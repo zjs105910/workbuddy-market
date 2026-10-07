@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.7）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.10）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
-→ v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1，当前）。
+→ v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1）
+→ v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -206,6 +207,33 @@ v2.7 → v2.8 的变化（GitHub 开源重构 R2：拆出无状态基础设施�
   · market_core 仍是唯一兼容入口：re-export 全部迁出符号，selftest 的
     core.X 属性注入（_scan / tree_hash / save_ownership / tx_* 等 44 处）
     全部保持有效。
+
+v2.8 → v2.9 的变化（GitHub 开源重构 R3：config / scanner / sync / version 迁入）：
+
+  · 四个模块逐字迁入包内，行为零变化；注入点命名空间随之迁移
+    （包内互调 patch wm.scanner._walk_tree，core 侧仍 patch core._scan）。
+  · validate_config 补跨插件 skill 大小写冲突的配置期拒绝。
+  · 详见 README 第十九节。
+
+v2.9 → v2.10 的变化（GitHub 动态目录：参考 DSH 市场的「目录 / 动态数据」分层）：
+
+  · **src/workbuddy_market/catalog.py 新模块**：收录源的实时元数据
+    （stars / pushed_at / 描述）+ GitHub 全网搜索。网络接缝只有
+    `_gh_request()` 一处，自检 monkeypatch 它离线测试全部逻辑。
+  · **易变数据不进配置**（provider-api.md 设计稿的口径）：动态元数据
+    缓存在 STATE_HOME 的 catalog.json（TTL 24 小时），remoteSources
+    继续只承担静态身份；展示层优先用实时值，配置里的 stars 退为快照。
+  · **容错口径**：单仓库失败保留旧值并记 errors；整轮全败不更新
+    refreshedAt（失败不算刷新过，自动循环按 TTL 继续重试）；
+    缓存损坏当不存在。
+  · **服务端**：GET /api/catalog、GET /api/gh/search（口令 + Origin、
+    词长上限、120 秒内存缓存）、POST /api/catalog/refresh（走
+    JobLimiter 的后台任务）。serve() 起 daemon 线程每 15 分钟检查、
+    过期即自动刷新（make_server 不起线程，自检零网络依赖）；
+    WBM_CATALOG_OFF=1 可关。
+  · **前端**：收录源卡片显示实时星数 / 更新日期 + 「刷新目录」按钮；
+    本地搜索无结果且关键词 ≥2 字时自动搜 GitHub 全网，结果卡片
+    可直接「一键安装」（仍走 ghpm 的任务进度 / 取消 / 超时链路）。
 """
 from __future__ import annotations
 
@@ -243,7 +271,7 @@ from workbuddy_market.paths import (          # noqa: E402,F401
     MARKET_ROOT, STATE_HOME,
     CONFIG_PATH, MANIFEST_DIR, MANIFEST_PATH, PLUGINS_DIR, WEB_DIR,
     STATE_PATH, LOG_PATH, BACKUP_DIR, TRASH_DIR, TX_DIR, OWNERSHIP_PATH,
-    LOCK_PATH, LOG_LOCK_PATH,
+    LOCK_PATH, LOG_LOCK_PATH, CATALOG_PATH,
     WB, SKILLS_DIR, KNOWN_PATH, GITHUB_REGISTRY, GHPM_PY,
     LOG_MAX_BYTES, LOG_KEEP, BACKUP_KEEP, HASH_CHUNK_BYTES,
 )
@@ -279,6 +307,13 @@ from workbuddy_market.scanner import (        # noqa: E402,F401
     _make_excluder, _sub_index,
 )
 from workbuddy_market.sync import _sync_tree  # noqa: E402,F401
+from workbuddy_market.catalog import (        # noqa: E402,F401  （v2.10 新增）
+    GH_API, CATALOG_TTL, GH_TIMEOUT,
+    SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, MAX_QUERY, CATALOG_SCHEMA,
+    _gh_request, normalize_repo_payload, validate_query,
+    fetch_meta, search_repos, catalog_path,
+    load_catalog, save_catalog, is_stale, refresh_catalog,
+)
 
 INSTALL_MODES = ("missing", "update", "force")
 

@@ -2,7 +2,31 @@
 
 本项目的版本号唯一来源是 `src/workbuddy_market/version.py` 的 `MARKET_VERSION`。
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
-更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.9 各一节）。
+更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.10 各一节）。
+
+## 2.10.0 — 2026-10-07（GitHub 动态目录）
+
+- 新增 `src/workbuddy_market/catalog.py`：收录源实时元数据（stars / pushed_at /
+  描述 / 语言 / 归档）+ GitHub 全网搜索。网络接缝只有 `_gh_request()` 一处，
+  自检假接缝离线覆盖。按 provider-api.md 设计稿口径：易变数据缓存在
+  STATE_HOME 的 `catalog.json`（TTL 24h），永不写回 market.config.json。
+- market_server 三个新接口（全过 _guard）：`GET /api/catalog`、
+  `GET /api/gh/search?q=`（词长上限 + 120s 内存缓存 + single-flight）、
+  `POST /api/catalog/refresh`（走 JobLimiter，满员 429）。
+- serve() 起 daemon 线程：每 15 分钟检查、条目过 24h TTL 自动重拉
+  （按条目判断，全新鲜时零网络；WBM_CATALOG_OFF=1 可关）。
+  make_server 不起线程，自检零网络依赖。
+- 容错：单仓库失败保旧值并记 errors；整轮全败不更新 refreshedAt
+  （失败不算刷新过，循环才会重试）；缓存损坏当不存在。
+- web/index.html：收录源卡片显示实时星数 / 更新日期，「刷新目录」按钮；
+  搜索框本地零匹配且 ≥2 字时自动搜 GitHub 全网，结果可直接一键安装
+  （非收录仓库的确认框提示确认来源；安装链路复用 ghpm 全套保障）。
+- selftest 第 26 节（round11）新增 38 项；SELFTEST_VERSION → 2.10；
+  版本盯防用例同步 2.10.0 / 2.10。全量 477 passed, 0 failed，
+  launcher --status 深度自检通过、--recover 补记 0 项，
+  真实网络冒烟（4 源刷新 + 全网搜索）通过。
+- 同步清单：core docstring（标题/链/新增 v2.9+v2.10 两节）、
+  README 自检项数三处 + 第八节 DSH 对照表 + 新增第二十节。
 
 ## 未发布（隐私加固）
 

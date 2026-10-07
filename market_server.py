@@ -29,6 +29,15 @@
   POST /api/remote/update     {repo} ghpm update（后台任务）
   POST /api/job/<id>/cancel   终止一个后台任务
   POST /api/open/path         {target, id?} 在资源管理器中打开市场内的目录
+
+v2.10 GitHub 动态目录：
+  GET  /api/catalog           收录源的实时元数据缓存（.catalog.json + 陈旧标记）
+  GET  /api/gh/search?q=      GitHub 全网搜索（实时，服务端短缓存 120s）
+  POST /api/catalog/refresh   手动刷新目录（后台任务，可取消）
+  · serve() 另起 daemon 线程：每 15 分钟检查一次，条目过期（默认 24h）
+    就自动刷新（按条目 TTL 逐个判断，全新鲜时零网络）；失败保旧值、
+    下个检查点重试。WBM_CATALOG_OFF=1 可关。
+  · make_server() **不**起这个线程 —— 自检的端到端测试必须零网络依赖。
 """
 from __future__ import annotations
 
@@ -45,7 +54,7 @@ import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -521,6 +530,97 @@ def _remote_job(repo: str, action: str):
     return jid
 
 
+# ---------------------------------------------------------------- GitHub 目录（v2.10）
+
+SEARCH_TTL = 120.0                 # GitHub 搜索的进程内缓存（秒）
+CATALOG_CHECK_INTERVAL = 15 * 60   # 自动刷新循环的检查间隔（秒）
+
+_search_lock = threading.Lock()
+_search_cache: dict = {"at": 0.0, "q": None, "items": None}
+
+
+def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT) -> list:
+    """GitHub 搜索：TTL 缓存 + single-flight。
+
+    未登录的 search API 限流是 10 次/分钟；前端 600ms 防抖 + 这里的
+    「同词 120 秒直返」足够把误触挡住。结果只进内存不落盘 —— 搜索是
+    「现在 GitHub 上有什么」的问题，落盘就变成目录了。
+    """
+    with _search_lock:
+        if (_search_cache["items"] is not None and _search_cache["q"] == query
+                and time.time() - _search_cache["at"] < SEARCH_TTL):
+            return _search_cache["items"]
+    items = _flight.run(("ghsearch", query),
+                        lambda: core.search_repos(query, limit))
+    with _search_lock:
+        _search_cache.update(at=time.time(), q=query, items=items)
+    return items
+
+
+def _catalog_refresh_job():
+    """手动刷新目录。与 _remote_job 同一套闸门与任务表，并发满员返回 None。"""
+    if not _RUNNER.acquire():
+        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝刷新目录")
+        return None
+    try:
+        jid = _new_job("刷新 GitHub 目录")
+    except BaseException:
+        _RUNNER.release()
+        raise
+
+    def work():
+        try:
+            rep = core.refresh_catalog(force=True)
+            _job_push(jid, f"已刷新 {rep['fetched']} 个 · 失败 {rep['failed']} 个"
+                           f" · 跳过 {rep['skipped']} 个（数据还新鲜）")
+            for repo, err in (rep["catalog"].get("errors") or {}).items():
+                _job_push(jid, f"! {repo}: {err}")
+            ok = rep["failed"] == 0
+            _job_finish(jid, ok, ("完成" if ok else "部分失败") + " · GitHub 目录")
+            core.log("info" if ok else "warn", "catalog",
+                     f"手动刷新：fetched={rep['fetched']} failed={rep['failed']}"
+                     f" skipped={rep['skipped']}")
+        except Exception as exc:  # noqa: BLE001 —— 任务里的一切都转成失败展示
+            _job_push(jid, f"✗ 刷新失败：{exc}")
+            _job_finish(jid, False, "失败 · GitHub 目录")
+            core.log("error", "catalog", f"手动刷新失败：{exc}")
+        finally:
+            _RUNNER.release()
+
+    threading.Thread(target=work, daemon=True).start()
+    return jid
+
+
+_catalog_stop = threading.Event()
+
+
+def catalog_auto_loop(stop: threading.Event) -> None:
+    """每日自动刷新：先等 20 秒让网页先出来，之后每 15 分钟看一眼 TTL。
+
+    force=False：只拉过期的条目；整轮失败时 refreshedAt 不动，
+    下个检查点自然重试。这个线程只在 serve() 里起 —— 自检走
+    make_server()，永远不碰网络。
+    """
+    if stop.wait(20.0):
+        return
+    while not stop.is_set():
+        try:
+            # 无条件进 refresh：内部按**单条** TTL 决定拉谁，全新鲜时零网络
+            # （noop 不写盘）。不能用 is_stale() 做闸门 —— 整份目录的新鲜度
+            # 跟着「最后一次成功刷新」走，个别条目连续失败时它永远显示新鲜，
+            # 那个条目就再也轮不到重试了。
+            rep = core.refresh_catalog(force=False)
+            if rep.get("fetched") or rep.get("failed"):
+                core.log("info" if not rep.get("failed") else "warn",
+                         "catalog",
+                         f"自动刷新：fetched={rep['fetched']} "
+                         f"failed={rep['failed']} skipped={rep['skipped']}")
+        except Exception as exc:  # noqa: BLE001 —— 网络问题不该弄死常驻线程
+            core.log("warn", "catalog", f"自动刷新失败（下个检查点重试）：{exc}")
+        if stop.wait(CATALOG_CHECK_INTERVAL):
+            return
+
+
 # ---------------------------------------------------------------- HTTP
 
 def _repo_arg(body: dict) -> tuple:
@@ -648,6 +748,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(get_state(exact))
             if path == "/api/log":
                 return self._json({"items": core.tail_log(80)})
+            if path == "/api/catalog":
+                cat = core.load_catalog()
+                return self._json({"ok": True, "stale": core.is_stale(cat),
+                                   "ttlHours": int(core.CATALOG_TTL // 3600),
+                                   "catalog": cat})
+            if path == "/api/gh/search":
+                qs = parse_qs(urlparse(self.path).query)
+                raw = (qs.get("q") or [""])[0]
+                try:
+                    q = core.validate_query(raw)
+                except core.ConfigError as exc:
+                    return self._json({"ok": False, "error": str(exc)}, 400)
+                try:
+                    items = gh_search(q)
+                except core.ConfigError as exc:
+                    return self._json({"ok": False, "error": str(exc)}, 400)
+                except Exception as exc:  # 网络 / 限流 / DNS 都算上游失败
+                    core.log("warn", "api", f"GitHub 搜索失败：{exc}")
+                    return self._json({"ok": False,
+                                       "error": f"GitHub 搜索失败：{exc}"}, 502)
+                return self._json({"ok": True, "query": q, "items": items})
             if path.startswith("/api/job/"):
                 jid = path.rsplit("/", 1)[-1]
                 reap_jobs()
@@ -732,6 +853,13 @@ class Handler(BaseHTTPRequestHandler):
                                        f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
                                        "请等当前任务完成或取消它"}, 429)
                 return self._json({"ok": True, "jobId": jid})
+            if path == "/api/catalog/refresh":
+                jid = _catalog_refresh_job()
+                if jid is None:
+                    return self._json({"ok": False, "error":
+                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
+                                       "请等当前任务完成或取消它"}, 429)
+                return self._json({"ok": True, "jobId": jid})
             if path.startswith("/api/job/") and path.endswith("/cancel"):
                 jid = path[len("/api/job/"):-len("/cancel")].strip("/")
                 if not jid:
@@ -777,11 +905,18 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
     print("  按 Ctrl+C 停止\n", flush=True)
     if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+    catalog_off = os.environ.get("WBM_CATALOG_OFF") == "1"
+    if not catalog_off:
+        threading.Thread(target=catalog_auto_loop, args=(_catalog_stop,),
+                         daemon=True, name="catalog-auto").start()
+        print("  GitHub 目录自动刷新已开启（每 15 分钟检查，过期即拉取；"
+              "WBM_CATALOG_OFF=1 可关闭）", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n  已停止。")
     finally:
+        _catalog_stop.set()
         httpd.server_close()
     return 0
 

@@ -155,7 +155,7 @@ workbuddy-market/
 │                                        hasher / locking / logging；v2.9/R3 增
 │                                        config / scanner / sync / version
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 439 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 477 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -193,7 +193,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 439 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 477 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 ```
 
@@ -349,6 +349,9 @@ python selftest.py --real         # 只读检查现网状态，不写任何东�
 | 更新失败有回滚记录        | GitHub 源安装/更新走 `ghpm`，它自带事务与回滚；进度条实时显示                           |
 | 区域/镜像感知          | 复用 `ghpm` 的镜像回退（`GHPM_MIRRORS`）                                  |
 | 操作日志可追溯          | 每次打包/注册/安装都写事件流                                                  |
+| 目录数据由 CI 每天刷新（stars 等），市场打开即最新 | v2.10：本地服务的 daemon 线程每 15 分钟检查、按 24h TTL 自动拉 GitHub API，不用任何外部 CI；失败保旧值、下个检查点重试 |
+| 精选注册表（plugins.json）承担静态身份，动态数据不进清单 | v2.10：`remoteSources` 只承担静态身份，实时元数据缓存在 STATE_HOME 的 `catalog.json`，永不写回配置 |
+| 浏览全目录 + 一键安装     | v2.10：搜索框本地零匹配时自动搜 GitHub 全网，结果卡片直接「一键安装」（仍走 ghpm 的事务/回滚/进度链路）    |
 
 ---
 
@@ -1112,7 +1115,63 @@ Windows 保留名 / 大小写归一 / 越界拒绝）、_sync_tree 增量闭环�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 439 passed, 0 failed
+python selftest.py        # 477 passed, 0 failed
+python launcher.py --status
+python launcher.py --recover
+```
+
+---
+
+## 二十、v2.10 相对 v2.9 改了什么（GitHub 动态目录）
+
+**这轮解决的问题是**：收录源的 stars / 更新日期是手工写进配置的快照，会过期；
+搜索框只能搜市场里已有的条目，GitHub 上有而市场没收录的项目无法触达。
+参考 DSH 市场的「精选目录承担静态身份 + 动态数据每日刷新」分层（其做法是远端 CI
+每天重建 `plugins.json`），本市场是本机服务，直接用一个后台线程把这件事做了，
+不需要任何外部基础设施。
+
+### 新增了什么
+
+- **`src/workbuddy_market/catalog.py` 新模块**：GitHub 实时元数据（stars /
+  pushed_at / 描述 / 语言 / 归档状态）+ 全网搜索。网络接缝只有 `_gh_request()`
+  一处，自检 monkeypatch 它离线测完全部逻辑。
+- **每日自动刷新**：`serve()` 起 daemon 线程，每 15 分钟检查一次，条目超过
+  24h TTL 就逐个重拉（全新鲜时零网络）。`WBM_CATALOG_OFF=1` 可关。
+- **网页**：
+  - 收录源卡片显示实时星数与「更新于」日期；区块标题显示目录刷新时间，
+    附「刷新目录」按钮（走后台任务，可看进度、可取消）；
+  - 搜索框在本地零匹配且关键词 ≥2 字时，自动搜索 GitHub 全网（600ms 防抖），
+    结果卡片可直接「一键安装」——非收录仓库的确认框会额外提示「不在精选收录里，
+    安装前请确认来源可信」。安装链路完全复用 ghpm 的事务 / 回滚 / 进度 / 超时。
+- **三个新接口**（全部过 `_guard()` 口令 + Origin 校验）：
+  `GET /api/catalog`、`GET /api/gh/search?q=`（词长上限 + 120s 内存缓存 +
+  single-flight）、`POST /api/catalog/refresh`（走 JobLimiter，满员 429）。
+
+### 容错口径（统计要诚实，约定 5）
+
+- 单个仓库拉取失败 → **保留旧值**，错误记进 `errors`，网页卡片显示「刷新失败」；
+- 整轮全部失败 → **不更新 refreshedAt**——失败不算「刷新过」，自动循环才会
+  按条目 TTL 继续重试，而不是傻等 24 小时；
+- 缓存文件（STATE_HOME 的 `catalog.json`）损坏 → 当不存在，绝不炸状态页；
+- 自动循环的闸门是**按条目**的 TTL，不是整份目录的 refreshedAt——否则个别
+  条目连续失败时，整份目录看起来永远新鲜，那个条目就再也轮不到重试。
+
+### 与 provider 协议的关系
+
+按 `docs/protocol/provider-api.md` 设计稿的口径落地：**易变数据永不写回
+`market.config.json`**。`remoteSources` 里手工填的 `stars` / `verifiedAt`
+退化为「上次的快照」，展示层优先用实时值；完整的多来源 Provider 抽象
+仍按计划排在 R4 之后。
+
+### 自检
+
+第 26 节（round11）新增 38 项：符号同一性、输入校验、normalize、
+TTL/重试/失败保旧值/坏缓存容错、搜索解析与畸形条目跳过、
+服务端三接口端到端（假接缝，零网络依赖）。
+
+```
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python selftest.py        # 477 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

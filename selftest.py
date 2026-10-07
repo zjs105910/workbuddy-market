@@ -19,6 +19,8 @@
            MARKET_ROOT fallback 盯防、包级功能冒烟
 第 25 节   v2.9/R3：config / scanner / sync / version 迁入——同一性、注入点
            命名空间迁移（_walk_tree 跟随 scanner）、功能冒烟
+第 26 节   v2.10：GitHub 动态目录——catalog 模块（缓存 / TTL / 失败保旧值 /
+           坏缓存容错）、全网搜索解析、服务端三接口端到端（假接缝，零网络）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -38,7 +40,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.9"
+SELFTEST_VERSION = "2.10"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -509,6 +511,9 @@ def run() -> None:
 
     # ============ 25. 开源重构 R3：config / scanner / sync / version 迁入 ============
     round10()
+
+    # ============ 26. v2.10：GitHub 动态目录（catalog + 搜索 + 服务接口） ============
+    round11()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2601,7 +2606,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.9.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.10.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2682,9 +2687,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.9.0"
-       and core.MARKET_VERSION == "2.9.0"
-       and SELFTEST_VERSION == "2.9", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.10.0"
+       and core.MARKET_VERSION == "2.10.0"
+       and SELFTEST_VERSION == "2.10", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -2752,6 +2757,229 @@ def round10():
     except core.ConfigError as exc:
         ck("跨插件 skill 冲突（含大小写）配置期拒绝",
            "同时声明" in str(exc), str(exc)[:80])
+
+
+def round11():
+    """v2.10：GitHub 动态目录。
+
+    三条盯防线：
+    1. catalog 是**不可信状态文件**：形状不对当不存在，绝不让坏 JSON 炸掉状态页；
+    2. 「失败不算刷新过」：整轮全败时 refreshedAt 必须沿用旧值，
+       否则自动循环会误以为数据新鲜、傻等 24 小时；
+    3. 服务端三个新接口全走 _guard（约定 15），网络接缝只有 _gh_request
+       一处 —— 全部用假接缝离线测，自检零网络依赖。
+    """
+    section("26. v2.10：GitHub 动态目录（catalog 模块 + 全网搜索 + 服务接口）")
+
+    import workbuddy_market.catalog as cat
+
+    # --- 26A. 符号同一性（re-export 必须就是包里的同一对象）
+    ck("★ catalog 符号同一性",
+       core.refresh_catalog is cat.refresh_catalog
+       and core.search_repos is cat.search_repos
+       and core.load_catalog is cat.load_catalog
+       and core.is_stale is cat.is_stale
+       and core.validate_query is cat.validate_query
+       and core.fetch_meta is cat.fetch_meta)
+    ck("catalog 路径常量与内核一致",
+       cat.CATALOG_PATH == core.CATALOG_PATH
+       and core.catalog_path() == core.CATALOG_PATH,
+       str(core.CATALOG_PATH))
+
+    # --- 26B. 输入校验（约定 14：边界只留一处）
+    for bad_q, why in [("", "空"), (None, "非字符串"), ("x" * 201, "超长")]:
+        try:
+            core.validate_query(bad_q)
+            ck(f"validate_query 拒绝{why}", False)
+        except core.ConfigError:
+            ck(f"validate_query 拒绝{why}", True)
+    ck("validate_query 正常去空白", core.validate_query("  skills for agents  ")
+       == "skills for agents")
+    for bad_repo in ("", "justname", "a/b/c", "o r/p"):
+        try:
+            core.fetch_meta(bad_repo)
+            ck(f"fetch_meta 拒绝坏 repo（{bad_repo!r}）", False)
+        except core.ConfigError:
+            ck(f"fetch_meta 拒绝坏 repo（{bad_repo!r}）", True)
+
+    # --- 26C. normalize：统一字段，坏 payload 尽量早死
+    n = core.normalize_repo_payload({
+        "full_name": "o/r", "stargazers_count": "12", "pushed_at": "2026-10-07T01:02:03Z",
+        "description": None, "language": "Python", "homepage": "",
+        "archived": 0, "html_url": "https://github.com/o/r", "topics": "bad"})
+    ck("normalize 字段与类型",
+       n["repo"] == "o/r" and n["stars"] == 12 and n["pushedAt"] == "2026-10-07"
+       and n["description"] == "" and n["archived"] is False and n["topics"] == [],
+       str(n))
+    try:
+        core.normalize_repo_payload({"id": 1})
+        ck("normalize 缺 full_name 报错", False)
+    except core.ConfigError:
+        ck("normalize 缺 full_name 报错", True)
+
+    # --- 26D. refresh 全流程（假接缝，零网络）
+    calls = []
+
+    def fake_gh(path, params=None, timeout=None):
+        calls.append((path, params))
+        if path.startswith("/repos/"):
+            repo = path[len("/repos/"):]
+            return {"full_name": repo, "stargazers_count": 7,
+                    "pushed_at": "2026-10-07T01:02:03Z",
+                    "description": "fake", "language": "Python",
+                    "html_url": "https://github.com/" + repo}
+        if path == "/search/repositories":
+            q = (params or {}).get("q", "")
+            items = [{"full_name": f"o/{q}{i}", "stargazers_count": 100 - i,
+                      "pushed_at": "2026-10-06T00:00:00Z", "description": f"item{i}",
+                      "html_url": f"https://github.com/o/{q}{i}"} for i in range(3)]
+            items.append("not-a-dict")           # 单条畸形不能拖垮整页
+            return {"items": items}
+        raise AssertionError(f"假接缝收到意外路径：{path}")
+
+    real_gh = cat._gh_request
+    catlog = core.CATALOG_PATH
+    catlog.unlink(missing_ok=True)
+    try:
+        cat._gh_request = fake_gh
+
+        rep = core.refresh_catalog(repos=["owner/repo", "another/one"], force=True, now=1000.0)
+        ck("force 刷新全部拉取", rep["fetched"] == 2 and rep["failed"] == 0
+           and len(calls) == 2, f"fetched={rep['fetched']} calls={len(calls)}")
+        disk = core.load_catalog()
+        ck("缓存落盘且可读回", disk["repos"]["owner/repo"]["stars"] == 7
+           and disk["schema"] == 1 and disk["refreshedAtEpoch"] == 1000.0, str(disk)[:120])
+        ck("is_stale 判新鲜", not core.is_stale(disk, now=2000.0, max_age=24 * 3600.0))
+        ck("is_stale 过期判定", core.is_stale(disk, now=2000.0, max_age=1.0))
+
+        before_text = catlog.read_text(encoding="utf-8")
+        calls.clear()
+        rep2 = core.refresh_catalog(repos=["owner/repo", "another/one"],
+                                    force=False, now=2000.0)
+        ck("新鲜缓存零请求零写盘", rep2.get("noop") is True and calls == []
+           and catlog.read_text(encoding="utf-8") == before_text)
+        ck("noop 沿用旧 refreshedAt", rep2["refreshedAt"] == disk["refreshedAt"])
+
+        calls.clear()
+        rep3 = core.refresh_catalog(repos=["OWNER/REPO"], force=False, now=2000.0)
+        ck("大小写变体命中同一条缓存", rep3["skipped"] == 1 and calls == [])
+
+        calls.clear()
+        rep4 = core.refresh_catalog(repos=["owner/repo"], force=False,
+                                    max_age=-1.0, now=3000.0)
+        ck("过期条目重新拉取", rep4["fetched"] == 1 and len(calls) == 1)
+
+        def boom(path, params=None, timeout=None):
+            raise OSError("模拟网络故障")
+
+        cat._gh_request = boom
+        old_epoch = core.load_catalog()["refreshedAtEpoch"]
+        rep5 = core.refresh_catalog(repos=["owner/repo"], force=True, now=4000.0)
+        ck("失败保留旧值", rep5["failed"] == 1 and rep5["fetched"] == 0
+           and core.load_catalog()["repos"]["owner/repo"]["stars"] == 7)
+        ck("失败记入 errors", "模拟网络故障" in rep5["catalog"]["errors"]["owner/repo"])
+        ck("★ 全部失败不算刷新过（refreshedAt 沿用旧值）",
+           rep5["catalog"]["refreshedAtEpoch"] == old_epoch)
+        ck("失败条目按旧数据判龄（不因失败变「新鲜」）",
+           core.is_stale(core.load_catalog(), now=old_epoch + 24 * 3600.0 + 1.0,
+                         max_age=24 * 3600.0))
+
+        cat._gh_request = fake_gh          # 恢复接缝，验证自动重试路径
+        calls.clear()
+        rep5b = core.refresh_catalog(repos=["owner/repo"], force=False,
+                                     now=old_epoch + 24 * 3600.0 + 1.0)
+        ck("★ TTL 过期后按条目重试成功并清掉错误",
+           rep5b["fetched"] == 1 and len(calls) == 1
+           and rep5b["catalog"]["errors"] == {},
+           f"fetched={rep5b['fetched']} calls={len(calls)}")
+
+        catlog.write_text("{这不是 json", encoding="utf-8")
+        ck("坏缓存当不存在", core.load_catalog() == {})
+        rep6 = core.refresh_catalog(repos=["owner/repo"], force=True, now=6000.0)
+        ck("坏缓存也能刷新回来", rep6["fetched"] == 1
+           and core.load_catalog()["repos"]["owner/repo"]["stars"] == 7)
+
+        # --- 26E. 搜索解析：limit 截断 + 单条畸形跳过
+        items = core.search_repos("skills", limit=2)
+        ck("搜索解析与 limit 截断",
+           len(items) == 2 and items[0]["repo"] == "o/skills0" and items[0]["stars"] == 100,
+           str(items)[:120])
+        try:
+            core.search_repos("   ")
+            ck("搜索拒绝空词", False)
+        except core.ConfigError:
+            ck("搜索拒绝空词", True)
+    finally:
+        cat._gh_request = real_gh
+        catlog.unlink(missing_ok=True)      # 给后面的用例留干净环境
+
+    # --- 26F. 服务端三接口端到端（真起服务，假接缝）
+    import market_server as srv  # noqa: E402
+
+    TOKC = "selftest-catalog-token"
+    httpd2 = srv.make_server(0, token=TOKC)
+    PORT2 = httpd2.server_address[1]
+    threading.Thread(target=httpd2.serve_forever, daemon=True).start()
+
+    def hit2(path, body=None, headers=None, method=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT2, timeout=10)
+        m = method or ("POST" if body is not None else "GET")
+        data = json.dumps(body).encode() if body is not None else None
+        c.request(m, path, body=data, headers=headers or {})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        try:
+            return r.status, json.loads(raw)
+        except Exception:
+            return r.status, raw.decode("utf-8", "replace")
+
+    AUTHC = {"X-Local-Market-Token": TOKC, "Content-Type": "application/json"}
+    try:
+        st, js = hit2("/api/catalog", headers=AUTHC)
+        ck("GET /api/catalog 形状", st == 200 and js.get("ok")
+           and "stale" in js and "catalog" in js, f"{st} {str(js)[:80]}")
+
+        st, _ = hit2("/api/gh/search?q=x")
+        ck("★ 搜索无口令 → 403", st == 403, str(st))
+        st, _ = hit2("/api/gh/search?q=x", headers={"X-Local-Market-Token": TOKC,
+                                                    "Origin": "http://evil.example"})
+        ck("★ 搜索跨源 → 403", st == 403, str(st))
+        st, js = hit2("/api/gh/search?q=%20", headers=AUTHC)
+        ck("空搜索词 → 400", st == 400, f"{st} {str(js)[:60]}")
+
+        cat._gh_request = fake_gh        # 端到端也用假接缝，保持零网络
+        try:
+            st, js = hit2("/api/gh/search?q=agent", headers=AUTHC)
+            ck("搜索接口返回条目（畸形条目被跳过）",
+               st == 200 and js.get("ok") and len(js.get("items", [])) == 3,
+               f"{st} {str(js)[:80]}")
+            srv._search_cache.update(at=0.0, q=None, items=None)   # 别把缓存漏进下一用例
+
+            st, js = hit2("/api/catalog/refresh", {}, AUTHC)
+            ck("POST /api/catalog/refresh 起任务", st == 200 and js.get("ok")
+               and js.get("jobId"), f"{st} {str(js)[:60]}")
+            jid = js["jobId"]
+            done, view = 0, {}
+            while done < 200:
+                _, view = hit2(f"/api/job/{jid}", headers=AUTHC)
+                if view.get("status") == "done":
+                    break
+                done += 1
+                time.sleep(0.05)
+            ck("刷新任务真完成且成功", view.get("ok") is True,
+               str(view.get("label"))[:80])
+            ck("刷新后目录落盘", core.load_catalog().get("repos", {}).get("owner/repo", {})
+               .get("stars") == 7)
+        finally:
+            cat._gh_request = real_gh
+            srv._search_cache.update(at=0.0, q=None, items=None)
+    finally:
+        httpd2.shutdown()
+        httpd2.server_close()
+
+    core.CATALOG_PATH.unlink(missing_ok=True)     # 收尾：留干净环境
+    ck("收尾：目录缓存已清理", not core.CATALOG_PATH.exists())
 
 if __name__ == "__main__":
     raise SystemExit(main())
