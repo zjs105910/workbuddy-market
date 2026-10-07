@@ -591,6 +591,7 @@ def _catalog_refresh_job():
                 reg = core.get_registry(force=True)
                 reg_note = (f"社区注册表 {len(reg['plugins'])} 条 · 来源 {reg['source']}")
                 _job_push(jid, reg_note)
+                invalidate_registry_mem()
             except Exception as exc:  # noqa: BLE001 —— 注册表挂了不算目录刷新失败
                 reg_ok, reg_note = False, ""
                 _job_push(jid, f"! 社区注册表刷新失败：{exc}")
@@ -654,6 +655,13 @@ REGISTRY_MEM_TTL = 600.0           # /api/registry 的进程内缓存（秒）
 
 _registry_mem_lock = threading.Lock()
 _registry_mem: dict = {"at": 0.0, "force": None, "data": None}
+
+
+def invalidate_registry_mem() -> None:
+    """清掉 /api/registry 的进程内缓存（刷新任务 / 自动循环拉到新数据后调），
+    否则内存层会继续把旧条目捂到 TTL 结束。"""
+    with _registry_mem_lock:
+        _registry_mem.update(at=0.0, force=None, data=None)
 
 
 def registry_data(force: bool = False) -> dict:
