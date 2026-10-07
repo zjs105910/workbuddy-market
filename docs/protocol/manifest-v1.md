@@ -36,7 +36,7 @@
   "description": "中文网文创作工作流",
   "description_en": "Chinese web-novel writing pipeline",
 
-  "author": { "name": "zjs105910", "url": "https://github.com/zjs105910" },
+  "author": { "name": "Example Author", "url": "https://github.com/example" },
   "license": "MIT",                     // SPDX 表达式；再分发的硬门槛（见 §6）
   "homepage": "",
   "repository": "https://github.com/owner/repo",

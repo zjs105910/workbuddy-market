@@ -6,10 +6,10 @@
 
 一句话：**双击 `一键启动.cmd` 就完事。**
 
-> **本仓库不含 `plugins/`（打包产物）**：市场内容是你本机 skill 的副本，属于个人数据，  
-> 不随仓库分发。克隆后直接启动也不会报错 —— 打包阶段会把「本机不存在的 skill」跳过，  
-> 网页界面、GitHub 收录源、自检等一切照常。想要自己的市场内容，见[第四节](#四怎么改市场里的内容)：  
-> 改 `market.config.json` 里的 `localPlugins`，指向你本机 `~/.workbuddy/skills/` 里的 skill 即可。
+> **本仓库不含 `plugins/`（打包产物），也不含任何人的市场配置**：市场内容是你本机 skill 的副本，属于个人数据，  
+> 不随仓库分发；`market.config.json`（含你自己的 skill 组合）同样不入库，仓库只提供模板  
+> `market.config.example.json`。运行状态、日志、所有权记录、回收站同样只留在本机。想要自己的市场内容，见[第四节](#四怎么改市场里的内容)：  
+> `cp market.config.example.json market.config.json`，再把 `localPlugins` 指向你本机 `~/.workbuddy/skills/` 里的 skill；打包阶段会把「本机不存在的 skill」跳过，网页、收录源、自检一切照常。
 
 ---
 
@@ -75,7 +75,7 @@
 安装成功时，本市场会在 `.ownership.json` 里记下：
 
 ```json
-{ "story": { "owner": "wb-local-market", "plugin": "novel-writing-suite",
+{ "my-skill": { "owner": "wb-local-market", "plugin": "my-first-plugin",
              "version": "1.0.0", "installedAt": "...", "hash": "<内容指纹>" } }
 ```
 
@@ -95,20 +95,27 @@
 
 ## 四、怎么改市场里的内容
 
-只改一个文件：**`market.config.json`**。改完点界面上的「重新打包」，  
+只改一个文件：**`market.config.json`**（本机私有，已 gitignore）。克隆后先从模板复制一份，  
+否则启动会明确报「market.config.json 不存在」：
+
+```bash
+cp market.config.example.json market.config.json
+```
+
+改完点界面上的「重新打包」，  
 或重新双击 `一键启动.cmd`。
 
 ```jsonc
 {
   "localPlugins": [
     {
-      "name": "novel-writing-suite",     // 插件 ID（也是目录名）
-      "displayName": "网文创作套件",       // 卡片标题
-      "category": "写作",                 // 分类，界面按此筛选
+      "name": "my-first-plugin",          // 插件 ID（也是目录名）
+      "displayName": "我的第一个插件",      // 卡片标题
+      "category": "工具",                  // 分类，界面按此筛选
       "version": "1.0.0",
       "description": "……",               // 卡片描述
-      "keywords": ["网文", "小说"],
-      "skills": ["story", "story-setup", "……"]   // ← 要打包哪些本机 skill（按目录名）
+      "keywords": ["示例"],
+      "skills": ["my-skill", "……"]              // ← 要打包哪些本机 skill（按目录名）
     }
   ],
   "remoteSources": [
@@ -129,7 +136,7 @@
 - **删掉插件**：从配置里删掉那一整块，重新打包。被删掉的插件目录会**rename 进  
   `.trash/`**，不会真删。
 
-> 现有的 3 个本机插件已覆盖你机器上全部 14 个 skill（网文 12 个 + 开发工具 2 个）。
+> 模板里的 `localPlugins` / `remoteSources` 默认为空：你装了什么、收录了什么，只存在于本机那份 `market.config.json` 里，不进 Git。
 
 ---
 
@@ -149,12 +156,11 @@ workbuddy-market/
 │                                        config / scanner / sync / version
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
 ├── selftest.py                       ← 439 项自检（默认隔离模式，不碰真实环境）
-├── market.config.json                ← ★ 唯一数据源，改这个
+├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
+├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
-├── plugins/                          ← 插件内容（自动生成）
-│   ├── novel-writing-suite/{.codebuddy-plugin/plugin.json, skills/…}
-│   ├── github-project-manager/…
-│   └── browser-cdp/…
+├── plugins/                          ← 插件内容（自动生成，随你的配置而定）
+│   └── <你的插件>/{.codebuddy-plugin/plugin.json, skills/…}
 ├── web/index.html                    ← 网页界面（单文件，服务端注入口令）
 ├── .ownership.json                   ← 谁装的、装时是什么内容 + 快速指纹（卸载靠它分级）
 ├── .market-tx/                       ← 安装/卸载的事务日志（正常结束即清空；残留会被自动补账）
@@ -439,7 +445,7 @@ v1 是我第一版（739 行）。一次代码评审提了 12 条，我逐条**�
 ### 评审里没做的一条
 
 评审建议「维护一份文件指纹索引（含 sha256），之后只扫变化的目录」。  
-这条我没做：当前 14 个 skill / 约 500 个文件，单次同步 0.13s，  
+这条我没做：当前规模（十几个 skill、几百个文件）单次同步 0.13s，  
 引入一份需要保持一致的持久化索引，收益不抵复杂度。  
 **什么时候该做**：本机 skill 涨到几百个、或单个 skill 有上万个文件时再说。
 

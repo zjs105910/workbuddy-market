@@ -12,7 +12,7 @@
 **请不要在公开 issue 里描述可利用细节。**
 
 通过 GitHub 私密渠道报告：仓库页面 → Security → "Report a vulnerability"
-（私密漏洞报告），或通过仓库所有者的 GitHub 账号（@zjs105910）私信联系。
+（私密漏洞报告 / Security Advisories）。不要通过个人社交账号私信或公开渠道联系。
 
 会在 72 小时内确认收到，修复时间视复杂度而定；修复发布前不公开细节。
 

@@ -4,6 +4,20 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.9 各一节）。
 
+## 未发布（隐私加固）
+
+- 外部隐私评审整改（2026-10-07）：PII 级问题只有一处 —— Git 提交历史的 QQ 邮箱。
+  用 git-filter-repo 把全部提交的 author/committer 重写为 GitHub noreply 邮箱，
+  `market.config.json`（个人 skill 组合）同时从全部历史移除。
+- 配置两层化：`market.config.json` 移出版本库（gitignore，本机保留），
+  新增入库模板 `market.config.example.json`；clone 后先复制模板再启动。
+- 新增 `scripts/privacy-audit.py`（扫 Git 跟踪文件，可选 `--history` 扫全部历史：
+  邮箱 / 手机号 / 私钥 / 凭据前缀 / 通用键值凭据 / 用户目录路径，发现即失败），
+  CI 新增 privacy audit 步骤。
+- 文档去个人化：README 移除「本机 14 个 skill」等环境描述、示例改通用插件；
+  SECURITY.md 漏洞报告改走 Security Advisories；manifest-v1.md 作者示例改 Example Author。
+- 内核代码零改动，版本号与 selftest 项数不变。
+
 ## 未发布（文档）
 
 - 新增 `docs/WorkBuddy-5.7.6-面板实测.md`：WorkBuddy 5.7.6 三个标签页的数据源实测、

@@ -1,0 +1,40 @@
+{
+  "_comment": "配置模板（入库）。复制为 market.config.json（该文件不入库）后按需填写；localPlugins / remoteSources 留空即得一个纯空市场，功能一切照常。字段说明见 README 第四节。",
+  "schemaVersion": 2,
+  "marketId": "wb-local-market",
+  "name": "本机插件市场",
+  "description": "由本机 skill 打包而成的私有插件市场，并收录精选 GitHub 技能仓库。改 market.config.json 即可扩缩市场。",
+  "owner": {
+    "name": "WorkBuddy Local Market"
+  },
+  "localPlugins": [],
+  "remoteSources": [],
+  "packaging": {
+    "_verify": "auto（默认）= 网页状态用廉价指纹、安装/卸载用完整 SHA-256，由工具自己判断，你不用管；fast = 连状态也走指纹（最快，状态显示可能有极小误差）；strict = 一律读内容比对（最准，最慢）。",
+    "verify": "auto",
+    "_hash": "内容指纹算法与流式块大小。sha256 + 1MiB 块 = 内存占用恒定，不受单个文件大小影响。",
+    "hashAlgorithm": "sha256",
+    "hashChunkBytes": 1048576,
+    "excludeNames": [
+      "__pycache__",
+      ".git",
+      "node_modules",
+      ".venv",
+      "venv"
+    ],
+    "excludeGlobs": [
+      "*.bak",
+      "*.pyc",
+      "*.pyo",
+      "*.tmp",
+      "*.log",
+      ".DS_Store"
+    ]
+  },
+  "trash": {
+    "_comment": "回收站自动清理策略。maxAgeDays=0 或 maxSizeBytes=0 表示该维度不清理。只有超过阈值才会真删 .trash/ 里的内容。",
+    "maxAgeDays": 30,
+    "maxSizeBytes": 2147483648,
+    "protectModified": true
+  }
+}
