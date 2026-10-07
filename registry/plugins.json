@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "updatedAt": "2026-10-07",
-  "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建，请勿手工编辑动态字段。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。",
+  "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建，请勿手工编辑动态字段。收录标准：仓库内含 SKILL.md 技能（可直接被 ghpm 安装到 ~/.workbuddy/skills）、非归档、活跃维护。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。",
   "plugins": [
     {
       "repo": "anthropics/skills",
@@ -10,12 +10,18 @@
       "category": "官方",
       "description": "Anthropic 官方 Agent Skills 仓库，含文档处理（docx/pdf/pptx/xlsx）、前端设计、MCP 构建、画布设计、品牌规范等 19 个高质量技能。",
       "descriptionEn": "Anthropic's official repository of Agent Skills: document processing (docx/pdf/pptx/xlsx), frontend design, MCP building, canvas design, brand guidelines and more.",
-      "keywords": ["官方", "文档", "office", "前端", "mcp"],
+      "keywords": [
+        "官方",
+        "文档",
+        "office",
+        "前端",
+        "mcp"
+      ],
       "homepage": "https://github.com/anthropics/skills",
       "addedAt": "2026-10-06",
-      "stars": 179993,
+      "stars": 180008,
       "pushedAt": "2026-10-05",
-      "latestSha": "",
+      "latestSha": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
       "refreshedAt": "2026-10-07"
     },
     {
@@ -25,11 +31,144 @@
       "category": "开发工具",
       "description": "一套成体系的软件开发方法论技能包：头脑风暴、写计划、TDD、系统化调试、并行派发子代理、代码审查、收尾分支等 15 个技能，彼此衔接成工作流。",
       "descriptionEn": "A cohesive software development methodology skill pack: brainstorming, planning, TDD, systematic debugging, parallel subagents, code review and finishing branches.",
-      "keywords": ["方法论", "TDD", "调试", "计划", "代码审查", "子代理"],
+      "keywords": [
+        "方法论",
+        "TDD",
+        "调试",
+        "计划",
+        "代码审查",
+        "子代理"
+      ],
       "homepage": "https://github.com/obra/superpowers",
       "addedAt": "2026-10-06",
       "stars": 296188,
       "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "mattpocock/skills",
+      "displayName": "Matt Pocock 工程技能集",
+      "displayNameEn": "Skills for Real Engineers",
+      "category": "开发工具",
+      "description": "知名 TypeScript 教育家 Matt Pocock 从自己的 .agents 目录里拿出来的工程技能集：面向真实工程场景的编码、评审与协作技能。",
+      "descriptionEn": "Engineering skills straight from Matt Pocock's .agents directory: pragmatic coding, review and collaboration skills for real-world projects.",
+      "keywords": [
+        "工程",
+        "编码",
+        "评审",
+        "TypeScript",
+        "最佳实践"
+      ],
+      "homepage": "https://github.com/mattpocock/skills",
+      "addedAt": "2026-10-07",
+      "stars": 278957,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "garrytan/gstack",
+      "displayName": "GStack 创业指挥栈",
+      "displayNameEn": "Garry Tan's GStack",
+      "category": "开发工具",
+      "description": "Y Combinator 总裁 Garry Tan 公开的 Claude Code 配置：CEO、设计师、工程管理等 23 个观点鲜明的工具，把 AI 当成完整创业团队来指挥。",
+      "descriptionEn": "Garry Tan's exact Claude Code setup: 23 opinionated tools acting as CEO, designer, engineering manager and more - run AI like a full startup team.",
+      "keywords": [
+        "创业",
+        "管理",
+        "产品",
+        "工作流",
+        "gstack"
+      ],
+      "homepage": "https://github.com/garrytan/gstack",
+      "addedAt": "2026-10-07",
+      "stars": 135638,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "addyosmani/agent-skills",
+      "displayName": "Addy Osmani 工程技能",
+      "displayNameEn": "Production-grade Agent Skills",
+      "category": "开发工具",
+      "description": "Chrome 工程负责人 Addy Osmani 出品的 AI 编码智能体生产级技能集，覆盖调试、性能、架构与代码质量等方向。",
+      "descriptionEn": "Production-grade engineering skills for AI coding agents by Addy Osmani (Chrome eng): debugging, performance, architecture and code quality.",
+      "keywords": [
+        "工程",
+        "调试",
+        "性能",
+        "架构",
+        "代码质量"
+      ],
+      "homepage": "https://github.com/addyosmani/agent-skills",
+      "addedAt": "2026-10-07",
+      "stars": 102427,
+      "pushedAt": "2026-10-03",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "nexu-io/open-design",
+      "displayName": "Open Design 设计插件",
+      "displayNameEn": "Open Design Plugin",
+      "category": "设计",
+      "description": "开源的 DSH 设计插件替代品（对标 Claude Design）：本地优先的设计能力，让智能体直接产出可用的界面与视觉稿。",
+      "descriptionEn": "The open-source DeepSeek Harness design plugin (a Claude Design alternative): local-first design skills for producing usable UI and visuals.",
+      "keywords": [
+        "设计",
+        "UI",
+        "界面",
+        "设计稿",
+        "local-first"
+      ],
+      "homepage": "https://github.com/nexu-io/open-design",
+      "addedAt": "2026-10-07",
+      "stars": 99814,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "Leonxlnx/taste-skill",
+      "displayName": "Taste 品味技能",
+      "displayNameEn": "Taste Skill",
+      "category": "设计",
+      "description": "给 AI 一双「好品味」的眼睛：阻止它生成平庸、模板化、千篇一律的输出，让界面与文案更有设计感（含安装脚本与示例）。",
+      "descriptionEn": "Gives your AI good taste: stops boring, generic, template-generated output and makes UI and copy feel designed (installer and examples included).",
+      "keywords": [
+        "设计",
+        "品味",
+        "UI",
+        "文案",
+        "去模板化"
+      ],
+      "homepage": "https://github.com/Leonxlnx/taste-skill",
+      "addedAt": "2026-10-07",
+      "stars": 93379,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "K-Dense-AI/claude-scientific-skills",
+      "displayName": "AI Scientist 科研技能库",
+      "displayNameEn": "Claude Scientific Skills",
+      "category": "科研",
+      "description": "号称使用量最大的科研 Agent 技能库（25 万+ 研究人员在用）：把任意 AI 智能体变成 AI Scientist，覆盖数据分析、文献、实验等科研全流程。",
+      "descriptionEn": "The #1 agent skills library for science (250,000+ researchers): turn any AI agent into an AI Scientist covering data analysis, literature and experiments.",
+      "keywords": [
+        "科研",
+        "科学",
+        "数据分析",
+        "文献",
+        "实验"
+      ],
+      "homepage": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "addedAt": "2026-10-07",
+      "stars": 47861,
+      "pushedAt": "2026-10-05",
       "latestSha": "",
       "refreshedAt": "2026-10-07"
     },
@@ -40,7 +179,13 @@
       "category": "自动化",
       "description": "Vercel 出品的浏览器自动化 CLI，官方 CodeBuddy 插件同源。首次使用自动安装，提供网页交互、截图、表单填写能力。",
       "descriptionEn": "Vercel's browser automation CLI for AI agents (same source as the official CodeBuddy plugin): page interaction, screenshots and form filling.",
-      "keywords": ["浏览器", "自动化", "vercel", "截图", "表单"],
+      "keywords": [
+        "浏览器",
+        "自动化",
+        "vercel",
+        "截图",
+        "表单"
+      ],
       "homepage": "https://agent-browser.dev",
       "addedAt": "2026-10-06",
       "stars": 43592,
@@ -55,7 +200,15 @@
       "category": "合集",
       "description": "体量极大的工程技能合集，184 个技能覆盖后端、前端、Python、K8s、可观测性、安全、支付、LLM 微调、量化交易、无障碍等方向，按主题分成数十个插件组。",
       "descriptionEn": "A massive engineering skills collection: 184 skills covering backend, frontend, Python, K8s, observability, security, payments, LLM fine-tuning, quant trading and more.",
-      "keywords": ["合集", "后端", "前端", "k8s", "安全", "LLM", "量化"],
+      "keywords": [
+        "合集",
+        "后端",
+        "前端",
+        "k8s",
+        "安全",
+        "LLM",
+        "量化"
+      ],
       "homepage": "https://github.com/wshobson/agents",
       "addedAt": "2026-10-06",
       "stars": 40267,

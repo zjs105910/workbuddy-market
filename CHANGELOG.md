@@ -26,9 +26,13 @@
   （Linux 的 SO_REUSEADDR 本就不允许双活监听）。
 - web/index.html：新增「社区目录」区块（与收录源大小写去重），社区条目
   一键安装的确认框如实标注来源；安装链路仍复用 ghpm 全套保障。
-- selftest 第 27 节（round12）新增 31 项（含端口修复盯防：真起服务后
-  `_find_port(p)` 绝不允许返回 p）；SELFTEST_VERSION → 2.11；
-  版本盯防用例同步 2.11.0 / 2.11。全量 508 passed, 0 failed。
+- selftest 第 27 节（round12）新增 32 项（含端口修复盯防：真起服务后
+  `_find_port(p)` 绝不允许返回 p；以及 main fetch 契约回归：实际请求
+  必须是 /repos/... 路径）；SELFTEST_VERSION → 2.11；
+  版本盯防用例同步 2.11.0 / 2.11。全量 509 passed, 0 failed。
+- 注册表收录 10 条（新增 mattpocock/skills、garrytan/gstack、
+  addyosmani/agent-skills、nexu-io/open-design、Leonxlnx/taste-skill、
+  K-Dense-AI/claude-scientific-skills 六个，全部核实含 SKILL.md 结构）。
 - 同步清单：core docstring（标题/链/新增 v2.11 节）、README 自检项数
   四处 + 目录结构 + 第八节 DSH 表 + 新增第二十一节、
   provider-api.md §5 状态注记。

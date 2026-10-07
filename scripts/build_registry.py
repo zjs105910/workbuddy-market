@@ -97,12 +97,15 @@ def main(argv: list | None = None) -> int:
 
     changed = failed = 0
     out_entries = []
+    # refresh_entry 的 fetch 契约是「收 repo 名」；_gh_get 是「收 API 路径」，
+    # 必须在这里包一层 —— 直接传 _gh_get 会拼出 api.github.comanthropics/skills
+    # 这种坏主机名（代理表现为 Tunnel 502，极难排查）。
+    fetch_repo = lambda r: _gh_get(f"/repos/{r}")          # noqa: E731
+    ref_repo = lambda r: _gh_get(f"/repos/{r}/commits?per_page=1")  # noqa: E731
     for entry in doc["plugins"]:
         repo = entry.get("repo", "?")
         try:
-            new_e = refresh_entry(entry, _gh_get,
-                                  ref_fetch=lambda r: _gh_get(
-                                      f"/repos/{r}/commits?per_page=1"))
+            new_e = refresh_entry(entry, fetch_repo, ref_fetch=ref_repo)
             if new_e != entry:
                 changed += 1
             diff = " ".join(f"{k}={new_e[k]}" for k in DYNAMIC_FIELDS)

@@ -278,7 +278,7 @@ let STATE = null, CATALOG = null, CATALOG_STALE = false, cat = "全部", filter 
 let GH = {q:null, items:null, state:"idle", error:""}, ghTimer = null;
 let REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}};   // 社区注册表（v2.11）
 
-const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","未分类":"◇"};
+const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","设计":"◆","科研":"⚛","未分类":"◇"};
 const iconOf = c => ICON[c] || "◇";
 const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const attr = s => String(s).replace(/"/g,"&quot;");

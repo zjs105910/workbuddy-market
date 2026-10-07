@@ -3197,6 +3197,34 @@ def round12():
     except ValueError:
         ck("refresh_entry 拒绝缺 full_name 的 payload", True)
 
+    # --- 27E-2. ★ main() 的 fetch 契约回归（2026-10-07 真实 bug）：
+    # main 直接把 _gh_get（收 API 路径）当 fetch（收 repo 名）传进
+    # refresh_entry，拼出 api.github.comanthropics/skills 坏主机名，
+    # 代理只报「Tunnel 502」，排查极难。这里用假接缝记录实际请求的
+    # 路径，必须全部以 /repos/ 开头。
+    seen_paths = []
+    real_bgh = breg._gh_get
+    tmp_reg = _TMP / "registry-test" / "plugins.json"
+    tmp_reg.parent.mkdir(parents=True, exist_ok=True)
+    tmp_doc = {"schema": 1, "updatedAt": "", "plugins": [
+        {"repo": "owner/repo", "displayName": "A"}]}
+    tmp_reg.write_text(json.dumps(tmp_doc), encoding="utf-8")
+    real_bfile = breg.REGISTRY_FILE
+    try:
+        breg._gh_get = lambda path: (seen_paths.append(path),
+                                     {"full_name": path[len("/repos/"):],
+                                      "stargazers_count": 5,
+                                      "pushed_at": "2026-10-07T00:00:00Z"})[1]
+        breg.REGISTRY_FILE = tmp_reg
+        breg.main(["--dry-run"])
+        ck("★ main 的 fetch 契约：实际请求都是 /repos/... 路径",
+           seen_paths and all(p.startswith("/repos/") for p in seen_paths)
+           and any(p.endswith("/commits?per_page=1") for p in seen_paths),
+           str(seen_paths[:3]))
+    finally:
+        breg._gh_get = real_bgh
+        breg.REGISTRY_FILE = real_bfile
+
     # --- 27F. GET /api/registry 端到端（真起服务，假接缝）
     import market_server as srv  # noqa: E402
 

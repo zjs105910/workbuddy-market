@@ -161,7 +161,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 508 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 509 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -199,7 +199,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 508 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 509 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 ```
 
@@ -1122,7 +1122,7 @@ Windows 保留名 / 大小写归一 / 越界拒绝）、_sync_tree 增量闭环�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 508 passed, 0 failed
+python selftest.py        # 509 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
@@ -1178,7 +1178,7 @@ TTL/重试/失败保旧值/坏缓存容错、搜索解析与畸形条目跳过�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 508 passed, 0 failed
+python selftest.py        # 509 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
@@ -1239,14 +1239,14 @@ python launcher.py --recover
 
 ### 自检
 
-第 27 节（round12）新增 31 项：符号同一性、parse_registry 边界矩阵、
+第 27 节（round12）新增 32 项：符号同一性、parse_registry 边界矩阵、
 三级兜底 + env 覆盖 + source 如实标注、TTL 语义（force=False 零联网）、
 refresh_entry 纯函数、GET /api/registry 端到端（403 / 跨源 / 形状 /
 force）、**端口修复盯防**（真起服务后 `_find_port(p)` 绝不允许返回 p）。
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 508 passed, 0 failed
+python selftest.py        # 509 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
