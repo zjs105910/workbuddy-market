@@ -16,6 +16,10 @@
   CI 新增 privacy audit 步骤。
 - 文档去个人化：README 移除「本机 14 个 skill」等环境描述、示例改通用插件；
   SECURITY.md 漏洞报告改走 Security Advisories；manifest-v1.md 作者示例改 Example Author。
+- CI 修复（14f473b / 后续提交）：privacy-audit 在 Windows runner 管道输出默认 ANSI 代码页，
+  打中文 UnicodeEncodeError —— 补 selftest 同款 stdout/stderr reconfigure(utf-8)；
+  selftest 24C 的 repo-root 见证文件由 market.config.json（已不入库）改为
+  market.config.example.json，fresh clone 场景恢复全绿。
 - 内核代码零改动，版本号与 selftest 项数不变。
 
 ## 未发布（文档）

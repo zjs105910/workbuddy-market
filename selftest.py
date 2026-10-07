@@ -2591,14 +2591,15 @@ def round9():
        core._sync_tree.__module__)
 
     # --- 24C. MARKET_ROOT 仓库根 fallback（src 布局 parents[2] 适配点，子进程盯防）：
-    # 不设任何 WBM_*/GHPM_* 环境变量时，MARKET_ROOT 必须仍是含 market.config.json
-    # 的仓库根，STATE_HOME 走默认分桶。
+    # 不设任何 WBM_*/GHPM_* 环境变量时，MARKET_ROOT 必须仍是含
+    # market.config.example.json 的仓库根（隐私加固后 market.config.json 是
+    # 本机私有文件，不入库；example 随仓库分发，任何 clone 都有），STATE_HOME 走默认分桶。
     repo = Path(__file__).resolve().parent
     env_c = {k: v for k, v in os.environ.items()
              if not k.startswith(("WBM_", "GHPM_"))}
     code_c = (
         "import market_core as c;"
-        "assert (c.MARKET_ROOT / 'market.config.json').is_file(), c.MARKET_ROOT;"
+        "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
         "assert c.MARKET_VERSION == '2.9.0', c.MARKET_VERSION;"
         "print('ok')"

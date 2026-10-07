@@ -1021,7 +1021,8 @@ R1 把「状态」从仓库里搬了出去，R2 开始把「代码」从 market_
 
 MARKET_ROOT 的仓库根 fallback 由 `Path(__file__).parent` 改为 `parents[2]`
 （src 布局下 paths.py 的上两级才是仓库根）。语义不变，新增子进程用例盯防
-（24C：不设任何环境变量时，MARKET_ROOT 必须仍是含 market.config.json 的仓库根）。
+（24C：不设任何环境变量时，MARKET_ROOT 必须仍是含 market.config.example.json 的仓库根；
+隐私加固后 `market.config.json` 是本机私有文件不入库，见「未发布（隐私加固）」）。
 
 ### 兼容层怎么保证不断（方案 §3.2 的落地）
 
