@@ -152,7 +152,7 @@
       "refreshedAt": "2026-10-07"
     },
     {
-      "repo": "K-Dense-AI/claude-scientific-skills",
+      "repo": "K-Dense-AI/scientific-agent-skills",
       "displayName": "AI Scientist 科研技能库",
       "displayNameEn": "Claude Scientific Skills",
       "category": "科研",
@@ -165,9 +165,9 @@
         "文献",
         "实验"
       ],
-      "homepage": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
       "addedAt": "2026-10-07",
-      "stars": 47861,
+      "stars": 47874,
       "pushedAt": "2026-10-05",
       "latestSha": "",
       "refreshedAt": "2026-10-07"
@@ -213,6 +213,373 @@
       "addedAt": "2026-10-06",
       "stars": 40267,
       "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "affaan-m/ECC",
+      "displayName": "ECC 智能体优化系统",
+      "displayNameEn": "ECC Agent Harness System",
+      "category": "合集",
+      "description": "面向智能体 harness 的性能优化系统：技能、本能、记忆、安全与研究工具一应俱全，插件目录覆盖 Claude Code、Codex、Cursor、Gemini 等十余个平台。",
+      "descriptionEn": "An agent harness performance optimization system: skills, instincts, memory, security and research tooling, with plugin directories for a dozen coding agents.",
+      "keywords": [
+        "合集",
+        "多平台",
+        "记忆",
+        "安全",
+        "harness"
+      ],
+      "homepage": "https://github.com/affaan-m/ECC",
+      "addedAt": "2026-10-07",
+      "stars": 274660,
+      "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "multica-ai/andrej-karpathy-skills",
+      "displayName": "Karpathy 行为技能",
+      "displayNameEn": "Andrej Karpathy Skills",
+      "category": "开发工具",
+      "description": "从 Andrej Karpathy 的观察提炼出的智能体行为改进技能：让编码智能体的工程判断更克制、更接近人类顶尖水平。内容稳定、低频更新。",
+      "descriptionEn": "Skills distilled from Andrej Karpathy's observations to improve agent behavior and engineering judgment. Stable content, low-frequency updates.",
+      "keywords": [
+        "karpathy",
+        "行为",
+        "工程判断",
+        "方法论"
+      ],
+      "homepage": "https://github.com/multica-ai/andrej-karpathy-skills",
+      "addedAt": "2026-10-07",
+      "stars": 217392,
+      "pushedAt": "2026-04-20",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "DietrichGebert/ponytail",
+      "displayName": "Ponytail 最懒工程师",
+      "displayNameEn": "Ponytail",
+      "category": "开发工具",
+      "description": "让智能体像「房间里最懒的高级工程师」一样思考：能不写的代码就不写，追求最小改动、最简方案与最少复杂度。",
+      "descriptionEn": "Makes your AI agent think like the laziest senior dev in the room: the best code is the code you never write.",
+      "keywords": [
+        "最小改动",
+        "工程哲学",
+        "代码审查",
+        "方法论"
+      ],
+      "homepage": "https://github.com/DietrichGebert/ponytail",
+      "addedAt": "2026-10-07",
+      "stars": 157339,
+      "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "tt-a1i/archify",
+      "displayName": "Archify 架构图技能",
+      "displayNameEn": "Archify Diagrams",
+      "category": "设计",
+      "description": "把任何想法、计划或代码库变成漂亮的交互式架构图：面向 Claude Code 等智能体的图表技能，含渲染器与配方库。",
+      "descriptionEn": "Turn any idea, plan or codebase into a beautiful interactive diagram - an agent skill for Claude Code with renderers and recipes.",
+      "keywords": [
+        "架构图",
+        "图表",
+        "可视化",
+        "设计"
+      ],
+      "homepage": "https://github.com/tt-a1i/archify",
+      "addedAt": "2026-10-07",
+      "stars": 79046,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "ayghri/i-have-adhd",
+      "displayName": "ADHD 友好输出",
+      "displayNameEn": "I Have ADHD Skill",
+      "category": "效率",
+      "description": "阻止编码智能体把答案埋进长篇大论的技能：ADHD 友好的直给输出结构，先说答案再谈过程。",
+      "descriptionEn": "A skill to stop your coding agent from burying the answer: ADHD-friendly, straight-to-the-point output.",
+      "keywords": [
+        "输出结构",
+        "直给",
+        "adhd",
+        "效率"
+      ],
+      "homepage": "https://github.com/ayghri/i-have-adhd",
+      "addedAt": "2026-10-07",
+      "stars": 54822,
+      "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "blader/humanizer",
+      "displayName": "Humanizer 去 AI 味",
+      "displayNameEn": "Humanizer",
+      "category": "写作",
+      "description": "去除文本中 AI 生成痕迹的智能体技能：去掉模板腔与机械感，让输出读起来像人写的。",
+      "descriptionEn": "Agent skill that removes signs of AI-generated writing from text, making output read like a human wrote it.",
+      "keywords": [
+        "去AI味",
+        "写作",
+        "人味",
+        "文案"
+      ],
+      "homepage": "https://github.com/blader/humanizer",
+      "addedAt": "2026-10-07",
+      "stars": 54578,
+      "pushedAt": "2026-09-28",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "coreyhaines31/marketingskills",
+      "displayName": "营销技能包",
+      "displayNameEn": "Marketing Skills",
+      "category": "商业",
+      "description": "面向 Claude Code 与 AI 智能体的营销技能包：转化率优化（CRO）、文案、SEO、数据分析与增长工程。",
+      "descriptionEn": "Marketing skills for Claude Code and AI agents: CRO, copywriting, SEO, analytics and growth engineering.",
+      "keywords": [
+        "营销",
+        "seo",
+        "文案",
+        "增长",
+        "数据分析"
+      ],
+      "homepage": "https://github.com/coreyhaines31/marketingskills",
+      "addedAt": "2026-10-07",
+      "stars": 53548,
+      "pushedAt": "2026-10-07",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "Imbad0202/academic-research-skills",
+      "displayName": "学术研究技能",
+      "displayNameEn": "Academic Research Skills",
+      "category": "科研",
+      "description": "学术研究全流程技能：研究 → 写作 → 评审 → 修改 → 定稿，含论文评审、深度研究等专项技能。",
+      "descriptionEn": "Academic research skills for Claude Code: research, write, review, revise, finalize - with paper reviewing and deep research specialties.",
+      "keywords": [
+        "学术",
+        "论文",
+        "深度研究",
+        "评审",
+        "写作"
+      ],
+      "homepage": "https://github.com/Imbad0202/academic-research-skills",
+      "addedAt": "2026-10-07",
+      "stars": 50758,
+      "pushedAt": "2026-10-03",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "cathrynlavery/diagram-design",
+      "displayName": "编辑级图表设计",
+      "displayNameEn": "Diagram Design",
+      "category": "设计",
+      "description": "编辑级的图表设计技能：42 种图表类型与 editorial 审美，支持 Claude Code、Codex、Copilot 等多个智能体。",
+      "descriptionEn": "Editorial diagram design skills with 42 diagram types, for Claude Code, Codex, GitHub Copilot and more.",
+      "keywords": [
+        "图表",
+        "设计",
+        "编辑级",
+        "可视化"
+      ],
+      "homepage": "https://github.com/cathrynlavery/diagram-design",
+      "addedAt": "2026-10-07",
+      "stars": 44605,
+      "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "zhaoxuya520/reverse-skill",
+      "displayName": "逆向与渗透技能路由",
+      "displayNameEn": "Reverse Engineering Skill Pack",
+      "category": "安全",
+      "description": "逆向工程与授权渗透测试的技能路由包：CTF 沙箱编排、Burp MCP 集成、Kali 工具链等，仅面向授权安全研究与学习。",
+      "descriptionEn": "Skill router pack for reverse engineering and authorized penetration testing: CTF sandbox orchestration, Burp MCP, Kali tooling. Authorized research only.",
+      "keywords": [
+        "安全",
+        "逆向",
+        "渗透测试",
+        "ctf",
+        "kali"
+      ],
+      "homepage": "https://github.com/zhaoxuya520/reverse-skill",
+      "addedAt": "2026-10-07",
+      "stars": 40014,
+      "pushedAt": "2026-09-22",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "mukul975/Anthropic-Cybersecurity-Skills",
+      "displayName": "网络安全技能库",
+      "displayNameEn": "Anthropic Cybersecurity Skills",
+      "category": "安全",
+      "description": "817 个结构化网络安全技能，映射到 MITRE ATT&CK、NIST CSF 2.0 等 6 大安全框架，供智能体按需调用。",
+      "descriptionEn": "817 structured cybersecurity skills for AI agents, mapped to 6 frameworks: MITRE ATT&CK, NIST CSF 2.0 and more.",
+      "keywords": [
+        "安全",
+        "mitre",
+        "nist",
+        "网络安全",
+        "攻防"
+      ],
+      "homepage": "https://github.com/mukul975/Anthropic-Cybersecurity-Skills",
+      "addedAt": "2026-10-07",
+      "stars": 33895,
+      "pushedAt": "2026-08-31",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "virgiliojr94/book-to-skill",
+      "displayName": "技术书转技能",
+      "displayNameEn": "Book to Skill",
+      "category": "效率",
+      "description": "把任何技术书 PDF 蒸馏成一个可用的智能体技能：边读边查边用，把整本书变成随身参考。",
+      "descriptionEn": "Turn any technical book PDF into a Claude Code skill - ready to study, reference and use while you work.",
+      "keywords": [
+        "pdf",
+        "技术书",
+        "技能生成",
+        "学习"
+      ],
+      "homepage": "https://github.com/virgiliojr94/book-to-skill",
+      "addedAt": "2026-10-07",
+      "stars": 34044,
+      "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "Nutlope/hallmark",
+      "displayName": "Hallmark 反模板设计",
+      "displayNameEn": "Hallmark",
+      "category": "设计",
+      "description": "反 AI 味设计技能：阻止智能体产出千篇一律的模板化界面，让生成的设计更有个性与质感。",
+      "descriptionEn": "Anti-AI-slop design skill for Claude Code, Cursor and Codex - stop generic, template-generated UI.",
+      "keywords": [
+        "设计",
+        "去模板化",
+        "ui",
+        "审美"
+      ],
+      "homepage": "https://github.com/Nutlope/hallmark",
+      "addedAt": "2026-10-07",
+      "stars": 29717,
+      "pushedAt": "2026-08-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "OthmanAdi/planning-with-files",
+      "displayName": "文件化任务规划",
+      "displayNameEn": "Planning with Files",
+      "category": "效率",
+      "description": "面向长任务的持久化文件规划技能：崩溃不丢进度的 Markdown 计划，适配多个主流编码智能体（含 CodeBuddy 目录）。",
+      "descriptionEn": "Persistent file-based planning for AI coding agents and long-running tasks: crash-proof markdown plans.",
+      "keywords": [
+        "规划",
+        "任务管理",
+        "断点续传",
+        "markdown"
+      ],
+      "homepage": "https://github.com/OthmanAdi/planning-with-files",
+      "addedAt": "2026-10-07",
+      "stars": 27319,
+      "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "phuryn/pm-skills",
+      "displayName": "产品经理技能市场",
+      "displayNameEn": "PM Skills Marketplace",
+      "category": "商业",
+      "description": "产品经理技能市场：100+ 智能体技能、命令与插件，覆盖从产品发现到上市推广的全生命周期。",
+      "descriptionEn": "PM skills marketplace: 100+ agentic skills, commands and plugins - from discovery to strategy, execution and go-to-market.",
+      "keywords": [
+        "产品经理",
+        "pm",
+        "市场调研",
+        "增长",
+        "战略"
+      ],
+      "homepage": "https://github.com/phuryn/pm-skills",
+      "addedAt": "2026-10-07",
+      "stars": 26819,
+      "pushedAt": "2026-09-14",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "JimLiu/baoyu-skills",
+      "displayName": "宝玉技能集",
+      "displayNameEn": "Baoyu's Skills",
+      "category": "开发工具",
+      "description": "宝玉（JimLiu）维护的智能体技能集，中文社区广泛使用的 Claude Code 技能合集。",
+      "descriptionEn": "Baoyu's agent skills collection for Claude Code, widely used in the Chinese community.",
+      "keywords": [
+        "宝玉",
+        "中文",
+        "技能集",
+        "claude code"
+      ],
+      "homepage": "https://github.com/JimLiu/baoyu-skills",
+      "addedAt": "2026-10-07",
+      "stars": 26391,
+      "pushedAt": "2026-09-10",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "titanwings/distilly",
+      "displayName": "Distilly 思维蒸馏",
+      "displayNameEn": "Distilly",
+      "category": "开发工具",
+      "description": "把领域专家的思维方式蒸馏成可复用技能：让任何智能体继承「他们怎么想」（原 Colleague Skills）。",
+      "descriptionEn": "Distill how experts think into reusable skills for any agent or bot. Formerly Colleague Skills.",
+      "keywords": [
+        "蒸馏",
+        "思维方式",
+        "技能生成",
+        "专家"
+      ],
+      "homepage": "https://github.com/titanwings/distilly",
+      "addedAt": "2026-10-07",
+      "stars": 25374,
+      "pushedAt": "2026-09-22",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "alchaincyf/huashu-design",
+      "displayName": "花叔设计",
+      "displayNameEn": "Huashu Design",
+      "category": "设计",
+      "description": "花叔设计：HTML 原生的设计技能（中文文档），高保真原型直出，让 Claude Code 像专业设计师一样产出界面。",
+      "descriptionEn": "Huashu Design - an HTML-native design skill for Claude Code producing high-fidelity prototypes (Chinese docs).",
+      "keywords": [
+        "设计",
+        "中文",
+        "html",
+        "原型",
+        "高保真"
+      ],
+      "homepage": "https://github.com/alchaincyf/huashu-design",
+      "addedAt": "2026-10-07",
+      "stars": 24646,
+      "pushedAt": "2026-09-22",
       "latestSha": "",
       "refreshedAt": "2026-10-07"
     }

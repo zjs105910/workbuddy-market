@@ -33,6 +33,13 @@
 - 注册表收录 10 条（新增 mattpocock/skills、garrytan/gstack、
   addyosmani/agent-skills、nexu-io/open-design、Leonxlnx/taste-skill、
   K-Dense-AI/claude-scientific-skills 六个，全部核实含 SKILL.md 结构）。
+- 2026-10-07 晚补记（数据轮，不升版本）：注册表扩至 28 条——新增 18 条
+  （ECC、andrej-karpathy-skills、ponytail、archify、i-have-adhd、humanizer、
+  marketingskills、academic-research-skills、diagram-design、reverse-skill、
+  Anthropic-Cybersecurity-Skills、book-to-skill、hallmark、planning-with-files、
+  pm-skills、baoyu-skills、distilly、huashu-design，逐仓核实根目录
+  SKILL.md / skills/ 结构）；K-Dense 仓库改名同步为 scientific-agent-skills；
+  前端 ICON 表新增效率 / 商业 / 安全三类。
 - 同步清单：core docstring（标题/链/新增 v2.11 节）、README 自检项数
   四处 + 目录结构 + 第八节 DSH 表 + 新增第二十一节、
   provider-api.md §5 状态注记。
