@@ -39,6 +39,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows 控制台 / runner 管道的输出默认是 ANSI 代码页（cp1252），
+# 打中文会直接 UnicodeEncodeError —— selftest 同款保险：强制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 ALLOW_MARKER = "pa:allow"
 
 # ---------- 规则 ----------
