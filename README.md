@@ -139,11 +139,12 @@ workbuddy-market/
 ├── _run.cmd                          ← 公共引导（找 Python），纯 ASCII
 ├── launcher.py                       ← 命令行入口与编排
 ├── market_core.py                    ← 内核：打包 / 注册 / 状态 / 安装（兼容入口，
-│                                        v2.8 起基础设施实现在 src/ 里）
+│                                        实现自 v2.8 起陆续迁入 src/）
 ├── src/workbuddy_market/             ← 内核包（v2.8/R2 起）：paths / errors / fsutil /
-│                                        hasher / locking / logging
+│                                        hasher / locking / logging；v2.9/R3 增
+│                                        config / scanner / sync / version
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 410 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 439 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.json                ← ★ 唯一数据源，改这个
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
 ├── plugins/                          ← 插件内容（自动生成）
@@ -182,7 +183,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 410 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 439 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 ```
 
@@ -509,7 +510,7 @@ os.path.isdir(link)         → True      ← 于是被当普通目录递归进�
 
 - **selftest 增加故障注入**（第 16 节），v2.1 时共 133 项
   （v2.2 → 178，v2.3 → 254，v2.4 → 304，v2.5 → 342，v2.6 → 353，v2.7/R1 → 384，
-  v2.8/R2 → 410）。
+  v2.8/R2 → 410，v2.9/R3 → 439）。
 - **日志事件带 `op` 字段**（operation id），便于把一次安装的多条事件串起来。
 
 ### 实测性能对照
@@ -1048,3 +1049,57 @@ python launcher.py --status
 python launcher.py --recover
 ```
 
+
+---
+
+## 十九、v2.9 相对 v2.8 改了什么（GitHub 开源重构 R3：config / scanner / sync / version 迁入）
+
+R2 搬的是「无状态基础设施」，R3 开始搬「业务判定」：配置校验、目录扫描、
+增量树同步、版本常量四件迁入 `src/workbuddy_market/`，仍然是**逐字搬迁、
+行为零变化**。market_core.py 从 133 KB 降到约 110 KB。
+
+### 搬了什么
+
+| 新模块 | 迁入内容 |
+| --- | --- |
+| `src/workbuddy_market/config.py` | validate_id/version/repo、ensure_child、collision_key、validate_config、load_config、verify_mode、needs_exact、hash_chunk_bytes、CLASSIFY_PURPOSES |
+| `src/workbuddy_market/scanner.py` | _is_reparse、_walk_tree、_raise_if_errors、_scan、_scan_many、file_index、SkillScanCache、parse_skill_meta、_make_excluder、_sub_index |
+| `src/workbuddy_market/sync.py` | _sync_tree（纯树同步，无打包语义） |
+| `src/workbuddy_market/version.py` | MARKET_VERSION 等四个版本常量（唯一来源） |
+
+`quick_fingerprint` / `tree_hash*` 继续留在 market_core：依赖 `core._scan`
+（注入点）与 `file_index`，R4/R5 拆 installer/state 时随调用方一起迁。
+
+### 注入点命名空间迁移（方案 §3.2 规则的第一次实际应用）
+
+`_walk_tree` 迁入 scanner 后，包内互调（SkillScanCache → _scan_many →
+_walk_tree）走 **scanner 命名空间**——patch `core._walk_tree` 不再生效。
+selftest 第 19 节的两处注入点同批改为 `wm.scanner._walk_tree`。
+core 侧直接调用（_sync_packaging / _stage_skill / prune_trash）仍走 core
+全局，patch `core._scan` 对它们依旧有效。三条路径各自独立、用例盯防。
+
+### 自测（第 25 节，410 → 439 项）
+
+| 指标 | v2.8（R2） | v2.9（R3） |
+| --- | --- | --- |
+| selftest | 410 项 | **439 项**（+29） |
+
+新增用例覆盖：config/scanner/sync/version 的 is 同一性、注入点定义模块
+盯防（哪些在 core、哪些已迁 scanner/config）、校验器功能冒烟（路径穿越 /
+Windows 保留名 / 大小写归一 / 越界拒绝）、_sync_tree 增量闭环（首扫 / 稳态
+零拷贝 / 内容变更 / 源端删除跟随 / 排除规则 / 空目录收敛）。
+
+### 开源三件（外部评审第 13 条）
+
+- `CHANGELOG.md` —— v2.0 → v2.9 每轮摘要；
+- `CONTRIBUTING.md` —— 「先探针复现再动手」「拆分与行为变更分开」等工程纪律的贡献者版；
+- `SECURITY.md` —— 安全模型摘要、已知边界（对第三方 skill 内容无沙箱，诚实声明）与漏洞报告渠道。
+
+### 验证
+
+```
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python selftest.py        # 439 passed, 0 failed
+python launcher.py --status
+python launcher.py --recover
+```

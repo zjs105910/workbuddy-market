@@ -263,20 +263,27 @@ from workbuddy_market.locking import (        # noqa: E402,F401
 from workbuddy_market.logging import (        # noqa: E402,F401
     now_iso, _rotate_log, log, _tail_lines, tail_log,
 )
-
-OWNERSHIP_SCHEMA = 1
-TX_SCHEMA = 1
-STATE_VERSION = 2
-MARKET_VERSION = "2.8.0"             # 全项目唯一的版本号来源
+from workbuddy_market.version import (        # noqa: E402,F401
+    OWNERSHIP_SCHEMA, TX_SCHEMA, STATE_VERSION, MARKET_VERSION,
+)
+from workbuddy_market.config import (         # noqa: E402,F401
+    CLASSIFY_PURPOSES, EXACT_PURPOSES,
+    _ID_RE, _REPO_RE, _VER_RE, WINDOWS_RESERVED,
+    validate_id, validate_version, ensure_child, collision_key,
+    _check_collision, _check_number, validate_repo,
+    validate_config, load_config, verify_mode, needs_exact, hash_chunk_bytes,
+)
+from workbuddy_market.scanner import (        # noqa: E402,F401
+    _is_reparse, _walk_tree, _raise_if_errors, _scan, _scan_many,
+    file_index, SkillScanCache, _FM_RE, parse_skill_meta,
+    _make_excluder, _sub_index,
+)
+from workbuddy_market.sync import _sync_tree  # noqa: E402,F401
 
 INSTALL_MODES = ("missing", "update", "force")
 
-# classify 的用途。用途决定「要不要读到内容」：
-#   ui        —— 网页状态，允许用廉价指纹，判错只是显示不准
-#   install   —— 决定要不要覆盖，必须准
-#   uninstall —— 决定要不要移走用户目录，必须最准
-CLASSIFY_PURPOSES = ("ui", "install", "uninstall")
-EXACT_PURPOSES = ("install", "uninstall")
+# CLASSIFY_PURPOSES / EXACT_PURPOSES 已迁 workbuddy_market.config（v2.9 R3），
+# 此处 re-export（见上方 import 块）。
 
 
 # ---------------------------------------------------------------- 小工具
@@ -363,290 +370,9 @@ def _warn_deprecated_envs() -> None:
 
 
 # ---------------------------------------------------------------- 配置校验
-#
-# 配置是手写的，一个手滑（"skills": ["../../x"]）不该让程序写到市场目录外面去。
-# 所有来自配置的「名字」都必须先过 validate_id，所有由名字拼出来的路径
-# 都必须再过一次 ensure_child。
-
-_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
-_VER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$")
-
-# Windows 保留设备名（不区分大小写，且带扩展名也算：CON.txt 同样非法）
-WINDOWS_RESERVED = {
-    "CON", "PRN", "AUX", "NUL",
-    *(f"COM{i}" for i in range(1, 10)),
-    *(f"LPT{i}" for i in range(1, 10)),
-}
-
-
-def validate_id(value, field: str) -> str:
-    """插件名 / skill 名必须是安全的单段标识符。"""
-    if not isinstance(value, str):
-        raise ConfigError(f"{field} 必须是字符串，实际是 {type(value).__name__}")
-    if not _ID_RE.fullmatch(value):
-        raise ConfigError(
-            f"{field} 非法：{value!r}\n"
-            "只允许「字母或数字开头，后跟字母 / 数字 / . _ -」，最长 128 字符；"
-            "不允许路径分隔符、盘符、.. 或空白。"
-        )
-    if value.split(".")[0].upper() in WINDOWS_RESERVED:
-        raise ConfigError(f"{field} 使用了 Windows 保留设备名：{value!r}")
-    return value
-
-
-def validate_version(value, field: str) -> str:
-    if not isinstance(value, str) or not _VER_RE.fullmatch(value):
-        raise ConfigError(f"{field} 不是合法版本号：{value!r}")
-    return value
-
-
-def ensure_child(root: Path, child: Path) -> Path:
-    """确认 child 落在 root 之内，否则拒绝。
-
-    这是「最后一道闸」：即使前面某处漏了校验，越界路径也会在这里被拦下。
-    """
-    r = Path(root).resolve()
-    c = Path(child).resolve()
-    if c != r and r not in c.parents:
-        raise ConfigError(f"路径越界：{c} 不在 {r} 之内")
-    return c
-
-
-def collision_key(value: str) -> str:
-    """做「同名判定」用的归一 key。
-
-    主战场是 Windows，而 NTFS 默认大小写不敏感 —— `SKILLS_DIR/Story` 与
-    `SKILLS_DIR/story` 在磁盘上就是同一个目录。如果只在字符串层面比较，
-    两个条目会互相覆盖，而且是**静默**覆盖。
-
-    所以在**所有平台**上统一 casefold：宁可 Linux 也拒绝这种配置，
-    也不要让同一个配置在两套系统上跑出两种行为。
-    """
-    return str(value).casefold()
-
-
-def _check_collision(seen: dict, raw: str, where: str, what: str) -> None:
-    """seen 的 key 是 casefold 后的名字，value 是第一次出现时的原始写法。"""
-    key = collision_key(raw)
-    prev = seen.get(key)
-    if prev is not None and prev != raw:
-        raise ConfigError(
-            f"{what}名大小写冲突：{prev!r} 与 {raw!r}（{where}）\n"
-            "Windows 文件系统大小写不敏感，这两个名字会指向同一个目录并互相覆盖。\n"
-            "请只保留一个写法（本工具在所有平台上都拒绝这种配置，避免跨平台行为不一致）。"
-        )
-    if prev is not None:
-        raise ConfigError(f"{what}名重复：{raw}")
-    seen[key] = raw
-
-
-def _check_number(value, field: str, *, lo: float = 0, integer: bool = False):
-    """配置里的数值统一在这里过一遍。
-
-    两个坑：
-      · NaN / Infinity 能通过 `isinstance(v, (int, float))` 和大小比较，
-        混进内部状态后会让 `int()` 抛异常或者让阈值判断永远为假。
-      · `maxSizeBytes: 1.9` 会被后面的 `int(...)` 静默截成 1 —— 用户以为
-        自己设了 1.9 字节，实际按 1 字节算。这种「悄悄改写的配置」应当直接拒绝。
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ConfigError(f"{field} 必须是数字。")
-    if isinstance(value, float) and not math.isfinite(value):
-        raise ConfigError(f"{field} 不能是 NaN 或 Infinity。")
-    if integer and not isinstance(value, int):
-        raise ConfigError(
-            f"{field} 必须是整数（{value!r} 的小数部分会被静默截掉，容易误配）。")
-    if value < lo:
-        raise ConfigError(f"{field} 必须不小于 {lo}。")
-    return value
-
-
-def validate_repo(value, field: str = "repo") -> str:
-    """GitHub 仓库标识 `owner/repo` 的唯一校验入口。
-
-    配置层、API 层、后台任务层共用这一个 —— v2.3 之前只有配置层在用，
-    `/api/remote/add` 只判断了「非空」，等于把已有的边界绕过去了。
-
-    拒绝：空、非字符串、超长、不是 owner/repo 形状、任一段以 `-` 开头
-    （会被下游当命令行选项）、任一段是 `.` / `..`、含空白或控制字符。
-    """
-    if not isinstance(value, str):
-        raise ConfigError(f"{field} 必须是字符串，实际是 {type(value).__name__}。")
-    if not value or value != value.strip():
-        raise ConfigError(f"{field} 不能为空或首尾带空白：{value!r}")
-    if len(value) > 201:
-        raise ConfigError(f"{field} 太长了（{len(value)} 字符）。")
-    if not _REPO_RE.fullmatch(value):
-        raise ConfigError(
-            f"{field} 必须是 owner/repo 形式（只用字母数字 . _ -，两段都要以字母数字开头）：{value!r}")
-    owner, _, repo = value.partition("/")
-    for seg in (owner, repo):
-        if seg in (".", ".."):
-            raise ConfigError(f"{field} 里不能出现 {seg!r}：{value!r}")
-    return value
-
-
-def validate_config(cfg: dict) -> list:
-    """校验配置结构与安全性，返回 warning 列表；结构性错误直接抛 ConfigError。
-
-    这里只查「结构和安全」，不查「skill 在本机存不存在」——
-    后者是 deep_check 的活，因为源不在本机时市场会沿用历史副本，属于正常状态。
-    """
-    if not isinstance(cfg, dict):
-        raise ConfigError("market.config.json 的顶层必须是一个对象。")
-
-    warnings = []
-
-    # --- 市场标识
-    mid = cfg.get("marketId")
-    if not mid:
-        raise ConfigError("配置缺少 marketId。")
-    validate_id(mid, "marketId")
-    if not isinstance(cfg.get("name", ""), str):
-        raise ConfigError("name 必须是字符串。")
-    owner = cfg.get("owner", {})
-    if not isinstance(owner, dict):
-        raise ConfigError("owner 必须是一个对象，例如 {\"name\": \"...\"}。")
-    if "schemaVersion" in cfg:
-        sv = cfg["schemaVersion"]
-        if not isinstance(sv, int) or isinstance(sv, bool) or sv < 1:
-            raise ConfigError("schemaVersion 必须是正整数。")
-
-    # --- 本机插件
-    plugins = cfg.get("localPlugins", [])
-    if not isinstance(plugins, list):
-        raise ConfigError("localPlugins 必须是数组。")
-    seen_plugins = {}                      # casefold(name) -> 第一次出现的原始写法
-    skill_owner = {}                       # casefold(skill) -> (原始写法, 插件原始写法)
-    for i, spec in enumerate(plugins):
-        where = f"localPlugins[{i}]"
-        if not isinstance(spec, dict):
-            raise ConfigError(f"{where} 必须是对象。")
-        name = validate_id(spec.get("name"), f"{where}.name")
-        _check_collision(seen_plugins, name, where, "插件")
-        validate_version(spec.get("version", "1.0.0"), f"{where}({name}).version")
-        for key in ("description", "description_en", "category", "homepage", "repository", "license"):
-            if key in spec and not isinstance(spec[key], str):
-                raise ConfigError(f"{where}({name}).{key} 必须是字符串。")
-        if "keywords" in spec:
-            if not isinstance(spec["keywords"], list) or not all(
-                    isinstance(k, str) for k in spec["keywords"]):
-                raise ConfigError(f"{where}({name}).keywords 必须是字符串数组。")
-        if "author" in spec and not isinstance(spec["author"], dict):
-            raise ConfigError(f"{where}({name}).author 必须是对象。")
-
-        skills = spec.get("skills", [])
-        if not isinstance(skills, list) or not skills:
-            raise ConfigError(f"{where}({name}).skills 必须是非空数组。")
-        seen_here = {}
-        for s in skills:
-            sid = validate_id(s, f"{where}({name}).skills")
-            _check_collision(seen_here, sid, f"{where}({name}).skills", "skill")
-            key = collision_key(sid)
-            prev = skill_owner.get(key)
-            if prev is not None and collision_key(prev[1]) != collision_key(name):
-                raise ConfigError(
-                    f"skill {sid!r} 被两个插件同时声明：{prev[1]} 与 {name}"
-                    "（同一个 skill 只能属于一个插件，否则内容会互相覆盖）"
-                )
-            skill_owner[key] = (prev[0] if prev else sid, name)
-            # 最后一道闸：拼出来的路径必须在合法根目录之内
-            ensure_path = MARKET_ROOT / "plugins" / name / "skills" / sid
-            ensure_child(MARKET_ROOT / "plugins", ensure_path)
-            ensure_child(SKILLS_DIR, SKILLS_DIR / sid)
-
-    # --- 远端源
-    remotes = cfg.get("remoteSources", [])
-    if not isinstance(remotes, list):
-        raise ConfigError("remoteSources 必须是数组。")
-    seen_repos = {}                        # casefold(repo) -> 原始写法
-    for i, spec in enumerate(remotes):
-        where = f"remoteSources[{i}]"
-        if not isinstance(spec, dict):
-            raise ConfigError(f"{where} 必须是对象。")
-        repo = spec.get("repo")
-        try:
-            validate_repo(repo, f"{where}.repo")
-        except ConfigError:
-            raise ConfigError(f"{where}.repo 必须是 owner/repo 形式：{repo!r}")
-        # GitHub 的 owner/repo 也是大小写不敏感的，同样要归一
-        _check_collision(seen_repos, repo, where, "远端源")
-
-    # --- 打包 / 回收站 / 校验模式
-    pack = cfg.get("packaging", {})
-    if not isinstance(pack, dict):
-        raise ConfigError("packaging 必须是对象。")
-    if pack.get("verify", "auto") not in ("auto", "fast", "strict"):
-        raise ConfigError('packaging.verify 只能是 auto / fast / strict。')
-    if "hashAlgorithm" in pack and pack["hashAlgorithm"] != "sha256":
-        raise ConfigError('packaging.hashAlgorithm 目前只支持 "sha256"。')
-    if "hashChunkBytes" in pack:
-        _check_number(pack["hashChunkBytes"], "packaging.hashChunkBytes",
-                      lo=4096, integer=True)
-    for key in ("excludeNames", "excludeGlobs"):
-        v = pack.get(key, [])
-        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
-            raise ConfigError(f"packaging.{key} 必须是字符串数组。")
-
-    trash = cfg.get("trash", {})
-    if not isinstance(trash, dict):
-        raise ConfigError("trash 必须是对象。")
-    if "maxAgeDays" in trash:
-        _check_number(trash["maxAgeDays"], "trash.maxAgeDays", lo=0)
-    if "maxSizeBytes" in trash:
-        # 必须整数：避免 1.9 被 int() 截成 1 这种「悄悄改配置」
-        _check_number(trash["maxSizeBytes"], "trash.maxSizeBytes", lo=0, integer=True)
-    if "protectModified" in trash and not isinstance(trash["protectModified"], bool):
-        raise ConfigError("trash.protectModified 必须是布尔值。")
-
-    if not plugins and not remotes:
-        warnings.append("配置里既没有本机插件也没有 GitHub 源，市场是空的。")
-
-    return warnings
-
-
-def load_config() -> dict:
-    cfg = read_json(CONFIG_PATH, None, strict=True)
-    validate_config(cfg)
-    return cfg
-
-
-def verify_mode() -> str:
-    """packaging.verify：auto（默认）/ fast / strict。"""
-    try:
-        cfg = load_config()
-    except ConfigError:
-        return "auto"
-    mode = (cfg.get("packaging") or {}).get("verify", "auto")
-    return mode if mode in ("auto", "fast", "strict") else "auto"
-
-
-def needs_exact(purpose: str) -> bool:
-    """这个用途要不要读到文件内容（完整 SHA-256）。
-
-    · strict  —— 一律精确（连网页状态也精确，方便排查）
-    · auto / fast —— 只有 install / uninstall 这种会**动用户磁盘**的用途才精确。
-      网页状态用廉价指纹，误差只是显示；而 fast 不再能削弱破坏性判定，
-      v2 那种「fast 导致 update 漏判 modified」的路子被彻底堵死。
-    """
-    if purpose not in CLASSIFY_PURPOSES:
-        raise ValueError(f"未知用途 {purpose!r}")
-    if verify_mode() == "strict":
-        return True
-    return purpose in EXACT_PURPOSES
-
-
-def hash_chunk_bytes() -> int:
-    """流式 SHA-256 的块大小，来自 packaging.hashChunkBytes。"""
-    try:
-        cfg = load_config()
-    except ConfigError:
-        return HASH_CHUNK_BYTES
-    v = (cfg.get("packaging") or {}).get("hashChunkBytes", HASH_CHUNK_BYTES)
-    if isinstance(v, int) and not isinstance(v, bool) and v >= 4096:
-        return v
-    return HASH_CHUNK_BYTES
+# validate_* / ensure_child / collision_key / validate_config / load_config /
+# verify_mode / needs_exact / hash_chunk_bytes 已迁 workbuddy_market.config
+# （v2.9 R3），此处 re-export（见上方 import 块）。
 
 
 # ---------------------------------------------------------------- 文件锁
@@ -655,117 +381,16 @@ def hash_chunk_bytes() -> int:
 
 
 # ---------------------------------------------------------------- 文件索引 / 指纹
-
-def _is_reparse(st) -> bool:
-    """Windows 重解析点：符号链接、junction、挂载点都算。
-
-    实测（本机 Python 3.13）：junction 的 `is_symlink()` 返回 **False**，
-    但 `st_file_attributes` 带 FILE_ATTRIBUTE_REPARSE_POINT。
-    只看 `is_symlink()` 会把 junction 当成普通目录递归进去，
-    把技能目录之外的内容带进市场目录 —— 这是实打实能造出来的逃逸路径。
-    """
-    attr = getattr(st, "st_file_attributes", 0)
-    return bool(attr & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+# _is_reparse / _walk_tree / _raise_if_errors / _scan / _scan_many /
+# file_index / SkillScanCache / parse_skill_meta / _make_excluder / _sub_index
+# 已迁 workbuddy_market.scanner（v2.9 R3），此处 re-export。
+# 注意：包内互调（file_index→_scan、_scan_many→_walk_tree 等）走 scanner
+# 命名空间，patch `core._scan/_walk_tree` 只对 core 侧直接调用有效
+# （如 _sync_packaging / _stage_skill / prune_trash）；需要拦截包内路径时
+# patch workbuddy_market.scanner 里的名字（selftest 第 19 节已按此调整）。
 
 
 # ScanError 已迁 workbuddy_market.errors（v2.8 R2），此处 re-export。
-
-
-def _walk_tree(root: Path, excluded, files: dict, links: list, errors: list) -> None:
-    """把一个子树走完，结果写进调用方给的 files / links / errors。
-
-    「一次遍历」的公共实现：单根（_scan）和多根分桶（_scan_many）都走这里，
-    免得两份游走逻辑慢慢长歪。
-
-    用 os.scandir 而不是 os.walk：DirEntry 的 stat 结果直接来自目录项、缓存着，
-    不用再按路径查一次 —— 既更快，又能顺手拿到文件属性位。
-
-    **软链 / junction 一律跳过、不跟随**：一个指向技能目录之外的重解析点，
-    跟随它就会把外部文件的内容带进市场目录（copy2 默认跟随软链）。
-    """
-    root = Path(root)
-    if not root.is_dir():
-        return
-    stack = [str(root)]
-    while stack:
-        cur = stack.pop()
-        try:
-            entries = list(os.scandir(cur))
-        except OSError as exc:
-            errors.append((cur, str(exc)))      # 读不了这个目录 —— 别当成"空的"
-            continue
-        for e in entries:
-            if excluded is not None and excluded(e.name):
-                continue
-            try:
-                st = e.stat(follow_symlinks=False)
-                if e.is_symlink() or _is_reparse(st):
-                    links.append(e.path)
-                    continue
-                if stat.S_ISDIR(st.st_mode):
-                    stack.append(e.path)
-                    continue
-                if not stat.S_ISREG(st.st_mode):
-                    continue
-            except OSError as exc:
-                errors.append((e.path, str(exc)))   # stat 失败同样是"看不见"
-                continue
-            rel = str(Path(e.path).relative_to(root)).replace("\\", "/")
-            files[rel] = (st.st_size, st.st_mtime_ns)
-
-
-def _raise_if_errors(errors: list, what: str) -> None:
-    if errors:
-        sample = "、".join(p for p, _ in errors[:3])
-        raise ScanError(
-            f"{what} 扫描不完整：{len(errors)} 处读取失败（例如 {sample}）。"
-            "拒绝在「看不见部分内容」的情况下继续 —— 那会把读失败当成文件不存在。")
-
-
-def _scan(root: Path, excluded=None, *, on_error: str = "skip") -> tuple:
-    """**一次遍历**同时得到：
-        files = {相对路径str: (size, mtime_ns)}
-        links = 被跳过的重解析点（软链 / junction，绝对路径）
-
-    on_error:
-      "skip"（默认）—— 读不了的条目跳过，适合状态展示这类"尽力而为"的用途
-      "raise"      —— 有任何一处读失败就抛 ScanError，破坏性操作必须用这个
-    """
-    files: dict = {}
-    links: list = []
-    errors: list = []
-    _walk_tree(root, excluded, files, links, errors)
-    if on_error == "raise":
-        _raise_if_errors(errors, f"{Path(root).name}")
-    return files, links
-
-
-def _scan_many(named: dict, excluded=None, *, on_error: str = "raise") -> tuple:
-    """一次调用、只走给定的那些子树，并且**按名字分桶**。
-
-    返回 ({name: {rel: (size, mtime)}}, {name: [links]}, errors)
-
-    为什么不是「扫一遍整棵 skills 根再按前缀切」：
-      · 市场声明 6 个 skill、而 skills 根下有 400 个别的目录时，整树扫要
-        走 2854 个文件（实测 223 ms），而只需要其中 6 个子树；
-      · 切分本身也不便宜 —— `_sub_index` 每个 skill 都要遍历一遍**完整**索引，
-        6 个 skill 就是 17124 次字典迭代（实测）。
-    分桶之后两个问题一起没了：扫描量 = O(声明的那几个 skill)，
-    取用时 O(1) 拿到自己的子树。
-    """
-    buckets: dict = {name: {} for name in named}
-    link_buckets: dict = {name: [] for name in named}
-    errors: list = []
-    for name, root in named.items():
-        _walk_tree(root, excluded, buckets[name], link_buckets[name], errors)
-    if on_error == "raise":
-        _raise_if_errors(errors, "skills 目录")
-    return buckets, link_buckets, errors
-
-
-def file_index(root: Path, excluded=None, *, on_error: str = "skip") -> dict:
-    """只要文件索引的便捷包装。"""
-    return _scan(root, excluded, on_error=on_error)[0]
 
 
 # fingerprint_from_index / sha256_file / _same_content 已迁
@@ -821,168 +446,9 @@ def tree_hash(root: Path, excluded=None, chunk_size: int | None = None,
                                 chunk_size)
 
 
-class SkillScanCache:
-    """一次批量扫描**已声明的那些 skill**，结果按 skill 分桶。
-
-    build_state 会给每个插件的每个 skill 各调一次 classify_skill，而 ui 模式下
-    每个 skill 都要一个指纹。v2.3 的做法是「扫一遍整棵 SKILLS_DIR 再按前缀切」，
-    在「市场 6 个 skill + skills 根下 400 个无关目录」的场景里实测要扫 2854 个文件
-    （223 ms），而且每切一个 skill 都要遍历一遍完整索引（6 个 skill = 17124 次迭代）。
-
-    现在换成：只走声明的那些子树，扫描时就按名字分桶。
-      · 扫描量 = O(声明的那几个 skill)
-      · `fingerprint(name)` 是 O(1) 取桶
-    """
-
-    def __init__(self, names, excluded=None):
-        self._names = [str(n) for n in names]
-        self._excluded = excluded
-        self._buckets = None
-        self._links = None
-        self.scans = 0
-        self.errors: list = []
-
-    def _ensure(self):
-        if self._buckets is not None:
-            return
-        named = {n: SKILLS_DIR / n for n in self._names}
-        self._buckets, self._links, self.errors = _scan_many(
-            named, self._excluded, on_error="skip")   # UI 用：尽量显示，不因为一处失败就白屏
-        self.scans += 1
-
-    def fingerprint(self, sname: str) -> dict:
-        """等价于 quick_fingerprint(SKILLS_DIR / sname)，但不单独遍历。"""
-        self._ensure()
-        return fingerprint_from_index(self._buckets.get(str(sname), {}),
-                                      self._links.get(str(sname), ()))
-
-
-# ---------------------------------------------------------------- skill 元信息
-
-_FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S | re.M)
-
-
-def parse_skill_meta(skill_dir: Path) -> dict:
-    """从 SKILL.md 的 frontmatter 里取 version/description，取不到就给默认值。"""
-    meta = {"version": "1.0.0", "description": ""}
-    try:
-        text = (Path(skill_dir) / "SKILL.md").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return meta
-    m = _FM_RE.match(text)
-    if not m:
-        return meta
-    for line in m.group(1).splitlines():
-        if line.startswith("version:"):
-            meta["version"] = line.split(":", 1)[1].strip().strip('"').strip("'") or "1.0.0"
-        elif line.startswith("description:"):
-            meta["description"] = line.split(":", 1)[1].strip().strip('"').strip("'")[:300]
-    return meta
-
-
-# ---------------------------------------------------------------- 打包
-
-def _make_excluder(exclude_names, exclude_globs):
-    """返回一个 name -> bool 的排除判定。"""
-    import fnmatch
-
-    names = set(exclude_names or [])
-    globs = list(exclude_globs or [])
-
-    def excluded(name: str) -> bool:
-        if name in names:
-            return True
-        return any(fnmatch.fnmatch(name, pat) for pat in globs)
-
-    return excluded
-
-
-def _sub_index(full: dict, prefix: str) -> dict:
-    """从一个「以 root 为基准」的整树索引里切出 prefix/ 这一支。
-
-    key 会从 "alpha/SKILL.md" 变回 "SKILL.md"，这样 _sync_tree 完全无感。
-    用来把「每个 skill 扫一次目标目录」降成「每个插件扫一次目标目录」。
-    """
-    p = str(prefix).rstrip("/") + "/"
-    n = len(p)
-    return {rel[n:]: val for rel, val in full.items() if rel.startswith(p)}
-
-
-def _sync_tree(src: Path, dst: Path, excluded=None, strict: bool = False,
-               dst_index: dict | None = None) -> tuple:
-    """把 src **增量**同步到 dst，返回 (拷贝数, 删除数, 源端总字节, 跳过的软链数)。
-
-    判定用 size + **mtime_ns**（v1 的 int(st_mtime) 会把精度砍到秒，
-    同秒内大小不变的修改会被漏掉）。
-    strict=True 时，对「大小和时间戳都一样」的文件再比一遍内容 ——
-    代价是要读文件，但能堵住「改完再把时间戳改回去」这种情况。
-
-    dst_index 可由调用方预先算好（插件级整树扫描 + _sub_index 切片），
-    避免每个 skill 都把目标目录重扫一遍。
-
-    **两侧都 fail-closed**：源端少看见一个文件，目标端那份就会被判成「多余」
-    而被删掉 —— 一次读取抖动就能把市场里的内容删掉（已用探针复现）。
-    所以这里任何一处扫描失败都直接抛 ScanError，宁可整次同步失败。
-    """
-    src_index, src_links = _scan(src, excluded, on_error="raise")
-    if dst_index is None:
-        dst_index, _ = _scan(dst, excluded, on_error="raise")
-    # strict 下每个变动文件都要比内容 —— 块大小在这里解析一次，别在循环里反复读配置
-    chunk = hash_chunk_bytes() if strict else HASH_CHUNK_BYTES
-    copied = removed = 0
-
-    for rel, (ssize, smtime) in src_index.items():
-        dfull = dst / rel
-        cur = dst_index.get(rel)
-        skip = False
-        if cur is not None:
-            if strict:
-                # strict：以内容为准 —— 内容一样就不重写，哪怕时间戳不同
-                skip = (cur[0] == ssize) and _same_content(src / rel, dfull, chunk)
-            else:
-                # fast：只看 size + mtime_ns
-                skip = (cur[0] == ssize and cur[1] == smtime)
-        if skip:
-            continue
-        dfull.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            shutil.copy2(src / rel, dfull)
-            copied += 1
-        except OSError as exc:
-            log("error", "sync", f"拷贝 {rel} 失败：{exc}")
-
-    # 删掉目标端多出来的（通常个位数），并记下受影响的目录
-    prune_dirs = set()
-    for rel in dst_index:
-        if rel in src_index:
-            continue
-        p = dst / rel
-        try:
-            p.unlink()
-            removed += 1
-            prune_dirs.add(str(p.parent))
-        except OSError:
-            pass
-
-    # 只收「确实删过文件的那些目录」及其祖先。
-    # 不对全树目录试 rmdir —— 宿主/沙箱会给每次 os.rmdir 套一层路径校验，
-    # 几百次空转 rmdir 能占掉整个同步一半的耗时（实测 0.32s/156 次）。
-    tried = set()
-    for d in sorted(prune_dirs, key=len, reverse=True):
-        cur = Path(d)
-        while cur not in tried and cur != dst and dst in cur.parents:
-            tried.add(cur)
-            try:
-                os.rmdir(cur)
-            except OSError:
-                break
-            cur = cur.parent
-
-    if src_links:
-        log("warn", "sync", f"{len(src_links)} 个符号链接被跳过，未打包：{src_links[:3]}")
-
-    total = sum(v[0] for v in src_index.values())
-    return copied, removed, total, len(src_links)
+# ---------------------------------------------------------------- skill 元信息 / 打包辅助
+# SkillScanCache / _FM_RE / parse_skill_meta / _make_excluder / _sub_index
+# 已随 scanner 迁入 workbuddy_market.scanner（v2.9 R3），此处 re-export。
 
 
 TRASH_INDEX_PATH = TRASH_DIR / ".index.json"

@@ -17,6 +17,8 @@
 第 23 节   v2.7/R1：三层根目录、WBM_* 环境变量、运行时迁移（含跨卷回退）
 第 24 节   v2.8/R2：src/workbuddy_market 包拆分——符号同一性、注入点保留、
            MARKET_ROOT fallback 盯防、包级功能冒烟
+第 25 节   v2.9/R3：config / scanner / sync / version 迁入——同一性、注入点
+           命名空间迁移（_walk_tree 跟随 scanner）、功能冒烟
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -36,7 +38,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.8"
+SELFTEST_VERSION = "2.9"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -54,6 +56,7 @@ if _ISOLATED:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import market_core as core  # noqa: E402
+import workbuddy_market as wm  # noqa: E402  （R3 起注入点迁到包命名空间时用）
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -504,6 +507,9 @@ def run() -> None:
     # ============ 24. 开源重构 R2：src/workbuddy_market 基础设施包 ============
     round9()
 
+    # ============ 25. 开源重构 R3：config / scanner / sync / version 迁入 ============
+    round10()
+
 
 def _restore_config(snapshot: str) -> None:
     core.CONFIG_PATH.write_text(snapshot, encoding="utf-8")
@@ -719,7 +725,10 @@ def round4():
     declared_names = sorted(s for p in core.load_config()["localPlugins"]
                             for s in p["skills"])
     walked = []
-    real_walk = core._walk_tree
+    # R3 起 _walk_tree 定义在 workbuddy_market.scanner：SkillScanCache →
+    # _scan_many → _walk_tree 全走 scanner 命名空间，patch core._walk_tree
+    # 不再生效（方案 §3.2 的注入点迁移规则），这里跟着改。
+    real_walk = wm.scanner._walk_tree
     real_scan = core._scan          # 19J 还要用
 
     def counting_walk(root, excluded, files, links, errors):
@@ -732,20 +741,20 @@ def round4():
        not isinstance(core.load_ownership()["skills"]["gamma"].get("fingerprint"), dict))
 
     core.record_owner("bundle-two", ["gamma"], "2.0.0")   # 补成正常记录
-    core._walk_tree = counting_walk
+    wm.scanner._walk_tree = counting_walk
     try:
         st6 = core.build_state()
     finally:
-        core._walk_tree = real_walk
+        wm.scanner._walk_tree = real_walk
     # 额外登记几个「无关 skill」，确认它们不会被顺带扫到
     for extra in ("unrelated-a", "unrelated-b"):
         write_fake_skill(core.SKILLS_DIR, extra, "1.0.0", "噪音", {})
-    core._walk_tree = counting_walk
+    wm.scanner._walk_tree = counting_walk
     walked.clear()
     try:
         core.build_state()
     finally:
-        core._walk_tree = real_walk
+        wm.scanner._walk_tree = real_walk
     ck(f"★ ★ 只走声明的 {len(declared_names)} 个 skill，不碰无关目录",
        sorted(walked) == declared_names, f"走了 {sorted(walked)}")
     ck("★ ★ 不再整树扫 skills 根", "skills" not in walked, str(sorted(walked)[:4]))
@@ -2562,13 +2571,24 @@ def round9():
        and core.GHPM_PY is wm.paths.GHPM_PY
        and core.HASH_CHUNK_BYTES is wm.paths.HASH_CHUNK_BYTES)
 
-    # --- 24B. 崩溃矩阵注入点必须仍定义在 core（搬走 = 注入失效 = 假绿）
-    for _name in ("_scan", "_walk_tree", "quick_fingerprint", "tree_hash",
-                  "tree_hash_from_index", "save_ownership", "record_owner",
-                  "tx_begin", "tx_note_committed", "_stage_skill",
-                  "_commit_staged", "build_state"):
+    # --- 24B. 注入点定义模块盯防（R2 core；R3 后 _scan/_walk_tree 等已迁 scanner）
+    for _name in ("quick_fingerprint", "tree_hash", "tree_hash_from_index",
+                  "save_ownership", "record_owner", "tx_begin",
+                  "tx_note_committed", "_stage_skill", "_commit_staged",
+                  "build_state"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
         ck(f"注入点仍定义在 core：{_name}", _mod == "market_core", _mod)
+    for _name in ("_scan", "_walk_tree", "_scan_many", "file_index",
+                  "SkillScanCache", "parse_skill_meta"):
+        _mod = getattr(getattr(core, _name), "__module__", "?")
+        ck(f"扫描注入点已迁 scanner：{_name}", _mod == "workbuddy_market.scanner", _mod)
+    for _name in ("validate_id", "validate_config", "hash_chunk_bytes",
+                  "verify_mode", "needs_exact", "collision_key", "ensure_child"):
+        _mod = getattr(getattr(core, _name), "__module__", "?")
+        ck(f"配置函数已迁 config：{_name}", _mod == "workbuddy_market.config", _mod)
+    ck("树同步已迁 sync：_sync_tree",
+       core._sync_tree.__module__ == "workbuddy_market.sync",
+       core._sync_tree.__module__)
 
     # --- 24C. MARKET_ROOT 仓库根 fallback（src 布局 parents[2] 适配点，子进程盯防）：
     # 不设任何 WBM_*/GHPM_* 环境变量时，MARKET_ROOT 必须仍是含 market.config.json
@@ -2580,7 +2600,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.8.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.9.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2612,6 +2632,125 @@ def round9():
     wm.logging.log("info", "r2_selftest", "package smoke")
     ck("包级 log 落盘且可 tail",
        any(r.get("event") == "r2_selftest" for r in wm.logging.tail_log(5)))
+
+
+def round10():
+    """开源重构 R3：config / scanner / sync / version 迁入包（逐字搬迁，行为零变化）。
+
+    重点盯防：
+    1. re-export 同一性（is）—— 与 R2 的 24A 同理；
+    2. 注入点命名空间迁移：_walk_tree / _scan 已迁 scanner，包内互调
+       （SkillScanCache→_scan_many→_walk_tree）走 scanner 全局，
+       patch 目标必须跟着搬（第 19 节已改）；
+    3. _sync_tree 的增量语义（拷贝 / 删除 / 排除 / 收空目录）在包内不变。
+    """
+    section("25. 开源重构 R3：config / scanner / sync / version 迁入")
+
+    # --- 25A. 符号同一性
+    ck("config 校验器同一性",
+       core.validate_id is wm.config.validate_id
+       and core.validate_version is wm.config.validate_version
+       and core.ensure_child is wm.config.ensure_child
+       and core.collision_key is wm.config.collision_key
+       and core.validate_repo is wm.config.validate_repo
+       and core._check_collision is wm.config._check_collision
+       and core._check_number is wm.config._check_number)
+    ck("config 读取 / 模式同一性",
+       core.validate_config is wm.config.validate_config
+       and core.load_config is wm.config.load_config
+       and core.verify_mode is wm.config.verify_mode
+       and core.needs_exact is wm.config.needs_exact
+       and core.hash_chunk_bytes is wm.config.hash_chunk_bytes)
+    ck("config 用途常量同一性",
+       core.CLASSIFY_PURPOSES is wm.config.CLASSIFY_PURPOSES
+       and core.EXACT_PURPOSES is wm.config.EXACT_PURPOSES)
+    ck("scanner 同一性",
+       core._scan is wm.scanner._scan
+       and core._walk_tree is wm.scanner._walk_tree
+       and core._scan_many is wm.scanner._scan_many
+       and core.file_index is wm.scanner.file_index
+       and core.SkillScanCache is wm.scanner.SkillScanCache
+       and core.parse_skill_meta is wm.scanner.parse_skill_meta
+       and core._make_excluder is wm.scanner._make_excluder
+       and core._sub_index is wm.scanner._sub_index
+       and core._is_reparse is wm.scanner._is_reparse)
+    ck("sync / version 同一性",
+       core._sync_tree is wm.sync._sync_tree
+       and core.MARKET_VERSION is wm.version.MARKET_VERSION
+       and core.STATE_VERSION is wm.version.STATE_VERSION)
+
+    # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
+    ck("版本同号：version 模块 / core / selftest",
+       wm.version.MARKET_VERSION == "2.9.0"
+       and core.MARKET_VERSION == "2.9.0"
+       and SELFTEST_VERSION == "2.9", core.MARKET_VERSION)
+
+    # --- 25C. 功能冒烟：校验器
+    ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
+    try:
+        core.validate_id("../evil", "f")
+        ck("validate_id 拒绝路径穿越", False)
+    except core.ConfigError:
+        ck("validate_id 拒绝路径穿越", True)
+    try:
+        core.validate_id("CON", "f")
+        ck("validate_id 拒绝 Windows 保留名", False)
+    except core.ConfigError:
+        ck("validate_id 拒绝 Windows 保留名", True)
+    ck("collision_key 大小写归一",
+       core.collision_key("Story") == core.collision_key("story"))
+    try:
+        core.ensure_child(core.SKILLS_DIR, core.SKILLS_DIR.parent / "escape")
+        ck("ensure_child 拒绝越界路径", False)
+    except core.ConfigError:
+        ck("ensure_child 拒绝越界路径", True)
+
+    # --- 25D. 功能冒烟：scanner / sync（临时树上的增量同步闭环）
+    d = _TMP / "r3d"
+    src = d / "src"; dst = d / "dst"
+    src.mkdir(parents=True); dst.mkdir(parents=True)
+    (src / "a.txt").write_text("A", encoding="utf-8")
+    (src / "sub").mkdir()
+    (src / "sub" / "b.txt").write_text("B", encoding="utf-8")
+    excluded = core._make_excluder([], ["*.log"])   # 通配符走 excludeGlobs
+    (src / "noise.log").write_text("x", encoding="utf-8")
+    c1, r1, _total, _links = core._sync_tree(src, dst, excluded)
+    ck("首扫全量拷贝（排除 *.log）",
+       c1 == 2 and r1 == 0 and (dst / "a.txt").is_file()
+       and (dst / "sub" / "b.txt").is_file() and not (dst / "noise.log").exists(),
+       f"c={c1} r={r1}")
+    c2, r2, _, _ = core._sync_tree(src, dst, excluded)
+    ck("稳态同步零拷贝零删除", c2 == 0 and r2 == 0, f"c={c2} r={r2}")
+    (src / "a.txt").write_text("A2", encoding="utf-8")   # 改内容（大小不变，mtime 变）
+    (src / "sub" / "b.txt").unlink()                      # 源端删除 → 目标跟随删
+    c3, r3, _, _ = core._sync_tree(src, dst, excluded)
+    ck("增量：内容变了重拷、目标多余文件被删且空目录收敛",
+       c3 == 1 and r3 == 1
+       and (dst / "a.txt").read_text(encoding="utf-8") == "A2"
+       and not (dst / "sub").exists(),
+       f"c={c3} r={r3}")
+    sk = d / "sk"
+    sk.mkdir()
+    (sk / "SKILL.md").write_text(
+        "---\nversion: 3.1.4\ndescription: hello\n---\nbody\n", encoding="utf-8")
+    meta = core.parse_skill_meta(sk)
+    ck("parse_skill_meta 读取 frontmatter",
+       meta == {"version": "3.1.4", "description": "hello"}, str(meta))
+    full = {"alpha/x.txt": (1, 2), "beta/y.txt": (3, 4)}
+    ck("_sub_index 按前缀切片",
+       core._sub_index(full, "alpha") == {"x.txt": (1, 2)}
+       and core._sub_index(full, "beta") == {"y.txt": (3, 4)})
+
+    # --- 25E. 校验闭环：跨插件 skill 冲突在配置阶段就报（外部评审第 9 点的既有实现）
+    bad = {"marketId": "m", "localPlugins": [
+        {"name": "pa", "skills": ["story"]},
+        {"name": "pb", "skills": ["Story"]}]}
+    try:
+        core.validate_config(bad)
+        ck("跨插件 skill 冲突（含大小写）配置期拒绝", False)
+    except core.ConfigError as exc:
+        ck("跨插件 skill 冲突（含大小写）配置期拒绝",
+           "同时声明" in str(exc), str(exc)[:80])
 
 if __name__ == "__main__":
     raise SystemExit(main())
