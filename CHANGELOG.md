@@ -4,6 +4,13 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.9 各一节）。
 
+## 未发布（文档）
+
+- 新增 `docs/WorkBuddy-5.7.6-面板实测.md`：WorkBuddy 5.7.6 三个标签页的数据源实测、
+  自定义市场在面板中的可见形态（技能页「用户自定义」）、与本机市场的优劣对比。
+- README 方式 A 与第九节 FAQ 按 5.7.6 实测修正（面板无「市场来源」入口）。
+- 纯文档变更，无代码改动，版本号不变。
+
 ## 2.9.0 — 2026-10-07（R3：config / scanner / sync / version 迁入）
 
 - `src/workbuddy_market/` 新增 `config.py`（validate_* / ensure_child / collision_key /
