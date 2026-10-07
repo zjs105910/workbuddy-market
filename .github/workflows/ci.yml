@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Syntax check
-        run: python -m py_compile market_core.py market_server.py launcher.py selftest.py
+        run: python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
       - name: Isolated selftest (Windows only)
         if: runner.os == 'Windows'
         run: python selftest.py

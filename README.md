@@ -138,9 +138,12 @@ workbuddy-market/
 ├── 撤销注册.cmd                      ← 从 WorkBuddy 摘掉本市场
 ├── _run.cmd                          ← 公共引导（找 Python），纯 ASCII
 ├── launcher.py                       ← 命令行入口与编排
-├── market_core.py                    ← 内核：打包 / 注册 / 状态 / 安装
+├── market_core.py                    ← 内核：打包 / 注册 / 状态 / 安装（兼容入口，
+│                                        v2.8 起基础设施实现在 src/ 里）
+├── src/workbuddy_market/             ← 内核包（v2.8/R2 起）：paths / errors / fsutil /
+│                                        hasher / locking / logging
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 384 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 410 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.json                ← ★ 唯一数据源，改这个
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
 ├── plugins/                          ← 插件内容（自动生成）
@@ -179,7 +182,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 384 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 410 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 ```
 
@@ -505,7 +508,8 @@ os.path.isdir(link)         → True      ← 于是被当普通目录递归进�
 **🟡 P2**
 
 - **selftest 增加故障注入**（第 16 节），v2.1 时共 133 项
-  （v2.2 → 178，v2.3 → 254，v2.4 → 304，v2.5 → 342，v2.6 → 353，v2.7/R1 → 384）。
+  （v2.2 → 178，v2.3 → 254，v2.4 → 304，v2.5 → 342，v2.6 → 353，v2.7/R1 → 384，
+  v2.8/R2 → 410）。
 - **日志事件带 `op` 字段**（operation id），便于把一次安装的多条事件串起来。
 
 ### 实测性能对照
@@ -978,3 +982,69 @@ known_marketplaces 备份）搬进 `~/.workbuddy-market/markets/workbuddy-market
   `market_core.py` 转 star-import 兼容 shim。
 - R7：selftest → pytest（unit / integration / fault 三层）+ 消 2 个前端 SKIP。
 - R8：pyproject.toml（动态版本）+ LICENSE + CI + README 重写。
+
+---
+
+## 十八、v2.8 相对 v2.7 改了什么（GitHub 开源重构 R2：拆出基础设施包）
+
+R1 把「状态」从仓库里搬了出去，R2 开始把「代码」从 market_core.py 里搬出去。
+本轮**只搬不改**：六个无状态模块逐字迁入 `src/workbuddy_market/`，行为零变化。
+
+### 搬了什么
+
+| 新模块 | 迁入内容 |
+| --- | --- |
+| `src/workbuddy_market/paths.py` | 三层根目录、全部路径常量、LOG_MAX_BYTES 等体量常量 |
+| `src/workbuddy_market/errors.py` | ConfigError / FileLockTimeout / ScanError |
+| `src/workbuddy_market/fsutil.py` | _fsync_dir、atomic_write_*、write_text_if_changed、read_json |
+| `src/workbuddy_market/hasher.py` | fingerprint_from_index、sha256_file、_same_content |
+| `src/workbuddy_market/locking.py` | _HELD、FileLock、locked、_NullLock |
+| `src/workbuddy_market/logging.py` | now_iso、_rotate_log、log、_tail_lines、tail_log |
+
+`quick_fingerprint` / `tree_hash*` **留在 market_core**：它们依赖 `core._scan`
+（自检崩溃注入点）与 `hash_chunk_bytes()`（读配置），R3 拆 config/scanner 时再走。
+
+### 唯一的必要适配
+
+MARKET_ROOT 的仓库根 fallback 由 `Path(__file__).parent` 改为 `parents[2]`
+（src 布局下 paths.py 的上两级才是仓库根）。语义不变，新增子进程用例盯防
+（24C：不设任何环境变量时，MARKET_ROOT 必须仍是含 market.config.json 的仓库根）。
+
+### 兼容层怎么保证不断（方案 §3.2 的落地）
+
+- market_core re-export 全部迁出符号，`import market_core` 与 `core.X` 用法不变；
+- **is 同一性**有专章用例（24A）：`core.ConfigError is workbuddy_market.errors.ConfigError`
+  等八组断言，防「star-import 值拷贝导致 except / monkeypatch 静默失效」；
+- **注入点保留**有专章用例（24B）：_scan / _walk_tree / quick_fingerprint /
+  tree_hash* / save_ownership / tx_begin / _stage_skill / _commit_staged /
+  record_owner / build_state 必须仍以 market_core 为定义模块 ——
+  搬走 = 崩溃矩阵假绿；
+- selftest 全部 44 处 `core.X` 属性注入逐一核对过，无一落入本轮搬迁集合。
+
+### 自测（第 24 节，384 → 410 项）
+
+| 指标 | v2.7（R1） | v2.8（R2） |
+| --- | --- | --- |
+| selftest | 384 项 | **410 项**（+26） |
+
+### 协议设计稿（只定接口，未实现）
+
+外部评审指出「工程强、协议弱」，本轮同时产出三份协议设计稿放在
+`docs/protocol/`，后续轮次按图施工：
+
+- `manifest-v1.md` —— plugin.json / marketplace.json 双层身份、声明式权限、
+  许可证硬门槛（与 plugins/ 不随 git 分发同一逻辑的协议化）；
+- `provider-api.md` —— PluginProvider 统一来源接口、动态元数据（stars 等）
+  不再写死进配置、验证状态（official/verified/community/unverified/blocked）正式化；
+- `lockfile.md` —— wb-market.lock 复现快照（精确版本 + skill 级校验和），
+  与 ownership 的权责分界：ownership 管安全边界，lock 管复现。
+
+### 验证
+
+```
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python selftest.py        # 410 passed, 0 failed
+python launcher.py --status
+python launcher.py --recover
+```
+

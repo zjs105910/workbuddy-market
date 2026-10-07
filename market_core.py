@@ -192,6 +192,20 @@ v2.6 → v2.7 的变化（GitHub 开源重构 R1：运行时与仓库分离）�
     锁文件无持久语义，不迁移。
   · 本轮只做行为变更与自测用例，模块拆分（R2-R6）随后分批进行；
     详见 docs/开源重构方案.md。
+
+v2.7 → v2.8 的变化（GitHub 开源重构 R2：拆出无状态基础设施包）：
+
+  · **src/workbuddy_market/ 包落地**：paths（三层根目录 + 全部路径常量）/
+    errors（ConfigError / FileLockTimeout / ScanError）/ fsutil（原子写 + JSON）/
+    hasher（流式 SHA-256 + 指纹叶子函数）/ locking（可重入文件锁）/
+    logging（事件流 + 真.tail）六个模块自本文件**逐字迁入**，行为零变化。
+  · quick_fingerprint / tree_hash* 因依赖 core._scan（自检崩溃注入点）与
+    hash_chunk_bytes()（读配置）暂留本文件，R3 拆 config/scanner 时再走。
+  · 唯一必要适配：MARKET_ROOT 的仓库根 fallback 由 ``Path(__file__).parent``
+    改为 ``parents[2]``（src 布局），语义不变；有自检用例盯防。
+  · market_core 仍是唯一兼容入口：re-export 全部迁出符号，selftest 的
+    core.X 属性注入（_scan / tree_hash / save_ownership / tx_* 等 44 处）
+    全部保持有效。
 """
 from __future__ import annotations
 
@@ -209,110 +223,51 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# ---------------------------------------------------------------- 路径
+# ------------------------------------------------------- 基础设施包（v2.8，R2）
 #
-# v2.7 起采用三层根目录（「仓库是产品，状态是环境」—— GitHub 开源重构方案 §2）：
-#   WBM_MARKET_ROOT   市场仓库根：market.config.json / marketplace.json / plugins / web
-#   WBM_STATE_HOME    运行状态根：state / ownership / tx / trash / backups / locks / logs
-#   WBM_HOME          WorkBuddy 家目录：skills / known_marketplaces.json
-# 旧名 GHPM_MARKET_ROOT / GHPM_HOME 继续兼容，每进程打一次 deprecation 告警。
-#
-# 运行状态分桶（评审定稿，防同机多 clone 互相污染）：
-#   · 显式 WBM_STATE_HOME                    → 直接使用（隔离由设置者负责）
-#   · 仅显式 *MARKET_ROOT（旧自检 / harness）→ 跟随 MARKET_ROOT，文件名沿用 v2.6 旧名，
-#     完整复刻旧行为（_LEGACY_LAYOUT），迁移逻辑直接跳过
-#   · 默认（真实使用）                       → ~/.workbuddy-market/markets/<bucket>/
-#     bucket = <仓库目录名清洗>-<sha256(MARKET_ROOT 绝对路径) 前 12 位>
-#     目录名人可读，hash 保证同机两个 clone 的锁 / trash / tx 绝不共享。
+# 路径 / 错误 / 原子写 / 哈希 / 锁 / 日志已逐字迁入 src/workbuddy_market/
+# （docs/开源重构方案.md §3.1、§9-R2）。本文件保留：
+#   · 版本与模式常量（version.py 到 R3 再拆）
+#   · 依赖 scanner / config 的组合函数（quick_fingerprint / tree_hash* 等）
+#   · 其余全部业务实现
+# market_core 仍是唯一兼容入口：re-export 全部迁出符号，selftest 的
+# core.X 属性注入不受影响。
 
-_DEPRECATED_ENVS_USED: list = []
+# --- sys.path 引导：src 布局，未安装 pip 包时也能直接 import ---
+_SRC_DIR = Path(__file__).resolve().parent / "src"
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
-
-def _env_root(new_name: str, old_name: str) -> "str | None":
-    """新名优先；回退旧名时记录下来，待 log() 可用后统一打一次告警。"""
-    v = os.environ.get(new_name)
-    if v is not None:
-        return v
-    v = os.environ.get(old_name)
-    if v is not None:
-        _DEPRECATED_ENVS_USED.append((old_name, new_name))
-        return v
-    return None
-
-
-_WBM_MARKET_ROOT = os.environ.get("WBM_MARKET_ROOT")
-_GHPM_MARKET_ROOT = os.environ.get("GHPM_MARKET_ROOT")
-_STATE_HOME_EXPLICIT = os.environ.get("WBM_STATE_HOME")
-
-if _WBM_MARKET_ROOT is None and _GHPM_MARKET_ROOT is not None:
-    _DEPRECATED_ENVS_USED.append(("GHPM_MARKET_ROOT", "WBM_MARKET_ROOT"))
-
-MARKET_ROOT = Path(
-    _WBM_MARKET_ROOT or _GHPM_MARKET_ROOT or Path(__file__).resolve().parent
-).resolve()
-
-# legacy 仅指「旧变量名 + 未显式给 WBM_STATE_HOME」的老自检 / harness 场景：
-# 完整复刻 v2.6 布局。显式设置**新**变量 WBM_MARKET_ROOT 属于新式用法，
-# 一律走 v2.7 布局（默认分桶），不会误入 legacy。
-_LEGACY_LAYOUT = (_WBM_MARKET_ROOT is None
-                  and _GHPM_MARKET_ROOT is not None
-                  and _STATE_HOME_EXPLICIT is None)
-
-if _LEGACY_LAYOUT:
-    STATE_HOME = MARKET_ROOT
-elif _STATE_HOME_EXPLICIT:
-    STATE_HOME = Path(_STATE_HOME_EXPLICIT).resolve()
-else:
-    def _state_bucket() -> str:
-        name = re.sub(r"[^A-Za-z0-9._-]+", "-", MARKET_ROOT.name).strip("-") or "market"
-        digest = hashlib.sha256(str(MARKET_ROOT).encode("utf-8")).hexdigest()[:12]
-        return f"{name[:40]}-{digest}"
-    STATE_HOME = (Path.home() / ".workbuddy-market" / "markets" / _state_bucket()).resolve()
-
-CONFIG_PATH = MARKET_ROOT / "market.config.json"
-MANIFEST_DIR = MARKET_ROOT / ".codebuddy-plugin"
-MANIFEST_PATH = MANIFEST_DIR / "marketplace.json"
-PLUGINS_DIR = MARKET_ROOT / "plugins"
-WEB_DIR = MARKET_ROOT / "web"
-
-if _LEGACY_LAYOUT:
-    # v2.6 布局：仅存在于旧自检 / 旧 harness 环境，行为不变
-    STATE_PATH = MARKET_ROOT / ".market-state.json"
-    LOG_PATH = MARKET_ROOT / ".market-log.ndjson"
-    BACKUP_DIR = MARKET_ROOT / ".backups"
-    TRASH_DIR = MARKET_ROOT / ".trash"
-    TX_DIR = MARKET_ROOT / ".market-tx"
-    OWNERSHIP_PATH = MARKET_ROOT / ".ownership.json"
-    LOCK_PATH = MARKET_ROOT / ".market.lock"
-    LOG_LOCK_PATH = MARKET_ROOT / ".market-log.lock"
-else:
-    # v2.7 布局：运行状态离开 Git 仓库，收进 STATE_HOME
-    STATE_PATH = STATE_HOME / "state.json"
-    LOG_PATH = STATE_HOME / "logs" / "market.ndjson"
-    BACKUP_DIR = STATE_HOME / "backups"
-    TRASH_DIR = STATE_HOME / "trash"
-    TX_DIR = STATE_HOME / "tx"
-    OWNERSHIP_PATH = STATE_HOME / "ownership.json"
-    LOCK_PATH = STATE_HOME / "locks" / "market.lock"
-    LOG_LOCK_PATH = STATE_HOME / "locks" / "log.lock"
-
-WB = Path(_env_root("WBM_HOME", "GHPM_HOME") or (Path.home() / ".workbuddy")).resolve()
-SKILLS_DIR = WB / "skills"
-KNOWN_PATH = WB / "plugins" / "known_marketplaces.json"
-GITHUB_REGISTRY = WB / "github-projects.json"
-
-GHPM_PY = SKILLS_DIR / "github-project-manager" / "scripts" / "ghpm.py"
-# 注：GHPM_PY 是「可选远端任务执行器」的本机路径常量（不是环境变量），
-# R6 拆 api/ 时改名为 REMOTE_JOB_TOOL；__GHPM__ 事件前缀是外部协议适配，保留。
+from workbuddy_market.paths import (          # noqa: E402,F401
+    _DEPRECATED_ENVS_USED, _LEGACY_LAYOUT,
+    MARKET_ROOT, STATE_HOME,
+    CONFIG_PATH, MANIFEST_DIR, MANIFEST_PATH, PLUGINS_DIR, WEB_DIR,
+    STATE_PATH, LOG_PATH, BACKUP_DIR, TRASH_DIR, TX_DIR, OWNERSHIP_PATH,
+    LOCK_PATH, LOG_LOCK_PATH,
+    WB, SKILLS_DIR, KNOWN_PATH, GITHUB_REGISTRY, GHPM_PY,
+    LOG_MAX_BYTES, LOG_KEEP, BACKUP_KEEP, HASH_CHUNK_BYTES,
+)
+from workbuddy_market.errors import (         # noqa: E402,F401
+    ConfigError, FileLockTimeout, ScanError,
+)
+from workbuddy_market.fsutil import (         # noqa: E402,F401
+    _fsync_dir, atomic_write_bytes, atomic_write_text, write_text_if_changed,
+    read_json,
+)
+from workbuddy_market.hasher import (         # noqa: E402,F401
+    fingerprint_from_index, sha256_file, _same_content,
+)
+from workbuddy_market.locking import (        # noqa: E402,F401
+    FileLock, locked, _HELD, _NullLock,
+)
+from workbuddy_market.logging import (        # noqa: E402,F401
+    now_iso, _rotate_log, log, _tail_lines, tail_log,
+)
 
 OWNERSHIP_SCHEMA = 1
 TX_SCHEMA = 1
 STATE_VERSION = 2
-MARKET_VERSION = "2.7.0"             # 全项目唯一的版本号来源
-LOG_MAX_BYTES = 10 * 1024 * 1024      # 单份日志上限，超过就 rotate
-LOG_KEEP = 2                          # 保留 .1 / .2 两份历史
-BACKUP_KEEP = 20                      # known_marketplaces 备份保留份数
-HASH_CHUNK_BYTES = 1024 * 1024        # 流式 SHA-256 的默认块大小（可被配置覆盖）
+MARKET_VERSION = "2.8.0"             # 全项目唯一的版本号来源
 
 INSTALL_MODES = ("missing", "update", "force")
 
@@ -325,59 +280,7 @@ EXACT_PURPOSES = ("install", "uninstall")
 
 
 # ---------------------------------------------------------------- 小工具
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
-def _rotate_log() -> None:
-    """日志超过阈值就轮转：.ndjson → .1.ndjson → .2.ndjson（最旧的丢弃）。"""
-    try:
-        if not LOG_PATH.is_file() or LOG_PATH.stat().st_size < LOG_MAX_BYTES:
-            return
-    except OSError:
-        return
-    for i in range(LOG_KEEP, 0, -1):
-        older = LOG_PATH.with_name(f"{LOG_PATH.stem}.{i}{LOG_PATH.suffix}")
-        newer = LOG_PATH if i == 1 else LOG_PATH.with_name(f"{LOG_PATH.stem}.{i - 1}{LOG_PATH.suffix}")
-        try:
-            if newer.is_file():
-                os.replace(newer, older)
-        except OSError:
-            pass
-
-
-def log(level: str, event: str, detail: str = "", op_id: str = "") -> None:
-    """DSH 风格的事件流：一行一条 ndjson，追加写，超限自动轮转。
-
-    「轮转 + 追加」整体放在**独立的日志锁**里 —— 两个进程同时轮转会出现
-    A 把 .1 挪成 .2、B 又把 .1 挪成 .2 的竞态。不共用主锁是为了避免
-    记日志和业务操作互相等待；也刻意不参与事务（日志不该成为失败点），
-    所以拿不到锁时退化成无锁追加，宁可顺序乱一点，也不让记日志把业务打断。
-    """
-    rec = {"at": now_iso(), "level": level, "event": event, "detail": detail}
-    if op_id:
-        rec["op"] = op_id
-    line = json.dumps(rec, ensure_ascii=False) + "\n"
-
-    def _append() -> None:
-        try:
-            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)  # v2.7：logs/ 可能尚未创建
-        except OSError:
-            pass
-        with LOG_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(line)
-
-    try:
-        with FileLock(LOG_LOCK_PATH, timeout=2.0):
-            _rotate_log()
-            _append()
-    except (FileLockTimeout, OSError):
-        try:
-            _append()
-        except OSError:
-            pass
+# now_iso / _rotate_log / log 已迁 workbuddy_market.logging（v2.8 R2），此处 re-export。
 
 
 def say(msg: str = "") -> None:
@@ -455,105 +358,8 @@ def _warn_deprecated_envs() -> None:
         pass
 
 
-def _fsync_dir(path: Path) -> None:
-    """POSIX 上 fsync 目录项。
-
-    `os.replace` 之后，文件**内容**已经 fsync 过了，但「rename 这个目录项」
-    本身要不要落盘，取决于父目录有没有 fsync。断电场景下可能出现
-    「内容在、改名没生效」或者反过来。Windows 没有这个语义（也不允许
-    对目录 open），直接跳过。
-    """
-    if os.name == "nt":
-        return
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-
-
-def atomic_write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
-    """唯一临时文件 → fsync → os.replace（可选再 fsync 父目录）。
-
-    durable=True 用于「丢了会很难受」的少数文件（ownership / 注册表 / 事务日志）。
-    普通打包产物没必要付这个代价。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=path.suffix)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-        if durable:
-            _fsync_dir(path.parent)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def atomic_write_text(path: Path, text: str, *, durable: bool = False) -> None:
-    """唯一临时文件 → fsync → os.replace，避免半截 JSON。"""
-    atomic_write_bytes(path, text.encode("utf-8"), durable=durable)
-
-
-def write_text_if_changed(path: Path, text: str, *, durable: bool = False) -> bool:
-    """内容一样就不写。
-
-    原子写要走 fsync，是个真开销（实测 8 次约 80ms）。而 plugin.json /
-    README / 市场索引 / 状态文件在绝大多数同步里内容是一样的 —— 跳过它们
-    能让「什么都没变」的那次同步几乎零写盘。返回是否真的写了。
-    """
-    try:
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            return False
-    except (OSError, UnicodeDecodeError):
-        pass
-    atomic_write_text(path, text, durable=durable)
-    return True
-
-
-def read_json(path: Path, default=None, *, strict: bool = False):
-    """读 JSON。
-
-    strict=False（默认）：容错，读不到/坏了就返回 default。
-    strict=True：关键文件（配置、索引）用它，坏了直接抛，并带上
-    行列出错信息 —— 否则「配置写坏了」会表现成「配置不存在」，很难查。
-    """
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        if strict:
-            raise ConfigError(f"{path.name} 不存在（{path}）") from None
-        return default
-    except UnicodeDecodeError as exc:
-        if strict:
-            raise ConfigError(f"{path.name} 不是合法 UTF-8：{exc}") from exc
-        return default
-    except ValueError as exc:
-        if strict:
-            raise ConfigError(f"{path.name} 不是合法 JSON：{exc}") from exc
-        return default
-    except OSError as exc:
-        if strict:
-            raise ConfigError(f"{path.name} 读取失败：{exc}") from exc
-        return default
-
-
-class ConfigError(RuntimeError):
-    """配置/索引等关键文件不可用。"""
+# _fsync_dir / atomic_write_* / write_text_if_changed / read_json 已迁
+# workbuddy_market.fsutil（v2.8 R2），此处 re-export。
 
 
 # ---------------------------------------------------------------- 配置校验
@@ -844,137 +650,8 @@ def hash_chunk_bytes() -> int:
 
 
 # ---------------------------------------------------------------- 文件锁
-
-class FileLockTimeout(RuntimeError):
-    pass
-
-
-# 线程级的「本线程当前是否持有市场锁」计数。
-# FileLock._depth 是**实例**属性，没法跨实例识别重入，所以单独放一份模块级状态。
-_HELD = threading.local()
-
-
-class FileLock:
-    """跨平台排他文件锁，**可重入**（同进程同线程重复获取不会自锁）。
-
-    Windows 用 msvcrt.locking，POSIX 用 fcntl.flock。都没有时退化成
-    O_EXCL 哨兵文件。
-
-    注意：这把锁只能串行化**本工具自己**的多个进程。WorkBuddy 自身
-    不会来抢这把锁，所以对 known_marketplaces.json 仍然保留
-    「写回校验」，两者互补。
-    """
-
-    _depth = threading.local()
-
-    def __init__(self, path: Path = LOCK_PATH, timeout: float = 15.0):
-        self.path = Path(path)
-        # v2.7：锁文件可能落在全新 STATE_HOME/locks/ 下，父目录必须先建好
-        # （os.open(O_CREAT) 不会建父目录）。
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
-        self.timeout = timeout
-        self._fd = None
-
-    # ---- 平台原语
-    def _try_lock(self) -> bool:
-        fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            if os.fstat(fd).st_size == 0:
-                os.write(fd, b"\0")
-            if os.name == "nt":
-                import msvcrt
-
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(fd)
-            return False
-        self._fd = fd
-        return True
-
-    def _unlock(self) -> None:
-        if self._fd is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                os.lseek(self._fd, 0, os.SEEK_SET)
-                msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(self._fd)
-            except OSError:
-                pass
-            self._fd = None
-
-    # ---- 可重入包装
-    def __enter__(self):
-        depth = getattr(self._depth, "n", 0)
-        if depth > 0:
-            self._depth.n = depth + 1
-            return self
-        deadline = time.monotonic() + self.timeout
-        delay = 0.02
-        while True:
-            if self._try_lock():
-                self._depth.n = 1
-                _HELD.n = getattr(_HELD, "n", 0) + 1
-                return self
-            if time.monotonic() >= deadline:
-                raise FileLockTimeout(
-                    f"等锁超时（{self.timeout:.0f}s）：{self.path}\n"
-                    "可能另一次安装/同步正在跑。若确认没有，删掉这个文件再试。"
-                )
-            time.sleep(delay)
-            delay = min(delay * 1.6, 0.25)
-
-    def __exit__(self, *exc):
-        depth = getattr(self._depth, "n", 0)
-        if depth > 1:
-            self._depth.n = depth - 1
-            return False
-        self._depth.n = 0
-        _HELD.n = max(0, getattr(_HELD, "n", 0) - 1)
-        self._unlock()
-        return False
-
-
-def locked(timeout: float = 15.0):
-    """取市场锁。**同线程可重入** —— 已持锁时直接返回空锁。
-
-    为什么需要这一层：`locked()` 每次调用都会 new 一个 FileLock 实例，
-    而 `FileLock._depth` 是**实例**属性。同一个线程在已持锁的状态下再
-    `with locked():` 会拿着**另一个 fd** 去抢同一段区域，Windows 的
-    msvcrt.locking / POSIX 的 flock 都会立刻失败 —— 结果是等锁超时，
-    也就是自己把自己锁死。用一个线程级计数器绕开它。
-    """
-    if getattr(_HELD, "n", 0) > 0:
-        return _NullLock()
-    return FileLock(LOCK_PATH, timeout=timeout)
-
-
-class _NullLock:
-    """已经持锁时的占位上下文。"""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
+# FileLockTimeout / _HELD / FileLock / locked / _NullLock 已迁
+# workbuddy_market.locking（v2.8 R2），此处 re-export。
 
 
 # ---------------------------------------------------------------- 文件索引 / 指纹
@@ -991,19 +668,7 @@ def _is_reparse(st) -> bool:
     return bool(attr & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-class ScanError(OSError):
-    """目录扫描不完整。
-
-    `_scan` 原来遇到 OSError 就 `continue` —— 等于把「读失败」当成「这里没有文件」。
-    这在状态页上顶多显示不全，但在**破坏性路径**上是真危险：同步时源端少看到一个
-    文件，目标端那份就会被判成「多余」而被删掉（已用探针复现：一次读取抖动删掉了
-    市场里的 2 个文件）。所以破坏性操作一律要求 fail-closed。
-
-    继承 OSError 是刻意的：安装循环里本来就有 `except (OSError, shutil.Error)`
-    的**按 skill 计**失败处理，这样"某一个 skill 读不了"只会让那一个失败，
-    不会把整次安装全炸掉；而 sync 那条路上没人接，就会一路冒到调用方 ——
-    正是我们要的"宁可整次同步失败也不误删"。
-    """
+# ScanError 已迁 workbuddy_market.errors（v2.8 R2），此处 re-export。
 
 
 def _walk_tree(root: Path, excluded, files: dict, links: list, errors: list) -> None:
@@ -1103,20 +768,10 @@ def file_index(root: Path, excluded=None, *, on_error: str = "skip") -> dict:
     return _scan(root, excluded, on_error=on_error)[0]
 
 
-def fingerprint_from_index(index: dict, links=()) -> dict:
-    """从一份**已经扫好的**索引算指纹，不再碰磁盘。
-
-    批量状态检查和安装暂存阶段都复用这个 —— 索引已经在那儿了，
-    没必要为了算指纹再把同一棵树走一遍。
-    """
-    mtimes = [v[1] for v in index.values()]
-    return {
-        "files": len(index),
-        "bytes": sum(v[0] for v in index.values()),
-        "mtime_ns_max": max(mtimes, default=0),
-        "mtime_ns_sum": sum(mtimes),
-        "links": len(links),
-    }
+# fingerprint_from_index / sha256_file / _same_content 已迁
+# workbuddy_market.hasher（v2.8 R2），此处 re-export。
+# quick_fingerprint / tree_hash* 留在这里：它们依赖 core._scan
+# （selftest 崩溃注入点）与 hash_chunk_bytes()（读配置），R3 再迁。
 
 
 def quick_fingerprint(root: Path, excluded=None) -> dict:
@@ -1134,37 +789,6 @@ def quick_fingerprint(root: Path, excluded=None) -> dict:
     """
     files, links = _scan(root, excluded)
     return fingerprint_from_index(files, links)
-
-
-def sha256_file(path: Path, chunk_size: int | None = None) -> bytes:
-    """流式 SHA-256：内存占用 O(chunk)，不是 O(文件大小)。
-
-    strict 模式会对每个文件算哈希；某个 skill 里出现几百 MB 的大文件时，
-    read_bytes() 会直接把文件整个读进内存。分块读则与文件大小无关。
-
-    实测（64 MiB 文件）：read_bytes 峰值 64.0 MiB → 流式 2.01 MiB，
-    耗时可忽略（44.9 ms vs 45.5 ms）。
-    """
-    cs = chunk_size or HASH_CHUNK_BYTES
-    h = hashlib.sha256()
-    with Path(path).open("rb") as fh:
-        while True:
-            chunk = fh.read(cs)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.digest()
-
-
-def _same_content(a: Path, b: Path, chunk_size: int | None = None) -> bool:
-    """两个文件内容是否一致（strict 模式下用）。流式比对，不整读。"""
-    cs = chunk_size or HASH_CHUNK_BYTES
-    try:
-        if a.stat().st_size != b.stat().st_size:
-            return False
-        return sha256_file(a, cs) == sha256_file(b, cs)
-    except OSError:
-        return False
 
 
 def tree_hash_from_index(root: Path, index: dict, chunk_size: int | None = None) -> str:
@@ -2693,79 +2317,7 @@ def build_state(purpose: str = "ui") -> dict:
 
 
 # ---------------------------------------------------------------- 日志读取
-
-def _tail_lines(path: Path, want: int, block: int = 64 * 1024) -> tuple:
-    """从文件**尾部**反向分块读，凑够 want 行就停。
-
-    返回 (行列表[按时间正序, bytes], 是否读到了文件开头)。
-    没读到开头时，返回的第一行可能是被截断的半行 —— 调用方靠第二个返回值判断。
-
-    为什么不直接 `deque(fh, maxlen=N)`：那样内存是 O(N)，但**磁盘 I/O 仍然是
-    整个文件**。实测 3 份日志合计 28.6 MB 时，取最后 60 行要读满 28.6 MB、
-    耗时 1.4 秒。反向读只碰最后 64 KB，成本与日志历史长度无关。
-    """
-    try:
-        with path.open("rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            pos = fh.tell()
-            chunks, newlines = [], 0
-            while pos > 0 and newlines <= want:
-                step = min(block, pos)
-                pos -= step
-                fh.seek(pos)
-                chunk = fh.read(step)
-                chunks.append(chunk)
-                newlines += chunk.count(b"\n")
-            at_start = pos == 0
-    except OSError:
-        return [], True
-    data = b"".join(reversed(chunks))
-    lines = data.split(b"\n")
-    if lines and lines[-1] == b"":
-        lines.pop()                     # 文件以换行结尾
-    if not at_start and lines:
-        lines.pop(0)                    # 最前面那条是被截断的半行
-    if len(lines) > want:
-        lines = lines[-want:]
-    return lines, at_start
-
-
-def tail_log(limit: int = 60) -> list:
-    """最近 limit 条事件（最新在前）。
-
-    **真 tail**：从每个文件的尾部反向读，凑够就停。
-    多份轮转日志按「新 → 旧」补足，所以日志越大，读的量也不会跟着涨。
-
-    （v2.3 的实现是 `deque.extend(fh)` —— 内存省了，I/O 没省：
-    每次仍要把整份日志从头扫一遍。README 里写的「反向读」名不副实。）
-    """
-    want = max(1, int(limit))
-    files = [LOG_PATH]                  # 最新的一份
-    for i in range(1, LOG_KEEP + 1):    # 越往后越旧
-        files.append(LOG_PATH.with_name(f"{LOG_PATH.stem}.{i}{LOG_PATH.suffix}"))
-
-    buf: list = []                      # 按时间正序累积
-    for p in files:
-        if not p.is_file():
-            continue
-        need = want - len(buf)
-        if need <= 0:
-            break
-        lines, at_start = _tail_lines(p, need)
-        buf = lines + buf
-        if not at_start:
-            break                       # 这一份还没读到头，就说明已经凑够了
-
-    out = []
-    for raw in buf[-want:]:
-        text = raw.decode("utf-8", "replace").strip()
-        if not text:
-            continue
-        try:
-            out.append(json.loads(text))
-        except ValueError:
-            continue
-    return list(reversed(out))
+# _tail_lines / tail_log 已迁 workbuddy_market.logging（v2.8 R2），此处 re-export。
 
 
 # ---------------------------------------------------------------- 打开目录（白名单）

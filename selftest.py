@@ -15,6 +15,8 @@
 第 21 节   v2.5：并发压力、扫描失败 fail-closed、崩溃点矩阵
 第 22 节   v2.6：ghpm 事件解析、取消竞态、进程树终止、真并发闸门
 第 23 节   v2.7/R1：三层根目录、WBM_* 环境变量、运行时迁移（含跨卷回退）
+第 24 节   v2.8/R2：src/workbuddy_market 包拆分——符号同一性、注入点保留、
+           MARKET_ROOT fallback 盯防、包级功能冒烟
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -34,7 +36,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.7"
+SELFTEST_VERSION = "2.8"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -498,6 +500,9 @@ def run() -> None:
 
     # ============ 23. 开源重构 R1：运行时目录分离 + WBM_* 环境变量 ============
     round8()
+
+    # ============ 24. 开源重构 R2：src/workbuddy_market 基础设施包 ============
+    round9()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2506,6 +2511,107 @@ def round8():
     ck("legacy 布局下 migrate_runtime_files 恒为 no-op",
        r["mode"] == "legacy" and r["moved"] == [] and r["skipped"] == [] and r["errors"] == [],
        json.dumps(r, ensure_ascii=False))
+
+
+def round9():
+    """开源重构 R2：src/workbuddy_market/ 基础设施包（逐字搬迁，行为零变化）。
+
+    重点盯防两件事：
+    1. 兼容层 re-export 的必须**就是包里的同一个对象**（is 同一性），
+       否则 selftest 的 core.X 属性注入和 ``except core.ConfigError``
+       会静默失效（方案 §3.2 点名的最大回归风险）。
+    2. selftest 崩溃矩阵的注入点（_scan / _stage_skill / tx_* 等）
+       必须仍以 market_core 为定义模块 —— 搬走了就会假绿。
+    """
+    section("24. 开源重构 R2：src/workbuddy_market 基础设施包")
+
+    import workbuddy_market as wm
+
+    # --- 24A. 包可导入 & 符号同一性
+    ck("包可导入且子模块齐全", hasattr(wm, "paths") and hasattr(wm, "fsutil")
+       and hasattr(wm, "hasher") and hasattr(wm, "locking")
+       and hasattr(wm, "logging") and hasattr(wm, "errors"))
+    ck("ConfigError / FileLockTimeout / ScanError 同一性",
+       core.ConfigError is wm.errors.ConfigError
+       and core.FileLockTimeout is wm.errors.FileLockTimeout
+       and core.ScanError is wm.errors.ScanError)
+    ck("FileLock / locked / _NullLock / _HELD 同一性",
+       core.FileLock is wm.locking.FileLock
+       and core.locked is wm.locking.locked
+       and core._NullLock is wm.locking._NullLock)
+    ck("原子写 / JSON 读写同一性",
+       core.atomic_write_bytes is wm.fsutil.atomic_write_bytes
+       and core.atomic_write_text is wm.fsutil.atomic_write_text
+       and core.write_text_if_changed is wm.fsutil.write_text_if_changed
+       and core.read_json is wm.fsutil.read_json
+       and core._fsync_dir is wm.fsutil._fsync_dir)
+    ck("哈希叶子函数同一性",
+       core.sha256_file is wm.hasher.sha256_file
+       and core._same_content is wm.hasher._same_content
+       and core.fingerprint_from_index is wm.hasher.fingerprint_from_index)
+    ck("日志函数同一性",
+       core.log is wm.logging.log and core.now_iso is wm.logging.now_iso
+       and core._rotate_log is wm.logging._rotate_log
+       and core.tail_log is wm.logging.tail_log
+       and core._tail_lines is wm.logging._tail_lines)
+    ck("路径常量同一性",
+       core.MARKET_ROOT is wm.paths.MARKET_ROOT
+       and core.STATE_HOME is wm.paths.STATE_HOME
+       and core.LOG_PATH is wm.paths.LOG_PATH
+       and core.LOCK_PATH is wm.paths.LOCK_PATH
+       and core.GHPM_PY is wm.paths.GHPM_PY
+       and core.HASH_CHUNK_BYTES is wm.paths.HASH_CHUNK_BYTES)
+
+    # --- 24B. 崩溃矩阵注入点必须仍定义在 core（搬走 = 注入失效 = 假绿）
+    for _name in ("_scan", "_walk_tree", "quick_fingerprint", "tree_hash",
+                  "tree_hash_from_index", "save_ownership", "record_owner",
+                  "tx_begin", "tx_note_committed", "_stage_skill",
+                  "_commit_staged", "build_state"):
+        _mod = getattr(getattr(core, _name), "__module__", "?")
+        ck(f"注入点仍定义在 core：{_name}", _mod == "market_core", _mod)
+
+    # --- 24C. MARKET_ROOT 仓库根 fallback（src 布局 parents[2] 适配点，子进程盯防）：
+    # 不设任何 WBM_*/GHPM_* 环境变量时，MARKET_ROOT 必须仍是含 market.config.json
+    # 的仓库根，STATE_HOME 走默认分桶。
+    repo = Path(__file__).resolve().parent
+    env_c = {k: v for k, v in os.environ.items()
+             if not k.startswith(("WBM_", "GHPM_"))}
+    code_c = (
+        "import market_core as c;"
+        "assert (c.MARKET_ROOT / 'market.config.json').is_file(), c.MARKET_ROOT;"
+        "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
+        "assert c.MARKET_VERSION == '2.8.0', c.MARKET_VERSION;"
+        "print('ok')"
+    )
+    p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
+                       capture_output=True, text=True, timeout=120)
+    ck("24C 子进程正常退出", p.returncode == 0, p.stderr[-300:])
+    if p.returncode == 0:
+        ck("无环境变量时 MARKET_ROOT fallback 仍是仓库根（parents[2] 适配）",
+           "ok" in p.stdout, p.stdout[-120:])
+
+    # --- 24D. 包级功能冒烟（原子写 + JSON 回读 + 流式哈希 + 锁重入 + 日志落盘）
+    d = _TMP / "r2d"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "probe.json"
+    wm.fsutil.atomic_write_text(f, '{"k": 1}', durable=True)
+    ck("atomic_write_text → read_json 回读", wm.fsutil.read_json(f) == {"k": 1})
+    ck("write_text_if_changed 第二次返回 False",
+       wm.fsutil.write_text_if_changed(f, '{"k": 1}') is False)
+    blob = d / "blob.bin"
+    payload = os.urandom(1024 * 512 + 7)
+    blob.write_bytes(payload)
+    ck("sha256_file 与 hashlib 直算一致",
+       wm.hasher.sha256_file(blob) == hashlib.sha256(payload).digest())
+    try:
+        with wm.locking.locked(), wm.locking.locked():
+            pass                                    # 同线程重入不自锁（约定 16）
+        ck("包级 FileLock 可重入", True)
+    except core.FileLockTimeout as exc:
+        ck("包级 FileLock 可重入", False, str(exc)[:120])
+    wm.logging.log("info", "r2_selftest", "package smoke")
+    ck("包级 log 落盘且可 tail",
+       any(r.get("event") == "r2_selftest" for r in wm.logging.tail_log(5)))
 
 if __name__ == "__main__":
     raise SystemExit(main())
