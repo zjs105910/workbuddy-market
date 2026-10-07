@@ -22,6 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Syntax check
+        shell: bash   # Windows runner 默认 pwsh 不展开 *.py 通配符，必须显式用 bash
         run: python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
       - name: Isolated selftest (Windows only)
         if: runner.os == 'Windows'
