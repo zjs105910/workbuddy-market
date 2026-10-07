@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 本机 API 的一次性口令：由服务端在返回本页时注入。
+     第三方网页即使能访问 127.0.0.1:8777，也读不到这个值（跨源读响应被浏览器挡住），
+     所以拿它当 CSRF token 用。 -->
+<meta name="market-token" content="__MARKET_TOKEN__">
+<title>本机插件市场 · WorkBuddy</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --panel:#ffffff; --panel-2:#fbfcfe; --line:#e3e8ef;
+    --text:#1b2430; --muted:#6b7891; --faint:#95a1b6;
+    --accent:#3b6fe0; --accent-soft:#eaf0fd; --accent-line:#c3d5f8;
+    --ok:#1f9d63; --ok-soft:#e8f7ef; --ok-line:#bfe6d3;
+    --warn:#b8791a; --warn-soft:#fdf3e2; --warn-line:#f0dcb4;
+    --bad:#cf4a3f; --bad-soft:#fdeceb; --bad-line:#f3c9c6;
+    --radius:14px; --shadow:0 1px 2px rgba(21,34,56,.05), 0 6px 20px -8px rgba(21,34,56,.13);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font:14px/1.6 "Microsoft YaHei UI","Microsoft YaHei",-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 22px 80px}
+
+  header.top{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px 22px;box-shadow:var(--shadow);margin-bottom:18px;
+  }
+  .top-row{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .logo{
+    width:44px;height:44px;border-radius:12px;flex:0 0 auto;
+    background:linear-gradient(135deg,#3b6fe0,#6f8ff5);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:700;
+  }
+  h1{font-size:19px;margin:0 0 3px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:12.5px}
+  .sub code{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px}
+  .grow{flex:1 1 auto;min-width:200px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  button{
+    font:inherit;cursor:pointer;border-radius:9px;padding:8px 14px;
+    border:1px solid var(--line);background:var(--panel);color:var(--text);
+    transition:.15s;white-space:nowrap;
+  }
+  button:hover{border-color:var(--accent-line);background:var(--accent-soft)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#2f5fce;border-color:#2f5fce}
+  button.danger{border-color:var(--bad-line);color:var(--bad)}
+  button.danger:hover{background:var(--bad-soft);border-color:var(--bad)}
+  button.ghost{background:transparent;border-color:transparent;color:var(--muted);padding:8px 10px}
+  button.ghost:hover{background:var(--accent-soft);color:var(--accent)}
+  button.tiny{padding:5px 11px;font-size:12.5px;border-radius:8px}
+
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
+    padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--muted);
+  }
+  .badge.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
+  .badge.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .badge.bad{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+
+  .hint{
+    display:flex;gap:10px;align-items:flex-start;
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+    border-radius:11px;padding:12px 15px;margin-bottom:18px;font-size:13px;color:#2c4a86;
+  }
+  .hint.warn{background:var(--warn-soft);border-color:var(--warn-line);color:#7d5410}
+  .hint b{color:inherit}
+
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .search{flex:1 1 240px;position:relative;min-width:200px}
+  .search input{
+    width:100%;font:inherit;padding:9px 13px 9px 34px;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel);color:var(--text);outline:none;
+  }
+  .search input:focus{border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft)}
+  .search::before{content:"⌕";position:absolute;left:12px;top:7px;color:var(--faint);font-size:16px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{
+    font-size:12.5px;padding:5px 12px;border-radius:999px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--muted);transition:.15s;
+  }
+  .chip:hover{border-color:var(--accent-line);color:var(--accent)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  .sec-title{
+    display:flex;align-items:center;gap:9px;margin:22px 0 12px;
+    font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.6px;
+  }
+  .sec-title::after{content:"";flex:1;height:1px;background:var(--line)}
+  .sec-title .n{font-weight:400;color:var(--faint)}
+
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(340px,1fr))}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:17px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column;
+    transition:.18s;position:relative;overflow:hidden;
+  }
+  .card:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(21,34,56,.06),0 14px 30px -12px rgba(21,34,56,.2)}
+  .card::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:transparent}
+  .card.on::before{background:var(--ok)}
+  .card.part::before{background:var(--warn)}
+  .card-head{display:flex;gap:11px;align-items:flex-start;margin-bottom:9px}
+  .icon{
+    width:38px;height:38px;border-radius:10px;flex:0 0 auto;font-size:18px;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+  }
+  .card h3{margin:0;font-size:15px;line-height:1.35}
+  .meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px;font-size:11.5px;color:var(--faint)}
+  .meta span{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .desc{color:var(--muted);font-size:12.8px;margin:0 0 11px;flex:1 1 auto}
+  .kw{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+  .kw i{font-style:normal;font-size:11px;color:var(--faint);background:var(--panel-2);border-radius:4px;padding:1px 6px}
+
+  .safety{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 11px}
+  .sf{font-size:11px;border-radius:6px;padding:2px 8px;border:1px solid var(--line);background:var(--panel-2);color:var(--faint)}
+  .sf.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
+  .sf.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+
+  .card-foot{display:flex;gap:8px;align-items:center;margin-top:auto;padding-top:11px;border-top:1px dashed var(--line)}
+  .state{font-size:12.5px;color:var(--muted);margin-right:auto;display:flex;align-items:center;gap:6px}
+  .state.ok{color:var(--ok)} .state.warn{color:var(--warn)}
+  .sk{font-size:11.5px;color:var(--faint);margin-top:9px;line-height:1.9;
+      max-height:0;overflow:hidden;transition:max-height .25s}
+  .sk.open{max-height:520px;overflow:auto}
+  .sk .row{display:flex;gap:7px;align-items:center}
+  .sk code{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
+           padding:1px 5px;font-size:11px}
+  .sk .tag{font-size:10px;border-radius:4px;padding:0 5px;margin-left:auto;flex:0 0 auto}
+  .sk .tag.ok{background:var(--ok-soft);color:var(--ok)}
+  .sk .tag.warn{background:var(--warn-soft);color:var(--warn)}
+  .sk .tag.grey{color:var(--faint);border:1px solid var(--line)}
+  .toggle{font-size:11.5px;color:var(--accent);cursor:pointer;user-select:none}
+
+  .veil{
+    position:fixed;inset:0;background:rgba(20,31,48,.4);backdrop-filter:blur(2px);
+    display:none;align-items:center;justify-content:center;z-index:60;padding:20px;
+  }
+  .veil.show{display:flex}
+  .modal{
+    background:var(--panel);border-radius:16px;width:min(640px,100%);
+    box-shadow:0 20px 60px -12px rgba(15,26,44,.4);overflow:hidden;
+    border:1px solid var(--line);max-height:86vh;display:flex;flex-direction:column;
+  }
+  .modal h4{margin:0;padding:17px 20px;font-size:15px;border-bottom:1px solid var(--line);
+            display:flex;align-items:center;gap:9px;flex:0 0 auto}
+  .modal .body{padding:16px 20px;overflow:auto;flex:1 1 auto}
+  .bar{height:5px;background:var(--panel-2);flex:0 0 auto}
+  .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .35s}
+  .joblabel{padding:11px 20px 0;font-size:13px;color:var(--muted)}
+  pre.out{
+    margin:12px 20px 16px;padding:12px 14px;background:#f7f9fc;border:1px solid var(--line);
+    border-radius:10px;max-height:240px;overflow:auto;font-size:12px;line-height:1.65;
+    font-family:Consolas,"Cascadia Mono",monospace;color:#40506b;white-space:pre-wrap;word-break:break-all;
+  }
+  .modal-foot{padding:0 20px 18px;display:flex;gap:9px;justify-content:flex-end;flex:0 0 auto}
+
+  .grp{margin:0 0 14px}
+  .grp h5{margin:0 0 6px;font-size:12.5px}
+  .grp ul{margin:0;padding-left:20px;font-size:12.5px;color:var(--muted);line-height:1.85}
+  .grp ul code{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+  .note{font-size:12px;color:var(--faint);line-height:1.8;margin-top:10px}
+
+  .drawer{
+    position:fixed;right:0;top:0;bottom:0;width:min(430px,92vw);background:var(--panel);
+    border-left:1px solid var(--line);box-shadow:-12px 0 40px -18px rgba(15,26,44,.3);
+    transform:translateX(102%);transition:transform .26s;z-index:70;display:flex;flex-direction:column;
+  }
+  .drawer.show{transform:none}
+  .drawer h4{margin:0;padding:16px 18px;border-bottom:1px solid var(--line);font-size:14px;
+             display:flex;align-items:center;gap:9px}
+  .drawer .list{flex:1;overflow:auto;padding:10px 14px}
+  .ev{display:flex;gap:9px;font-size:12.2px;padding:7px 4px;border-bottom:1px dashed var(--line)}
+  .ev .t{color:var(--faint);flex:0 0 auto;font-family:Consolas,monospace;font-size:11px}
+  .ev .lv{flex:0 0 auto;font-size:10.5px;border-radius:4px;padding:1px 6px;height:18px;line-height:16px}
+  .ev .lv.info{background:var(--accent-soft);color:var(--accent)}
+  .ev .lv.warn{background:var(--warn-soft);color:var(--warn)}
+  .ev .lv.error{background:var(--bad-soft);color:var(--bad)}
+  .ev .d{color:var(--muted);word-break:break-all}
+
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translate(-50%,80px);
+    background:#1b2430;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;
+    box-shadow:0 12px 32px -8px rgba(15,26,44,.5);opacity:0;transition:.28s;z-index:90;
+    pointer-events:none;max-width:88vw;text-align:center;
+  }
+  .toast.show{transform:translate(-50%,0);opacity:1}
+  .toast.bad{background:#a83228}
+
+  .empty{text-align:center;color:var(--faint);padding:44px 20px;font-size:13.5px}
+  footer{margin-top:34px;text-align:center;color:var(--faint);font-size:11.5px;line-height:2}
+  footer code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="top-row">
+      <div class="logo">◈</div>
+      <div class="grow">
+        <h1 id="mName">本机插件市场</h1>
+        <div class="sub" id="mSub">加载中…</div>
+      </div>
+      <div class="actions">
+        <button class="ghost" id="btnTrash">回收站</button>
+        <button class="ghost" id="btnLog">事件流</button>
+        <button id="btnSync" title="从 ~/.workbuddy/skills 重新打包">重新打包</button>
+        <button class="primary" id="btnReg">注册到 WorkBuddy</button>
+      </div>
+    </div>
+    <div class="badges" id="badges"></div>
+  </header>
+
+  <div id="hint"></div>
+
+  <div class="toolbar">
+    <div class="search"><input id="q" placeholder="搜索插件、关键词、GitHub 仓库…" autocomplete="off"></div>
+    <div class="chips" id="cats"></div>
+    <div class="chips" id="filters">
+      <div class="chip on" data-f="all">全部</div>
+      <div class="chip" data-f="todo">未装完</div>
+      <div class="chip" data-f="done">已装好</div>
+    </div>
+  </div>
+
+  <div id="content"></div>
+
+  <footer>
+    本机插件市场 · <code id="fRoot"></code><br>
+    改 <code>market.config.json</code> 后点「重新打包」即可增删市场内容 ·
+    数据目录 <code id="fWb"></code>
+  </footer>
+</div>
+
+<div class="drawer" id="drawer">
+  <h4>事件流 <span style="flex:1"></span><button class="ghost tiny" id="btnLogClose">关闭</button></h4>
+  <div class="list" id="logList"></div>
+</div>
+
+<div class="veil" id="veil">
+  <div class="modal">
+    <h4><span id="jobTitle">执行中</span></h4>
+    <div class="bar"><i id="jobBar"></i></div>
+    <div class="joblabel" id="jobLabel">准备中…</div>
+    <pre class="out" id="jobOut"></pre>
+    <div class="modal-foot"><button id="jobClose" disabled>后台继续</button></div>
+  </div>
+</div>
+
+<div class="veil" id="cfm">
+  <div class="modal">
+    <h4 id="cfmTitle">确认</h4>
+    <div class="body" id="cfmBody"></div>
+    <div class="modal-foot">
+      <button id="cfmNo">取消</button>
+      <button class="primary" id="cfmYes">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let STATE = null, cat = "全部", filter = "all", jobs = {};
+
+const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","未分类":"◇"};
+const iconOf = c => ICON[c] || "◇";
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const attr = s => String(s).replace(/"/g,"&quot;");
+const fmtNum = n => n >= 10000 ? (n/10000).toFixed(1)+"w" : (n>=1000 ? (n/1000).toFixed(1)+"k" : String(n));
+const mb = b => ((b||0)/1048576).toFixed(1)+" MB";
+
+function toast(msg, bad){
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(t._t);
+  t._t = setTimeout(()=>{ t.className = "toast" + (bad?" bad":""); }, 3400);
+}
+
+// 服务端注入的一次性口令。所有 /api/* 都要带上它，
+// 否则本机任意网页都能替我们点「安装 / 卸载 / 清空回收站」。
+const MARKET_TOKEN = (document.querySelector('meta[name="market-token"]') || {}).content || "";
+
+async function api(path, body){
+  const headers = {"X-Local-Market-Token": MARKET_TOKEN};
+  if(body) headers["Content-Type"] = "application/json";
+  const opt = {headers};
+  if(body){ opt.method = "POST"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  let data = {};
+  try { data = await r.json(); } catch(e){}
+  if(r.status === 403) throw new Error("本机服务拒绝了这次请求（口令失效，刷新页面即可）");
+  if(!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+function confirmBox(title, html, yesLabel){
+  return new Promise(resolve => {
+    $("#cfmTitle").textContent = title;
+    $("#cfmBody").innerHTML = html;
+    $("#cfmYes").textContent = yesLabel || "确定";
+    $("#cfm").classList.add("show");
+    const done = v => { $("#cfm").classList.remove("show"); resolve(v); };
+    $("#cfmYes").onclick = () => done(true);
+    $("#cfmNo").onclick = () => done(false);
+    $("#cfm").onclick = e => { if(e.target.id === "cfm") done(false); };
+  });
+}
+
+/* ---------------- 渲染 ---------------- */
+function render(){
+  const st = STATE;
+  $("#mName").textContent = st.marketName || "本机插件市场";
+  $("#mSub").innerHTML = '市场 ID <code>'+st.marketId+'</code> · '+st.stats.localPlugins+
+    ' 个本机插件 / '+st.stats.localSkills+' 个 skill · '+st.stats.remoteSources+' 个 GitHub 源';
+  $("#fRoot").textContent = st.root;
+  $("#fWb").textContent = st.wbHome;
+
+  const b = [];
+  if(st.marketVersion) b.push('<span class="badge">v'+st.marketVersion+'</span>');
+  b.push(st.registered
+    ? '<span class="badge ok"><i class="dot"></i>已注册进 WorkBuddy</span>'
+    : '<span class="badge warn"><i class="dot"></i>尚未注册</span>');
+  b.push(st.manifestOk
+    ? '<span class="badge ok"><i class="dot"></i>市场索引就绪</span>'
+    : '<span class="badge bad"><i class="dot"></i>市场索引缺失</span>');
+  b.push(st.ghpmOk
+    ? '<span class="badge ok"><i class="dot"></i>ghpm 可用</span>'
+    : '<span class="badge warn"><i class="dot"></i>ghpm 不可用</span>');
+  b.push('<span class="badge">已装本机 skill '+st.stats.installedLocalSkills+'/'+st.stats.localSkills+'</span>');
+  b.push('<span class="badge">本市场托管 '+st.stats.ownedSkills+' 个</span>');
+  const vm = st.stats.verify || "auto";
+  const vmText = vm === "strict" ? "校验档位 strict（全部精确读取）"
+               : vm === "fast"   ? "校验档位 fast（状态用指纹，安装/卸载仍精确）"
+               : "校验档位 auto（状态用指纹，安装/卸载精确）";
+  b.push('<span class="badge'+(vm === "strict" ? ' warn' : '')+'">'+vmText+'</span>');
+  $("#badges").innerHTML = b.join("");
+
+  $("#btnTrash").textContent = "回收站" + (st.trash.count ? " ("+st.trash.count+")" : "");
+
+  let hint = "";
+  if(!st.registered){
+    hint = '<div class="hint">点右上角 <b>「注册到 WorkBuddy」</b>，本市场就会出现在 WorkBuddy 自带的插件面板里，'+
+           '之后在那边也能一键安装。注册只会往 <code>known_marketplaces.json</code> 加一条记录，先自动备份，可随时撤销。</div>';
+  } else if(st.stats.ownedSkills === 0 && st.stats.localSkills > 0){
+    hint = '<div class="hint">本机这 '+st.stats.localSkills+' 个 skill 都<b>不是本市场装的</b>（是别的途径装到你机器上的），'+
+           '所以卸载不会动它们 —— 这是刻意的。把一个 skill 删掉、再从市场装回来，它才归本市场托管。</div>';
+  }
+  $("#hint").innerHTML = hint;
+
+  const cats = ["全部"].concat(st.categories || []);
+  $("#cats").innerHTML = cats.map(c =>
+    '<div class="chip'+(c===cat?" on":"")+'" data-c="'+c+'">'+c+'</div>').join("");
+
+  $("#btnReg").textContent = st.registered ? "撤销注册" : "注册到 WorkBuddy";
+  $("#btnReg").className = st.registered ? "" : "primary";
+
+  renderCards();
+}
+
+function pass(p){
+  if(cat !== "全部" && p.category !== cat) return false;
+  if(filter === "done" && !p.installed) return false;
+  if(filter === "todo" && p.installed) return false;
+  const q = $("#q").value.trim().toLowerCase();
+  if(!q) return true;
+  const hay = [p.name,p.rawName,p.description,p.category,(p.keywords||[]).join(" ")].join(" ").toLowerCase();
+  return hay.includes(q);
+}
+
+function renderCards(){
+  const st = STATE;
+  const local = (st.plugins||[]).filter(pass);
+  const remote = (st.remotes||[]).filter(pass);
+  let h = "";
+  h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
+  h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
+                    : '<div class="empty">没有符合条件的本机插件</div>';
+  h += '<div class="sec-title">GitHub 收录源 <span class="n">'+remote.length+' 个 · 由 ghpm 下载安装，联网可用</span></div>';
+  h += remote.length ? '<div class="grid">'+remote.map(cardRemote).join("")+'</div>'
+                     : '<div class="empty">没有符合条件的 GitHub 源</div>';
+  $("#content").innerHTML = h;
+}
+
+function safetyBar(u){
+  const c = u.counts || {};
+  const out = [];
+  if(c.safe) out.push('<span class="sf ok">可安全卸载 '+c.safe+'</span>');
+  if(c.modified) out.push('<span class="sf warn">被改过 '+c.modified+'</span>');
+  const foreign = (c.foreign||0) + (c.other_plugin||0);
+  if(foreign) out.push('<span class="sf">非本市场 '+foreign+' · 不会动</span>');
+  if(c.absent) out.push('<span class="sf">未安装 '+c.absent+'</span>');
+  return out.length ? '<div class="safety">'+out.join("")+'</div>' : "";
+}
+
+function cardLocal(p){
+  const u = p.uninstall || {counts:{}};
+  const cls = p.installed ? "on" : (p.partial ? "part" : "");
+  const stTxt = p.installed ? '<span class="state ok">● 已装好 '+p.installedRatio+'</span>'
+              : p.partial   ? '<span class="state warn">● 装了 '+p.installedRatio+'</span>'
+              : '<span class="state">○ 未安装</span>';
+
+  const rows = (p.skillDetail||[]).map(d => {
+    const k = d.kind;
+    const tag = k === "safe" ? '<span class="tag ok">可卸载</span>'
+              : k === "modified" ? '<span class="tag warn">被改过</span>'
+              : k === "foreign" ? '<span class="tag grey">非本市场</span>'
+              : k === "other_plugin" ? '<span class="tag grey">别的插件</span>'
+              : '<span class="tag grey">未装</span>';
+    return '<div class="row"><code>'+esc(d.skill)+'</code>'+tag+'</div>';
+  }).join("");
+
+  const hasMissing = (u.counts.absent||0) > 0;
+  const hasModified = (u.counts.modified||0) > 0;
+  let btns = '<button class="tiny" data-path="'+attr(p.id)+'">定位</button>';
+  if(hasMissing){
+    btns += '<button class="tiny primary" data-install="'+p.id+'" data-mode="missing">补齐</button>';
+  } else if(hasModified){
+    btns += '<button class="tiny primary" data-install="'+p.id+'" data-mode="update">更新</button>';
+  }
+  if((u.counts.safe||0) > 0 || hasModified){
+    btns += '<button class="tiny danger" data-uninstall="'+p.id+'">卸载…</button>';
+  }
+
+  return '<div class="card '+cls+'">'+
+    '<div class="card-head">'+
+      '<div class="icon">'+iconOf(p.category)+'</div>'+
+      '<div style="flex:1"><h3>'+esc(p.name)+'</h3>'+
+        '<div class="meta"><span>'+esc(p.category)+'</span><span>v'+esc(p.version)+'</span>'+
+        '<span>'+p.skills.length+' skill</span></div></div>'+
+    '</div>'+
+    '<p class="desc">'+esc(p.description)+'</p>'+
+    (p.keywords&&p.keywords.length ? '<div class="kw">'+p.keywords.map(k=>'<i>'+esc(k)+'</i>').join("")+'</div>' : '')+
+    safetyBar(u)+
+    '<div><span class="toggle" data-toggle="'+p.id+'">▾ 看 '+p.skills.length+' 个 skill 的状态</span></div>'+
+    '<div class="sk" id="sk-'+p.id+'">'+rows+'</div>'+
+    '<div class="card-foot">'+stTxt+btns+'</div>'+
+  '</div>';
+}
+
+function cardRemote(r){
+  const stTxt = r.installed
+    ? '<span class="state ok">● 已装 '+r.installedSkills+' 个 skill · '+esc(r.installedSha)+'</span>'
+    : '<span class="state">○ 未安装</span>';
+  return '<div class="card '+(r.installed?"on":"")+'">'+
+    '<div class="card-head">'+
+      '<div class="icon">'+iconOf(r.category)+'</div>'+
+      '<div style="flex:1"><h3>'+esc(r.name)+'</h3>'+
+        '<div class="meta"><span>'+esc(r.category)+'</span>'+
+          (r.skillCount ? '<span>'+r.skillCount+' skill</span>' : '')+
+          (r.stars ? '<span>★ '+fmtNum(r.stars)+'</span>' : '')+'</div></div>'+
+    '</div>'+
+    '<p class="desc">'+esc(r.description)+'</p>'+
+    '<div class="kw"><i>'+esc(r.rawName)+'</i>'+
+      (r.keywords||[]).map(k=>'<i>'+esc(k)+'</i>').join("")+'</div>'+
+    '<div class="card-foot">'+stTxt+
+      (r.installed
+        ? '<button class="tiny" data-rupdate="'+attr(r.rawName)+'">检查更新</button>'
+        : '<button class="tiny primary" data-radd="'+attr(r.rawName)+'">一键安装</button>')+
+    '</div></div>';
+}
+
+/* ---------------- 交互 ---------------- */
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-path]");
+  if(!t) return;
+
+  if(t.dataset.c !== undefined && t.classList.contains("chip")){ cat = t.dataset.c; render(); return; }
+  if(t.dataset.f){
+    filter = t.dataset.f;
+    document.querySelectorAll("#filters .chip").forEach(c=>c.classList.toggle("on", c.dataset.f===filter));
+    renderCards(); return;
+  }
+  if(t.dataset.toggle){
+    const el = $("#sk-"+t.dataset.toggle);
+    const open = el.classList.toggle("open");
+    t.textContent = open ? "▴ 收起" : "▾ 看全部 skill 的状态";
+    return;
+  }
+
+  if(t.dataset.install){
+    const id = t.dataset.install, mode = t.dataset.mode || "missing";
+    if(mode === "update"){
+      const ok = await confirmBox("更新「"+id+"」？",
+        '<div class="note">会覆盖本市场装过、但之后被改动过的那几个 skill。<br>'+
+        '旧的那份先移进回收站，可以恢复。<br>'+
+        '<b>不是本市场装的 skill 一律不碰。</b></div>', "更新");
+      if(!ok) return;
+    }
+    t.disabled = true;
+    try{
+      const r = await api("/api/install", {id, mode});
+      const parts = [];
+      if(r.added.length) parts.push("新增 "+r.added.length+" 个");
+      if(r.updated.length) parts.push("更新 "+r.updated.length+" 个");
+      if(r.skipped.length) parts.push("跳过 "+r.skipped.length+" 个已有");
+      if(r.foreign.length) parts.push("保留 "+r.foreign.length+" 个非本市场");
+      if(r.failed.length) parts.push("失败 "+r.failed.length+" 个");
+      toast(parts.length ? parts.join("，") : "没有需要处理的 skill", r.failed.length > 0);
+      await refresh();
+    }catch(err){ toast(err.message, true); t.disabled = false; }
+    return;
+  }
+
+  if(t.dataset.uninstall){
+    const id = t.dataset.uninstall;
+    let plan;
+    try { plan = await api("/api/uninstall", {id, dryRun:true}); }
+    catch(err){ return toast(err.message, true); }
+
+    const groups = [];
+    if(plan.removable.length) groups.push(
+      '<div class="grp"><h5>将移入回收站（'+plan.removable.length+'）</h5><ul>'+
+      plan.removable.map(s=>'<li><code>'+esc(s)+'</code></li>').join("")+'</ul></div>');
+    if(plan.modified.length) groups.push(
+      '<div class="grp"><h5>被改过，将保留（'+plan.modified.length+'）</h5><ul>'+
+      plan.modified.map(s=>'<li><code>'+esc(s)+'</code></li>').join("")+'</ul></div>');
+    if(plan.untouched.length) groups.push(
+      '<div class="grp"><h5>不是本市场装的，不会动（'+plan.untouched.length+'）</h5><ul>'+
+      plan.untouched.map(s=>'<li><code>'+esc(s)+'</code></li>').join("")+'</ul></div>');
+
+    let body = groups.join("");
+    if(!plan.removable.length){
+      body += '<div class="note">这个插件当前没有「可安全卸载」的 skill，卸载不会有任何改动。</div>';
+    }
+    body += '<div class="note">移走的东西都在市场的 <code>.trash</code> 里，可以手工恢复。</div>';
+    const ok = await confirmBox("卸载「"+id+"」", body, "卸载");
+    if(!ok) return;
+    t.disabled = true;
+    try{
+      const r = await api("/api/uninstall", {id});
+      toast(r.moved.length ? ("已移入回收站："+r.moved.join("、")) : "没有需要移除的 skill");
+      await refresh();
+    }catch(err){ toast(err.message, true); t.disabled = false; }
+    return;
+  }
+
+  if(t.dataset.radd || t.dataset.rupdate){
+    const repo = t.dataset.radd || t.dataset.rupdate;
+    const isAdd = !!t.dataset.radd;
+    if(isAdd){
+      const ok = await confirmBox("从 GitHub 安装 "+repo+"？",
+        '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>'+
+        '安装走 ghpm，自带事务与回滚。</div>', "安装");
+      if(!ok) return;
+    }
+    try{
+      const r = await api(isAdd ? "/api/remote/add" : "/api/remote/update", {repo});
+      watchJob(r.jobId, (isAdd?"安装 ":"更新 ")+repo);
+    }catch(err){ toast(err.message, true); }
+    return;
+  }
+
+  if(t.dataset.path){
+    try{ await api("/api/open/path", {target: "root"}); }catch(err){ toast(err.message, true); }
+    return;
+  }
+});
+
+document.addEventListener("input", (e) => { if(e.target.id === "q") renderCards(); });
+
+$("#btnSync").onclick = async (e) => {
+  e.target.disabled = true;
+  try{
+    const r = (await api("/api/sync", {})).report;
+    let msg = "已重新打包："+r.plugins+" 个插件 / "+r.skills+" 个 skill";
+    msg += r.copiedFiles ? ("，更新 "+r.copiedFiles+" 个文件") : "，内容无变化";
+    if(r.skippedLinks){
+      msg += "。注意：跳过了 "+r.skippedLinks+" 个符号链接 / junction（不跟随）";
+    }
+    if(r.missing && r.missing.length){
+      msg += "（"+r.missing.length+" 个源不在本机，沿用市场里的历史副本）";
+    }
+    toast(msg);
+    await refresh();
+  }catch(err){ toast(err.message, true); }
+  finally{ e.target.disabled = false; }
+};
+
+$("#btnReg").onclick = async (e) => {
+  e.target.disabled = true;
+  try{
+    if(STATE.registered){
+      const ok = await confirmBox("撤销注册？",
+        '<div class="note">只是把本市场从 <code>known_marketplaces.json</code> 里移除，'+
+        '插件文件和已装的 skill 都不动。</div>', "撤销注册");
+      if(!ok){ e.target.disabled = false; return; }
+      await api("/api/unregister", {});
+      toast("已撤销注册");
+    } else {
+      const r = await api("/api/register", {});
+      toast(r.changed ? "注册完成 —— 打开 WorkBuddy 的插件面板就能看到本市场" : "已是注册状态");
+    }
+    await refresh();
+  }catch(err){ toast(err.message, true); }
+  finally{ e.target.disabled = false; }
+};
+
+$("#btnTrash").onclick = async () => {
+  const t = STATE.trash, pol = t.policy || {};
+  const html = '<div class="grp"><h5>当前回收站</h5><ul>'+
+    '<li>共 '+t.count+' 项，'+mb(t.bytes)+'</li>'+
+    '<li>自动清理阈值：超过 '+(pol.max_age_days||0)+' 天，或总量超过 '+mb(pol.max_bytes||0)+'</li>'+
+    '</ul></div>'+
+    '<div class="note">回收站里是卸载 / 覆盖时移走的 skill 目录，可以手工恢复。<br>'+
+    '位置：<code>'+esc(STATE.root)+'\\.trash</code><br>'+
+    '清空只影响这个目录，不会碰 <code>~/.workbuddy/skills</code>。</div>';
+  const ok = await confirmBox("回收站", html, "清空回收站");
+  if(!ok) return;
+  try{
+    const r = await api("/api/trash/purge", {});
+    toast("已清空回收站，释放 "+mb(r.result.freed));
+    await refresh();
+  }catch(err){ toast(err.message, true); }
+};
+
+$("#btnLog").onclick = async () => { $("#drawer").classList.add("show"); await loadLog(); };
+$("#btnLogClose").onclick = () => $("#drawer").classList.remove("show");
+
+async function loadLog(){
+  try{
+    const r = await api("/api/log");
+    const items = r.items || [];
+    $("#logList").innerHTML = items.length ? items.map(ev =>
+      '<div class="ev"><span class="t">'+(ev.at||"").slice(11,19)+'</span>'+
+      '<span class="lv '+esc(ev.level||"info")+'">'+esc(ev.level||"info")+'</span>'+
+      '<span class="d">'+esc(ev.event||"")+(ev.detail?' · '+esc(ev.detail):'')+'</span></div>'
+    ).join("") : '<div class="empty">暂无事件</div>';
+  }catch(err){ toast(err.message, true); }
+}
+
+function watchJob(jid, title){
+  $("#veil").classList.add("show");
+  $("#jobTitle").textContent = title;
+  $("#jobBar").style.width = "0%";
+  $("#jobBar").style.background = "var(--accent)";
+  $("#jobLabel").textContent = "准备中…";
+  $("#jobOut").textContent = "";
+  $("#jobClose").disabled = true;
+  $("#jobClose").onclick = () => { $("#veil").classList.remove("show"); refresh(); };
+
+  jobs[jid] = setInterval(async () => {
+    let j;
+    try{ j = await api("/api/job/"+jid); }catch(e){ return; }
+    $("#jobBar").style.width = (j.percent||0)+"%";
+    $("#jobLabel").textContent = j.label || "";
+    $("#jobOut").textContent = (j.lines||[]).slice(-60).join("\n");
+    $("#jobOut").scrollTop = $("#jobOut").scrollHeight;
+    if(j.status === "done"){
+      clearInterval(jobs[jid]); delete jobs[jid];
+      $("#jobClose").disabled = false;
+      $("#jobLabel").textContent = (j.ok ? "✓ " : "✗ ") + (j.label || "");
+      $("#jobBar").style.width = "100%";
+      $("#jobBar").style.background = j.ok ? "var(--ok)" : "var(--bad)";
+      toast(j.ok ? (title+" 完成") : (title+" 失败，看输出"), !j.ok);
+      await refresh();
+    }
+  }, 700);
+}
+
+async function refresh(){
+  try{ STATE = await api("/api/state"); render(); }
+  catch(err){ toast("读取状态失败："+err.message, true); }
+}
+
+refresh();
+setInterval(() => { if($("#drawer").classList.contains("show")) loadLog(); }, 5000);
+</script>
+</body>
+</html>

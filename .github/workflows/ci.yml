@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # 跨 OS 跑语法检查：msvcrt/fcntl、junction/symlink、进程树击杀
+        # 都是本项目历史上踩过平台差异的点（linux 侧自检尚未完全适配，
+        # 故 selftest 目前仅在 windows 上作为硬门槛）。
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Syntax check
+        run: python -m py_compile market_core.py market_server.py launcher.py selftest.py
+      - name: Isolated selftest (Windows only)
+        if: runner.os == 'Windows'
+        run: python selftest.py
