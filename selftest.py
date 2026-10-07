@@ -21,6 +21,9 @@
            命名空间迁移（_walk_tree 跟随 scanner）、功能冒烟
 第 26 节   v2.10：GitHub 动态目录——catalog 模块（缓存 / TTL / 失败保旧值 /
            坏缓存容错）、全网搜索解析、服务端三接口端到端（假接缝，零网络）
+第 27 节   v2.11：社区注册表——registry 模块（解析 / 三路兜底 / TTL 缓存 /
+           source 如实标注）、build_registry 的 refresh_entry、
+           GET /api/registry 端到端、Windows 假空闲端口修复盯防
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -40,7 +43,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.10"
+SELFTEST_VERSION = "2.11"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -514,6 +517,9 @@ def run() -> None:
 
     # ============ 26. v2.10：GitHub 动态目录（catalog + 搜索 + 服务接口） ============
     round11()
+
+    # ============ 27. v2.11：社区注册表（registry + CI 重建 + 端口修复） ============
+    round12()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2606,7 +2612,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.10.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.11.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2687,9 +2693,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.10.0"
-       and core.MARKET_VERSION == "2.10.0"
-       and SELFTEST_VERSION == "2.10", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.11.0"
+       and core.MARKET_VERSION == "2.11.0"
+       and SELFTEST_VERSION == "2.11", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -2980,6 +2986,286 @@ def round11():
 
     core.CATALOG_PATH.unlink(missing_ok=True)     # 收尾：留干净环境
     ck("收尾：目录缓存已清理", not core.CATALOG_PATH.exists())
+
+
+def round12():
+    """v2.11：社区注册表 + Windows 假空闲端口修复。
+
+    三条盯防线：
+    1. registry 是**不可信状态文件**：坏 JSON / 坏 schema 当不存在，
+       坏条目跳过，绝不让社区数据炸掉状态页（与 catalog 同一口径）；
+    2. 「source 必须如实标注」：在线三路（env / raw / api）→ 缓存 →
+       本地副本，逐级兜底时 source 跟着变 —— 绝不把兜底数据假装成
+       「刚从 GitHub 拉的」；
+    3. **Windows 假空闲端口**：探测 socket 设 SO_REUSEADDR 时，Windows
+       允许绑定别的进程正监听的端口（同机多进程同绑 8777，2026-10-07
+       实测复现）。真起服务后 _find_port(p) 绝不允许再返回 p。
+    """
+    section("27. v2.11：社区注册表（registry 模块 + CI 重建 + 端口修复）")
+
+    import workbuddy_market.registry as reg
+
+    # --- 27A. 符号同一性（re-export 必须就是包里的同一对象）
+    ck("★ registry 符号同一性",
+       core.get_registry is reg.get_registry
+       and core.parse_registry is reg.parse_registry
+       and core.load_registry_cache is reg.load_registry_cache
+       and core.registry_routes is reg.registry_routes
+       and core._registry_http_get is reg._registry_http_get)
+    ck("registry 路径常量与内核一致",
+       reg.REGISTRY_PATH == core.REGISTRY_PATH
+       and core.registry_path() == core.REGISTRY_PATH,
+       str(core.REGISTRY_PATH))
+    ck("本地副本路径在仓库根 registry/ 下",
+       core.local_registry_file() == core.MARKET_ROOT / "registry" / "plugins.json",
+       str(core.local_registry_file()))
+
+    # --- 27B. parse_registry：边界只留一处，坏条目跳过不拖垮整份
+    doc = {"schema": 1, "updatedAt": "2026-10-07", "plugins": [
+        {"repo": "owner/repo", "displayName": "A", "category": "官方",
+         "description": "d", "keywords": ["k1", "  ", 3],
+         "stars": 12, "pushedAt": "2026-10-06", "latestSha": "abc"},
+        {"repo": "OWNER/REPO"},                      # 大小写重复 → 跳过
+        {"repo": "bad-repo"},                        # 非法 repo → 跳过
+        {"repo": 42},                                # 非字符串 → 跳过
+        "not-a-dict",                                # 畸形条目 → 跳过
+        {"repo": "another/one", "stars": "bad",      # 坏动态字段当没有
+         "keywords": "not-a-list"},
+    ]}
+    parsed = core.parse_registry(doc)
+    ck("★ parse_registry 跳过坏条目并去重",
+       [e["repo"] for e in parsed["plugins"]] == ["owner/repo", "another/one"]
+       and parsed["skipped"] == 4, f"skipped={parsed['skipped']}")
+    e0 = parsed["plugins"][0]
+    ck("动态字段类型守卫 + 关键词清洗",
+       e0["stars"] == 12 and e0["pushedAt"] == "2026-10-06"
+       and e0["keywords"] == ["k1"], str(e0)[:120])
+    ck("坏动态字段 / 坏 keywords 不进条目",
+       parsed["plugins"][1].get("stars") is None
+       and parsed["plugins"][1]["keywords"] == []
+       and parsed["plugins"][1]["category"] == "未分类")
+    for bad_doc, why in [({"schema": 2, "plugins": []}, "schema 不认识"),
+                         ({"schema": 1}, "缺 plugins"),
+                         ({"schema": 1, "plugins": {}}, "plugins 非数组"),
+                         ([1, 2], "顶层非对象"),
+                         ("{这不是 json", "非 JSON 文本")]:
+        try:
+            core.parse_registry(bad_doc)
+            ck(f"parse_registry 拒绝{why}", False)
+        except core.ConfigError:
+            ck(f"parse_registry 拒绝{why}", True)
+
+    # --- 27C. 拉取路线与三级兜底（假接缝，零网络）
+    good_doc = {"schema": 1, "updatedAt": "2026-10-07",
+                "plugins": [{"repo": "owner/repo", "displayName": "A"}]}
+    good_bytes = json.dumps(good_doc).encode("utf-8")
+    real_get = reg._registry_http_get
+    core.REGISTRY_PATH.unlink(missing_ok=True)
+    try:
+        # 27C-1: 首选路线（raw）成功 → source 如实、缓存落盘
+        def ok_raw(url, headers=None, timeout=None):
+            if "raw.githubusercontent.com" in url:
+                return good_bytes
+            raise OSError("这条路线不该被走到")
+
+        reg._registry_http_get = ok_raw
+        r1 = core.get_registry(force=True, now=1000.0)
+        ck("首选路线成功 → source=raw 且 fetched",
+           r1["fetched"] is True and r1["source"] == "raw.githubusercontent.com"
+           and len(r1["plugins"]) == 1, str(r1.get("source")))
+        ck("注册表缓存落盘且可读回",
+           core.load_registry_cache()["plugins"][0]["repo"] == "owner/repo")
+
+        # 27C-2: raw 挂 → api 路线接住（且必须带 raw accept 头，否则拿到的是
+        # contents 接口的 base64 JSON 信封，解析必炸）
+        seen_headers = []
+
+        def raw_down(url, headers=None, timeout=None):
+            if "raw.githubusercontent.com" in url:
+                raise OSError("raw 超时（国内常态）")
+            if "api.github.com" in url:
+                seen_headers.append(dict(headers or {}))
+            return good_bytes
+
+        reg._registry_http_get = raw_down
+        r2 = core.get_registry(force=True, now=2000.0)
+        ck("★ raw 挂 → api.github.com 接住且带 raw 头",
+           r2["source"] == "api.github.com" and r2["fetched"] is True
+           and seen_headers and seen_headers[0].get("Accept")
+           == "application/vnd.github.raw",
+           f"{r2.get('source')} headers={seen_headers[:1]}")
+
+        # 27C-3: 全挂 + 缓存还在 → 退缓存（stale 与否按 TTL 如实）
+        def all_down(url, headers=None, timeout=None):
+            raise OSError(f"网络全挂：{url}")
+
+        reg._registry_http_get = all_down
+        r3 = core.get_registry(force=True, now=3000.0)   # force 拉不动 → 退缓存
+        ck("★ 在线全挂 → 退回缓存且 source 如实",
+           r3["source"] == "cache" and r3["fetched"] is False
+           and r3["stale"] is False and len(r3["plugins"]) == 1,
+           f"{r3.get('source')} stale={r3.get('stale')}")
+        r3b = core.get_registry(force=True, now=3000.0 + core.REGISTRY_TTL + 1)
+        ck("过期缓存的 stale 标记如实",
+           r3b["stale"] is True and r3b["source"] == "cache")
+
+        # 27C-4: 全挂 + 无缓存 → 本地副本兜底
+        core.REGISTRY_PATH.unlink(missing_ok=True)
+        local_f = core.local_registry_file()
+        local_f.parent.mkdir(parents=True, exist_ok=True)
+        local_f.write_text(json.dumps(good_doc), encoding="utf-8")
+        try:
+            r4 = core.get_registry(force=True, now=4000.0)
+            ck("★ 缓存也没有 → 本地副本兜底",
+               r4["source"] == "local-repo" and r4["stale"] is True
+               and len(r4["plugins"]) == 1, str(r4.get("source")))
+        finally:
+            import shutil as _sh
+            _sh.rmtree(local_f.parent, ignore_errors=True)
+
+        # 27C-5: WBM_REGISTRY_URL 环境变量成为第一优先路线
+        os.environ["WBM_REGISTRY_URL"] = "https://mirror.example/reg.json"
+        try:
+            routes = core.registry_routes()
+            ck("env 覆盖插入为第一路线",
+               routes[0][0] == "env-override"
+               and routes[0][1] == "https://mirror.example/reg.json",
+               str(routes[0][:2]))
+
+            def only_env(url, headers=None, timeout=None):
+                if url == "https://mirror.example/reg.json":
+                    return good_bytes
+                raise OSError("env 之后的路线不应被走到")
+
+            reg._registry_http_get = only_env
+            r5 = core.get_registry(force=True, now=5000.0)
+            ck("★ env 路线命中 → source 如实标注",
+               r5["source"] == "env-override" and r5["fetched"] is True,
+               str(r5.get("source")))
+        finally:
+            os.environ.pop("WBM_REGISTRY_URL", None)
+    finally:
+        reg._registry_http_get = real_get
+        core.REGISTRY_PATH.unlink(missing_ok=True)
+
+    # --- 27D. 缓存 TTL 语义：force=False 全新鲜时零联网
+    calls = {"n": 0}
+
+    def count_get(url, headers=None, timeout=None):
+        calls["n"] += 1
+        return good_bytes
+
+    reg._registry_http_get = count_get
+    try:
+        core.get_registry(force=True, now=6000.0)          # 先填缓存
+        calls["n"] = 0
+        r6 = core.get_registry(force=False, now=6100.0)
+        ck("新鲜缓存内零联网（force=False）",
+           r6["fetched"] is False and r6["source"] == "cache" and calls["n"] == 0,
+           f"calls={calls['n']}")
+        r7 = core.get_registry(force=True, now=6200.0)
+        ck("force=True 无视 TTL 重新拉取", r7["fetched"] is True and calls["n"] == 1)
+    finally:
+        reg._registry_http_get = real_get
+        core.REGISTRY_PATH.unlink(missing_ok=True)
+
+    # --- 27E. build_registry.refresh_entry（CI 与本机共用的纯函数）
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_registry", str(Path(__file__).resolve().parent / "scripts" / "build_registry.py"))
+    breg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(breg)
+    entry = {"repo": "owner/repo", "displayName": "A", "stars": 1,
+             "pushedAt": "", "latestSha": "", "refreshedAt": ""}
+    def fake_fetch(repo):
+        return {"full_name": repo, "stargazers_count": 99,
+                "pushed_at": "2026-10-07T08:09:10Z"}
+    def fake_ref(repo):
+        return [{"sha": "0123456789abcdef" * 2 + "0123"}]
+    new_e = breg.refresh_entry(entry, fake_fetch, ref_fetch=fake_ref)
+    ck("refresh_entry 更新动态字段且不改原对象",
+       new_e["stars"] == 99 and new_e["pushedAt"] == "2026-10-07"
+       and new_e["latestSha"] == "0123456789abcdef" * 2 + "0123"
+       and entry["stars"] == 1 and entry["latestSha"] == "")
+    ck("refresh_entry 不覆盖静态字段",
+       new_e["displayName"] == "A" and new_e["repo"] == "owner/repo")
+    def bad_fetch(repo):
+        return {"id": 1}
+    try:
+        breg.refresh_entry(entry, bad_fetch)
+        ck("refresh_entry 拒绝缺 full_name 的 payload", False)
+    except ValueError:
+        ck("refresh_entry 拒绝缺 full_name 的 payload", True)
+
+    # --- 27F. GET /api/registry 端到端（真起服务，假接缝）
+    import market_server as srv  # noqa: E402
+
+    TOKR = "selftest-registry-token"
+    httpd3 = srv.make_server(0, token=TOKR)
+    PORT3 = httpd3.server_address[1]
+    threading.Thread(target=httpd3.serve_forever, daemon=True).start()
+
+    def hit3(path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT3, timeout=10)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        try:
+            return r.status, json.loads(raw)
+        except Exception:
+            return r.status, raw.decode("utf-8", "replace")
+
+    AUTHR = {"X-Local-Market-Token": TOKR}
+    try:
+        st, _ = hit3("/api/registry")
+        ck("GET /api/registry 无口令 → 403", st == 403, str(st))
+        st, _ = hit3("/api/registry", {"X-Local-Market-Token": TOKR,
+                                       "Origin": "http://evil.example"})
+        ck("GET /api/registry 跨源 → 403", st == 403, str(st))
+
+        reg._registry_http_get = count_get      # 端到端也用假接缝，保持零网络
+        core.REGISTRY_PATH.unlink(missing_ok=True)
+        try:
+            st, js = hit3("/api/registry", AUTHR)
+            ck("GET /api/registry 形状（plugins/installedRepos/ttlHours）",
+               st == 200 and js.get("ok") is True
+               and isinstance(js.get("plugins"), list) and len(js["plugins"]) == 1
+               and "installedRepos" in js and js.get("ttlHours") == 6,
+               f"{st} {str(js)[:90]}")
+            ck("★ 接口如实标注拉取来源",
+               js.get("source") == "raw.githubusercontent.com"
+               and js.get("stale") is False, str(js.get("source")))
+            srv._registry_mem.update(at=0.0, force=None, data=None)
+
+            st, js = hit3("/api/registry?force=1", AUTHR)
+            ck("?force=1 强制在线拉取", st == 200 and js.get("ok")
+               and js.get("source") == "raw.githubusercontent.com",
+               str(js.get("source")))
+        finally:
+            reg._registry_http_get = real_get
+            srv._registry_mem.update(at=0.0, force=None, data=None)
+            core.REGISTRY_PATH.unlink(missing_ok=True)
+    finally:
+        httpd3.shutdown()
+        httpd3.server_close()
+
+    # --- 27G. ★ Windows 假空闲端口修复盯防（本轮的起点 bug）
+    httpd4 = srv.make_server(0)                     # 真起监听（随机端口）
+    busy = httpd4.server_address[1]
+    try:
+        threading.Thread(target=httpd4.serve_forever, daemon=True).start()
+        time.sleep(0.05)
+        picked = srv._find_port(busy)
+        ck("★ 已被监听的端口绝不允许再被探测选中（v2.10 同绑 8777 复现点）",
+           picked != busy and busy < picked <= busy + 20,
+           f"busy={busy} picked={picked}")
+    finally:
+        httpd4.shutdown()
+        httpd4.server_close()
+
+    core.REGISTRY_PATH.unlink(missing_ok=True)      # 收尾：留干净环境
+    ck("收尾：注册表缓存已清理", not core.REGISTRY_PATH.exists())
 
 if __name__ == "__main__":
     raise SystemExit(main())

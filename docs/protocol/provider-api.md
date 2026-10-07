@@ -79,3 +79,10 @@ class PluginProvider:
 Registry 就是一个静态 GitHub 仓库（registry/index.json + plugins/*.json），
 Provider 实现里最薄的一种：`list/metadata` 读 index，`fetch` 交给 GitHub
 raw/ghpm。不需要服务器，先有生态再有基础设施。
+
+> **v2.11 状态注记**：本节已落地最小实现——注册表就是本仓库的
+> `registry/plugins.json`（单一文件，暂不拆 plugins/*.json），市场端
+> `src/workbuddy_market/registry.py` 按 6h TTL 拉取（raw → api.github.com
+> → 本地副本三级路线），动态字段由 `.github/workflows/registry.yml`
+> 每日重建。Provider 抽象（§2）仍按原计划排在 R4 之后；「fetch 委托
+> ghpm、易变数据不写回配置」两个原则与本节一致。

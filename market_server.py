@@ -38,6 +38,16 @@ v2.10 GitHub 动态目录：
     就自动刷新（按条目 TTL 逐个判断，全新鲜时零网络）；失败保旧值、
     下个检查点重试。WBM_CATALOG_OFF=1 可关。
   · make_server() **不**起这个线程 —— 自检的端到端测试必须零网络依赖。
+
+v2.11 社区注册表 + 端口修复：
+  GET  /api/registry          社区注册表（本仓库 registry/plugins.json，
+                              每日 CI 重建动态字段；600s 内存缓存 + single-flight，
+                              ?force=1 强制在线拉取）。响应带 installedRepos
+                              （本机 ghpm 已装的 repo → 摘要）。
+  · POST /api/catalog/refresh 现在同时刷新 catalog 与 registry。
+  · _find_port 的探测 socket 在 Windows 改用 SO_EXCLUSIVEADDRUSE：
+    原来的 SO_REUSEADDR 允许绑定「别的进程正监听着」的端口，同机多个
+    市场进程同时绑 8777、请求随机打到旧进程（2026-10-07 实测复现）。
 """
 from __future__ import annotations
 
@@ -558,7 +568,7 @@ def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT) -> list:
 
 
 def _catalog_refresh_job():
-    """手动刷新目录。与 _remote_job 同一套闸门与任务表，并发满员返回 None。"""
+    """手动刷新目录 + 社区注册表。与 _remote_job 同一套闸门与任务表，并发满员返回 None。"""
     if not _RUNNER.acquire():
         core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝刷新目录")
         return None
@@ -575,11 +585,20 @@ def _catalog_refresh_job():
                            f" · 跳过 {rep['skipped']} 个（数据还新鲜）")
             for repo, err in (rep["catalog"].get("errors") or {}).items():
                 _job_push(jid, f"! {repo}: {err}")
+            # v2.11：目录顺手把社区注册表也刷了（同一个「联网取新数据」动作）
+            reg_ok, reg_note = True, ""
+            try:
+                reg = core.get_registry(force=True)
+                reg_note = (f"社区注册表 {len(reg['plugins'])} 条 · 来源 {reg['source']}")
+                _job_push(jid, reg_note)
+            except Exception as exc:  # noqa: BLE001 —— 注册表挂了不算目录刷新失败
+                reg_ok, reg_note = False, ""
+                _job_push(jid, f"! 社区注册表刷新失败：{exc}")
             ok = rep["failed"] == 0
             _job_finish(jid, ok, ("完成" if ok else "部分失败") + " · GitHub 目录")
             core.log("info" if ok else "warn", "catalog",
                      f"手动刷新：fetched={rep['fetched']} failed={rep['failed']}"
-                     f" skipped={rep['skipped']}")
+                     f" skipped={rep['skipped']} registry={reg_note}")
         except Exception as exc:  # noqa: BLE001 —— 任务里的一切都转成失败展示
             _job_push(jid, f"✗ 刷新失败：{exc}")
             _job_finish(jid, False, "失败 · GitHub 目录")
@@ -617,8 +636,50 @@ def catalog_auto_loop(stop: threading.Event) -> None:
                          f"failed={rep['failed']} skipped={rep['skipped']}")
         except Exception as exc:  # noqa: BLE001 —— 网络问题不该弄死常驻线程
             core.log("warn", "catalog", f"自动刷新失败（下个检查点重试）：{exc}")
+        try:
+            # v2.11：注册表同样按自己的 TTL（6h）走，过期才联网。
+            reg = core.get_registry(force=False)
+            if reg.get("fetched"):
+                core.log("info", "registry",
+                         f"社区注册表已更新：{len(reg['plugins'])} 条（{reg['source']}）")
+        except Exception as exc:
+            core.log("warn", "registry", f"社区注册表刷新失败（下个检查点重试）：{exc}")
         if stop.wait(CATALOG_CHECK_INTERVAL):
             return
+
+
+# ---------------------------------------------------------------- 社区注册表（v2.11）
+
+REGISTRY_MEM_TTL = 600.0           # /api/registry 的进程内缓存（秒）
+
+_registry_mem_lock = threading.Lock()
+_registry_mem: dict = {"at": 0.0, "force": None, "data": None}
+
+
+def registry_data(force: bool = False) -> dict:
+    """GET /api/registry 的数据层：内存缓存 + single-flight + 已装摘要。
+
+    内存 600 秒；core.get_registry 自己还有 6 小时的盘上缓存，两层各管各的
+    （内存层挡轮询，盘上层挡重启）。force=True 连内存缓存一起跳过，
+    但 single-flight 仍然生效 —— 并发的 force 请求共享同一次在线拉取。
+    """
+    with _registry_mem_lock:
+        if (not force and _registry_mem["data"] is not None
+                and _registry_mem["force"] is False
+                and time.time() - _registry_mem["at"] < REGISTRY_MEM_TTL):
+            return _registry_mem["data"]
+    data = _flight.run(("registry", force), lambda: _registry_fresh(force))
+    with _registry_mem_lock:
+        _registry_mem.update(at=time.time(), force=force, data=data)
+    return data
+
+
+def _registry_fresh(force: bool) -> dict:
+    reg = core.get_registry(force=force)
+    reg["installedRepos"] = core.installed_repos()
+    reg["ttlHours"] = int(core.REGISTRY_TTL // 3600)
+    reg["ok"] = True
+    return reg
 
 
 # ---------------------------------------------------------------- HTTP
@@ -769,6 +830,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False,
                                        "error": f"GitHub 搜索失败：{exc}"}, 502)
                 return self._json({"ok": True, "query": q, "items": items})
+            if path == "/api/registry":
+                force = parse_qs(urlparse(self.path).query).get("force") == ["1"]
+                try:
+                    reg = registry_data(force=force)
+                except Exception as exc:  # 注册表三路全挂且无兜底时给 502，不白屏
+                    core.log("warn", "api", f"社区注册表拉取失败：{exc}")
+                    return self._json({"ok": False,
+                                       "error": f"社区注册表拉取失败：{exc}"}, 502)
+                return self._json(reg)
             if path.startswith("/api/job/"):
                 jid = path.rsplit("/", 1)[-1]
                 reap_jobs()
@@ -922,11 +992,31 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
 
 
 def _find_port(start: int) -> int:
+    """从 start 起找一个真正空闲的端口。
+
+    v2.11 修复 Windows 假空闲端口：探测 socket 原来设 SO_REUSEADDR ——
+    在 Windows 上它允许绑定「别的进程**正监听着**」的端口，于是旧市场
+    进程还活着时新进程也「探测成功」，两个进程同时绑 8777，请求随机
+    打到旧进程，网页就会随机 404（2026-10-07 三个进程同绑 8777 实测）。
+    Windows 改用 SO_EXCLUSIVEADDRUSE：只要端口被任何人占着就 bind 失败，
+    这才是「真的空闲」。POSIX 不需要换 —— Linux 上 SO_REUSEADDR 只放宽
+    TIME_WAIT 复用，本就不允许两个监听 socket 共存。
+
+    真正的服务 socket（MarketHTTPServer）保留 allow_reuse_address=True：
+    Windows 上 Ctrl+C 重启后立刻重绑 8777 依赖它，去掉会引入重启回归；
+    而 serve() 的入口永远先过本探测，双活场景已经被这里挡死。
+    """
     import socket
 
+    exclusive = hasattr(socket, "SO_EXCLUSIVEADDRUSE")   # Windows only
     for p in range(start, start + 20):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if exclusive:
+                # 注意 SO_REUSEADDR 与 SO_EXCLUSIVEADDRUSE 在 Windows 上互斥，
+                # 同设是 WSEINVAL —— 要换就彻底换掉。
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((HOST, p))
                 return p

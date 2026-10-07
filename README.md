@@ -153,9 +153,15 @@ workbuddy-market/
 │                                        实现自 v2.8 起陆续迁入 src/）
 ├── src/workbuddy_market/             ← 内核包（v2.8/R2 起）：paths / errors / fsutil /
 │                                        hasher / locking / logging；v2.9/R3 增
-│                                        config / scanner / sync / version
+│                                        config / scanner / sync / version；
+│                                        v2.10 增 catalog，v2.11 增 registry
+├── registry/plugins.json             ← 社区注册表（v2.11）：静态收录人工维护，
+│                                        动态字段（stars 等）由每日 CI 重建
+├── .github/workflows/                ← ci.yml（语法/隐私/自检）+
+│                                        registry.yml（注册表每日重建）
+├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 477 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 508 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -193,7 +199,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 477 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 508 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 ```
 
@@ -352,6 +358,7 @@ python selftest.py --real         # 只读检查现网状态，不写任何东�
 | 目录数据由 CI 每天刷新（stars 等），市场打开即最新 | v2.10：本地服务的 daemon 线程每 15 分钟检查、按 24h TTL 自动拉 GitHub API，不用任何外部 CI；失败保旧值、下个检查点重试 |
 | 精选注册表（plugins.json）承担静态身份，动态数据不进清单 | v2.10：`remoteSources` 只承担静态身份，实时元数据缓存在 STATE_HOME 的 `catalog.json`，永不写回配置 |
 | 浏览全目录 + 一键安装     | v2.10：搜索框本地零匹配时自动搜 GitHub 全网，结果卡片直接「一键安装」（仍走 ghpm 的事务/回滚/进度链路）    |
+| 精选注册表是一个独立 GitHub 仓库，克隆即用 | v2.11：注册表就是本仓库的 `registry/plugins.json`（每日 CI 重建动态字段）；市场端按 6h TTL 在线拉取，网页新增「社区目录」区块，条目直接一键安装 |
 
 ---
 
@@ -1115,7 +1122,7 @@ Windows 保留名 / 大小写归一 / 越界拒绝）、_sync_tree 增量闭环�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 477 passed, 0 failed
+python selftest.py        # 508 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
@@ -1171,7 +1178,75 @@ TTL/重试/失败保旧值/坏缓存容错、搜索解析与畸形条目跳过�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 477 passed, 0 failed
+python selftest.py        # 508 passed, 0 failed
+python launcher.py --status
+python launcher.py --recover
+```
+
+---
+
+## 二十一、v2.11 相对 v2.10 改了什么（社区注册表 + 端口修复）
+
+**这轮解决的两个问题**：
+
+1. **收录范围只到本机配置**：market.config.json 的 remoteSources 只有
+   自己加的那几个仓库，别人无法共享一份「认可的 WorkBuddy 插件清单」。
+   参考 DSH 市场的「精选注册表 = 一个静态 GitHub 仓库」做法，把注册表
+   落在本仓库的 `registry/plugins.json`，市场端按 TTL 在线拉取。
+2. **Windows 假空闲端口**（2026-10-07 实测复现）：`_find_port` 的探测
+   socket 设了 `SO_REUSEADDR`，Windows 上它允许绑定「别的进程**正监听着**」
+   的端口——同机三个市场进程同时绑 8777，请求随机打到旧进程，网页随机
+   404（界面里那个「not found」红色提示就是这么来的）。
+
+### 社区注册表（`src/workbuddy_market/registry.py` 新模块）
+
+- **注册表本体**：`registry/plugins.json`（schema 1），静态字段
+  （repo / displayName / category / description / keywords）人工审核提交，
+  动态字段（stars / pushedAt / latestSha / refreshedAt）由每日 CI 重建；
+- **每日 CI**：`scripts/build_registry.py`（单条失败保旧值、原子写、
+  `--dry-run`、`GITHUB_TOKEN` 只进请求头）+ `.github/workflows/registry.yml`
+  （每天 21:21 UTC，有变化才提交，concurrency 排队防踩）；
+- **市场端拉取**：6 小时 TTL，三级网络路线 + 本地兜底——
+  `WBM_REGISTRY_URL`（镜像/测试）→ raw.githubusercontent.com →
+  api.github.com contents（`Accept: application/vnd.github.raw`）→
+  本仓库自带的本地副本（断网也能显示）；缓存落 STATE_HOME 的
+  `registry.json`（不可信状态文件，坏 JSON 当不存在）；
+- **来源必须如实标注**：返回值里的 `source` / `stale` / `fetched` 逐级
+  变化，绝不把兜底数据假装成「刚从 GitHub 拉的」；
+- **解析边界只留一处**（约定 14）：repo 逐条过 `validate_repo()`，
+  单条坏条目跳过并计数，大小写去重，条目数上限 500。
+
+### 服务端与网页
+
+- `GET /api/registry`（口令 + Origin、600 秒内存缓存 + single-flight、
+  `?force=1` 强制在线拉取），响应带 `installedRepos`（本机已装的 repo
+  摘要，社区条目据此显示「已装」）；「刷新目录」按钮现在同时刷新
+  catalog 与 registry，后台自动循环也顺带按 6h TTL 检查注册表；
+- 网页新增**「社区目录」区块**：与本机收录源大小写去重后展示，
+  条目可直接一键安装（确认框如实标注「来自社区目录」，安装链路
+  仍走 ghpm 的事务 / 回滚 / 进度 / 超时）；
+- 端口探测修复：Windows 上探测 socket 改用 `SO_EXCLUSIVEADDRUSE`
+  （与 `SO_REUSEADDR` 在 Windows 上互斥，不能同设）；POSIX 不用换——
+  Linux 的 `SO_REUSEADDR` 本就不允许两个监听 socket 共存。真正监听的
+  server socket 保留 `allow_reuse_address=True`（Windows 上 Ctrl+C
+  后立刻重绑依赖它），双活场景已由「serve() 必先探测」挡死。
+
+### 与 provider 协议的关系
+
+`docs/protocol/provider-api.md` §5 的 Registry Index 由「未来」推进为
+「最小实现」：注册表是静态文件 + CI 补数据，`fetch` 仍完全委托 ghpm
+（Provider 是包在它外面的适配层，这个次序不变）。
+
+### 自检
+
+第 27 节（round12）新增 31 项：符号同一性、parse_registry 边界矩阵、
+三级兜底 + env 覆盖 + source 如实标注、TTL 语义（force=False 零联网）、
+refresh_entry 纯函数、GET /api/registry 端到端（403 / 跨源 / 形状 /
+force）、**端口修复盯防**（真起服务后 `_find_port(p)` 绝不允许返回 p）。
+
+```
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python selftest.py        # 508 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

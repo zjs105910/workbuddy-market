@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.10）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.11）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
 → v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1）
-→ v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录，当前）。
+→ v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表，
+当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -234,6 +235,26 @@ v2.9 → v2.10 的变化（GitHub 动态目录：参考 DSH 市场的「目录 /
   · **前端**：收录源卡片显示实时星数 / 更新日期 + 「刷新目录」按钮；
     本地搜索无结果且关键词 ≥2 字时自动搜 GitHub 全网，结果卡片
     可直接「一键安装」（仍走 ghpm 的任务进度 / 取消 / 超时链路）。
+
+v2.10 → v2.11 的变化（社区注册表：DSH 市场那层「registry 仓库」的本机实现）：
+
+  · **src/workbuddy_market/registry.py 新模块**：注册表本体就是本仓库的
+    registry/plugins.json（静态提交人工审核，stars / pushedAt / latestSha
+    由每日 CI 重建——scripts/build_registry.py + registry.yml）。
+    市场端按 TTL 在线拉取，三条网络路线 + 本地副本兜底；网络接缝只有
+    `_registry_http_get()` 一处，缓存口径与 catalog 一致（不可信文件 /
+    全挂退缓存、source 如实标注来源）。
+  · **Windows 假空闲端口修复**：_find_port 的探测 socket 原来设
+    SO_REUSEADDR —— Windows 上它允许绑定「别的进程正监听着」的端口，
+    同机三个市场进程可以同时绑 8777，请求随机打到旧进程（2026-10-07
+    实测复现）。探测在 Windows 改用 SO_EXCLUSIVEADDRUSE，POSIX 沿用
+    SO_REUSEADDR（Linux 上 SO_REUSEADDR 本就不允许双活监听）。
+  · **服务端**：GET /api/registry（口令 + Origin、600 秒内存缓存 +
+    single-flight、?force=1 强制在线拉取）；「刷新目录」后台任务
+    同时刷新 catalog 与 registry。
+  · **前端**：新增「社区目录」区块（与收录源大小写去重后展示），社区
+    条目可直接一键安装（确认框如实标注来自社区目录）；搜索兜底同时
+    看社区目录与 GitHub 全网。
 """
 from __future__ import annotations
 
@@ -271,7 +292,7 @@ from workbuddy_market.paths import (          # noqa: E402,F401
     MARKET_ROOT, STATE_HOME,
     CONFIG_PATH, MANIFEST_DIR, MANIFEST_PATH, PLUGINS_DIR, WEB_DIR,
     STATE_PATH, LOG_PATH, BACKUP_DIR, TRASH_DIR, TX_DIR, OWNERSHIP_PATH,
-    LOCK_PATH, LOG_LOCK_PATH, CATALOG_PATH,
+    LOCK_PATH, LOG_LOCK_PATH, CATALOG_PATH, REGISTRY_PATH,
     WB, SKILLS_DIR, KNOWN_PATH, GITHUB_REGISTRY, GHPM_PY,
     LOG_MAX_BYTES, LOG_KEEP, BACKUP_KEEP, HASH_CHUNK_BYTES,
 )
@@ -313,6 +334,13 @@ from workbuddy_market.catalog import (        # noqa: E402,F401  （v2.10 新增
     _gh_request, normalize_repo_payload, validate_query,
     fetch_meta, search_repos, catalog_path,
     load_catalog, save_catalog, is_stale, refresh_catalog,
+)
+from workbuddy_market.registry import (       # noqa: E402,F401  （v2.11 新增）
+    REGISTRY_REPO, REGISTRY_BRANCH, REGISTRY_FILENAME, REGISTRY_TTL,
+    REGISTRY_TIMEOUT, REGISTRY_SCHEMA, REGISTRY_RAW_URL, REGISTRY_API_URL,
+    ENV_REGISTRY_URL, _registry_http_get, registry_routes,
+    local_registry_file, parse_registry, registry_path,
+    load_registry_cache, save_registry_cache, get_registry,
 )
 
 INSTALL_MODES = ("missing", "update", "force")

@@ -90,6 +90,7 @@ if _LEGACY_LAYOUT:
     LOCK_PATH = MARKET_ROOT / ".market.lock"
     LOG_LOCK_PATH = MARKET_ROOT / ".market-log.lock"
     CATALOG_PATH = MARKET_ROOT / ".market-catalog.json"
+    REGISTRY_PATH = MARKET_ROOT / ".market-registry.json"
 else:
     # v2.7 布局：运行状态离开 Git 仓库，收进 STATE_HOME
     STATE_PATH = STATE_HOME / "state.json"
@@ -101,6 +102,7 @@ else:
     LOCK_PATH = STATE_HOME / "locks" / "market.lock"
     LOG_LOCK_PATH = STATE_HOME / "locks" / "log.lock"
     CATALOG_PATH = STATE_HOME / "catalog.json"
+    REGISTRY_PATH = STATE_HOME / "registry.json"
 
 WB = Path(_env_root("WBM_HOME", "GHPM_HOME") or (Path.home() / ".workbuddy")).resolve()
 SKILLS_DIR = WB / "skills"

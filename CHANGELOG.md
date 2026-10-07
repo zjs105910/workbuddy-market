@@ -2,7 +2,36 @@
 
 本项目的版本号唯一来源是 `src/workbuddy_market/version.py` 的 `MARKET_VERSION`。
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
-更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.10 各一节）。
+更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.11 各一节）。
+
+## 2.11.0 — 2026-10-07（社区注册表 + 端口修复）
+
+- 新增 `src/workbuddy_market/registry.py`：注册表本体是本仓库的
+  `registry/plugins.json`（静态收录人工审核，stars / pushedAt / latestSha
+  由每日 CI 重建）。市场端按 6h TTL 在线拉取：`WBM_REGISTRY_URL` →
+  raw.githubusercontent.com → api.github.com contents（raw accept 头）→
+  本地副本四级路线；缓存落 STATE_HOME 的 `registry.json`（不可信文件，
+  全挂退缓存，`source` / `stale` / `fetched` 如实标注来源）。
+  网络接缝只有 `_registry_http_get()` 一处，自检假接缝离线覆盖。
+- 每日 CI：`scripts/build_registry.py`（单条失败保旧值、原子写、--dry-run、
+  GITHUB_TOKEN 只进请求头）+ `.github/workflows/registry.yml`
+  （每天 21:21 UTC，无变化不提交，concurrency 排队）。
+- market_server：`GET /api/registry`（口令 + Origin、600s 内存缓存 +
+  single-flight、?force=1），响应带 installedRepos；「刷新目录」任务
+  同时刷新 catalog 与 registry，serve() 自动循环顺带按 6h TTL 检查注册表。
+- ★ Windows 假空闲端口修复：`_find_port` 探测 socket 原设 SO_REUSEADDR，
+  Windows 上允许绑定别的进程正监听的端口——同机 3 个市场进程同绑 8777、
+  请求随机打到旧进程（2026-10-07 实测复现，即网页「not found」红色提示
+  的根因）。探测在 Windows 改用 SO_EXCLUSIVEADDRUSE；POSIX 不变
+  （Linux 的 SO_REUSEADDR 本就不允许双活监听）。
+- web/index.html：新增「社区目录」区块（与收录源大小写去重），社区条目
+  一键安装的确认框如实标注来源；安装链路仍复用 ghpm 全套保障。
+- selftest 第 27 节（round12）新增 31 项（含端口修复盯防：真起服务后
+  `_find_port(p)` 绝不允许返回 p）；SELFTEST_VERSION → 2.11；
+  版本盯防用例同步 2.11.0 / 2.11。全量 508 passed, 0 failed。
+- 同步清单：core docstring（标题/链/新增 v2.11 节）、README 自检项数
+  四处 + 目录结构 + 第八节 DSH 表 + 新增第二十一节、
+  provider-api.md §5 状态注记。
 
 ## 2.10.0 — 2026-10-07（GitHub 动态目录）
 

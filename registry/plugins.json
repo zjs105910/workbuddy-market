@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "updatedAt": "2026-10-07",
+  "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建，请勿手工编辑动态字段。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。",
+  "plugins": [
+    {
+      "repo": "anthropics/skills",
+      "displayName": "Anthropic 官方技能集",
+      "displayNameEn": "Anthropic Official Skills",
+      "category": "官方",
+      "description": "Anthropic 官方 Agent Skills 仓库，含文档处理（docx/pdf/pptx/xlsx）、前端设计、MCP 构建、画布设计、品牌规范等 19 个高质量技能。",
+      "descriptionEn": "Anthropic's official repository of Agent Skills: document processing (docx/pdf/pptx/xlsx), frontend design, MCP building, canvas design, brand guidelines and more.",
+      "keywords": ["官方", "文档", "office", "前端", "mcp"],
+      "homepage": "https://github.com/anthropics/skills",
+      "addedAt": "2026-10-06",
+      "stars": 179993,
+      "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "obra/superpowers",
+      "displayName": "Superpowers 工程方法论",
+      "displayNameEn": "Superpowers Software Methodology",
+      "category": "开发工具",
+      "description": "一套成体系的软件开发方法论技能包：头脑风暴、写计划、TDD、系统化调试、并行派发子代理、代码审查、收尾分支等 15 个技能，彼此衔接成工作流。",
+      "descriptionEn": "A cohesive software development methodology skill pack: brainstorming, planning, TDD, systematic debugging, parallel subagents, code review and finishing branches.",
+      "keywords": ["方法论", "TDD", "调试", "计划", "代码审查", "子代理"],
+      "homepage": "https://github.com/obra/superpowers",
+      "addedAt": "2026-10-06",
+      "stars": 296188,
+      "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "vercel-labs/agent-browser",
+      "displayName": "agent-browser 浏览器自动化",
+      "displayNameEn": "agent-browser Browser Automation",
+      "category": "自动化",
+      "description": "Vercel 出品的浏览器自动化 CLI，官方 CodeBuddy 插件同源。首次使用自动安装，提供网页交互、截图、表单填写能力。",
+      "descriptionEn": "Vercel's browser automation CLI for AI agents (same source as the official CodeBuddy plugin): page interaction, screenshots and form filling.",
+      "keywords": ["浏览器", "自动化", "vercel", "截图", "表单"],
+      "homepage": "https://agent-browser.dev",
+      "addedAt": "2026-10-06",
+      "stars": 43592,
+      "pushedAt": "2026-10-06",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    },
+    {
+      "repo": "wshobson/agents",
+      "displayName": "Agents 技能大全",
+      "displayNameEn": "Agents Collection",
+      "category": "合集",
+      "description": "体量极大的工程技能合集，184 个技能覆盖后端、前端、Python、K8s、可观测性、安全、支付、LLM 微调、量化交易、无障碍等方向，按主题分成数十个插件组。",
+      "descriptionEn": "A massive engineering skills collection: 184 skills covering backend, frontend, Python, K8s, observability, security, payments, LLM fine-tuning, quant trading and more.",
+      "keywords": ["合集", "后端", "前端", "k8s", "安全", "LLM", "量化"],
+      "homepage": "https://github.com/wshobson/agents",
+      "addedAt": "2026-10-06",
+      "stars": 40267,
+      "pushedAt": "2026-10-05",
+      "latestSha": "",
+      "refreshedAt": "2026-10-07"
+    }
+  ]
+}

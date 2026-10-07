@@ -276,6 +276,7 @@
 const $ = s => document.querySelector(s);
 let STATE = null, CATALOG = null, CATALOG_STALE = false, cat = "全部", filter = "all", jobs = {};
 let GH = {q:null, items:null, state:"idle", error:""}, ghTimer = null;
+let REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}};   // 社区注册表（v2.11）
 
 const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","未分类":"◇"};
 const iconOf = c => ICON[c] || "◇";
@@ -396,6 +397,10 @@ function renderCards(){
   const st = STATE;
   const local = (st.plugins||[]).filter(pass);
   const remote = (st.remotes||[]).filter(pass);
+  // 社区目录（v2.11）：注册表条目，与本机收录源大小写去重后展示
+  const regRepos = new Set((st.remotes||[]).map(r => String(r.rawName||"").toLowerCase()));
+  const regAll = (REG.plugins||[]).filter(e => !regRepos.has(String(e.repo||"").toLowerCase()));
+  const comm = regAll.filter(regPass);
   let h = "";
   h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
   h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
@@ -409,7 +414,18 @@ function renderCards(){
   h += '<div class="sec-title">GitHub 收录源 <span class="n">'+sub+'</span></div>';
   h += remote.length ? '<div class="grid">'+remote.map(cardRemote).join("")+'</div>'
                      : '<div class="empty">没有符合条件的 GitHub 源</div>';
-  // 本地（含收录源）零匹配且关键词够长 → 自动搜 GitHub 全网
+  // 社区注册表区块（v2.11）：来源与数量如实展示，离线兜底要看得出来
+  if(comm.length || (REG.plugins && REG.plugins.length)){
+    let rsub = REG.plugins && REG.plugins.length
+      ? (REG.stale ? REG.plugins.length+' 个收录 · 数据非最新' : REG.plugins.length+' 个收录') : '';
+    if(REG.updatedAt) rsub += ' · 注册表 '+esc(REG.updatedAt);
+    if(REG.source && REG.source !== "cache" && REG.source.indexOf("github.com") < 0)
+      rsub += '（'+esc(REG.source)+'）';
+    h += '<div class="sec-title">社区目录 <span class="n">'+rsub+'</span></div>';
+    h += comm.length ? '<div class="grid">'+comm.map(cardRegistry).join("")+'</div>'
+                     : '<div class="empty">社区目录没有匹配的条目</div>';
+  }
+  // 本地（含收录源）零匹配且关键词够长 → 社区目录已并入上方过滤，再兜底全网搜索
   const q = $("#q").value.trim();
   if(!local.length && !remote.length && q.length >= 2){
     h += '<div class="sec-title">GitHub 全网搜索 <span class="n" id="ghState"></span></div>'+
@@ -553,6 +569,57 @@ function cardRemote(r){
     '</div></div>';
 }
 
+/* ---------------- 社区注册表（v2.11） ---------------- */
+function regPass(e){
+  if(cat !== "全部" && e.category !== cat) return false;
+  if(filter === "done" && !isRegInstalled(e.repo)) return false;
+  if(filter === "todo" && isRegInstalled(e.repo)) return false;
+  const q = $("#q").value.trim().toLowerCase();
+  if(!q) return true;
+  const hay = [e.displayName,e.displayNameEn,e.repo,e.description,e.category,(e.keywords||[]).join(" ")]
+    .join(" ").toLowerCase();
+  return hay.includes(q);
+}
+
+function isRegInstalled(repo){
+  return !!(REG.installedRepos && REG.installedRepos[repo]);
+}
+
+function cardRegistry(e){
+  const inst = isRegInstalled(e.repo);
+  const info = inst ? REG.installedRepos[e.repo] : null;
+  const stTxt = inst
+    ? '<span class="state ok">● 已装 '+esc(info.name||"")+(info.sha_short? ' · '+esc(info.sha_short):"")+'</span>'
+    : '<span class="state">○ 未安装</span>';
+  const okLink = String(e.homepage||"").indexOf("https://") === 0
+    || String(e.repo||"").indexOf("/") > 0;
+  const href = e.homepage && String(e.homepage).indexOf("https://") === 0
+    ? e.homepage : "https://github.com/"+e.repo;
+  const title = okLink
+    ? '<a href="'+attr(href)+'" target="_blank" rel="noopener" style="color:inherit">'+esc(e.displayName)+'</a>'
+    : esc(e.displayName);
+  return '<div class="card">'+
+    '<div class="card-head">'+
+      '<div class="icon">'+iconOf(e.category)+'</div>'+
+      '<div style="flex:1"><h3>'+title+'</h3>'+
+        '<div class="meta">'+
+          '<span>'+esc(e.category)+'</span>'+
+          '<code style="font-size:11px">'+esc(e.repo)+'</code>'+
+          (e.stars ? '<span>★ '+fmtNum(e.stars)+'</span>' : '')+
+          (e.pushedAt ? '<span>更新于 '+esc(e.pushedAt)+'</span>' : '')+
+        '</div></div>'+
+    '</div>'+
+    '<p class="desc">'+esc(e.description)+'</p>'+
+    '<div class="kw">'+(e.keywords||[]).map(k=>'<i>'+esc(k)+'</i>').join("")+
+      '<i>社区目录</i></div>'+
+    '<div class="card-foot">'+stTxt+
+      (inst
+        ? '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>'
+        : '<button class="tiny primary" data-radd="'+attr(e.repo)+'">一键安装</button>')+
+    '</div>'+
+  '</div>';
+}
+
 /* ---------------- 交互 ---------------- */
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-path],[data-crefresh]");
@@ -633,8 +700,12 @@ document.addEventListener("click", async (e) => {
     const isAdd = !!t.dataset.radd;
     if(isAdd){
       const known = (STATE.remotes||[]).some(r => r.rawName === repo);
+      const regKnown = (REG.plugins||[]).some(p => p.repo === repo);
       const note = known
         ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>安装走 ghpm，自带事务与回滚。</div>'
+        : regKnown
+        ? '<div class="note">来自<b>社区目录</b>（'+esc(((REG.plugins||[]).find(p=>p.repo===repo)||{}).category||"社区")+
+          '收录）。会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>'
         : '<div class="note">这个仓库<b>不在精选收录里</b>，是搜索结果 —— 安装前请确认来源可信。<br>'+
           '会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>';
       const ok = await confirmBox("从 GitHub 安装 "+repo+"？", note, "安装");
@@ -770,6 +841,12 @@ async function refresh(){
     const c = await api("/api/catalog");
     CATALOG = c.catalog || {}; CATALOG_STALE = !!c.stale;
   }catch(e){ CATALOG = null; CATALOG_STALE = false; }   // 目录缓存失败不挡主界面
+  try{
+    const g = await api("/api/registry");
+    REG = {plugins: g.plugins || [], updatedAt: g.updatedAt || "",
+           stale: !!g.stale, source: g.source || "",
+           installedRepos: g.installedRepos || {}};   // 社区目录失败也不挡主界面
+  }catch(e){ REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}}; }
   render();
 }
 

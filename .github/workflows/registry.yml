@@ -1,0 +1,42 @@
+name: Registry
+
+# 社区注册表每日重建：拉一遍 plugins.json 里每个仓库的 stars / pushedAt /
+# latestSha，有变化才提交。静态收录字段永远是人工维护的，机器只补动态数据。
+on:
+  schedule:
+    - cron: "21 21 * * *"     # 每天 21:21 UTC（北京时间次日 5:21，避开整点高峰）
+  workflow_dispatch:          # 手动触发（收录新条目后想立刻补数据时用）
+
+permissions:
+  contents: write             # 允许向本仓库提交重建结果
+
+concurrency:
+  group: registry
+  cancel-in-progress: false   # 两次运行重叠时排队，不互相踩提交
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Refresh dynamic fields
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # 只进请求头，脚本不落盘
+        run: python scripts/build_registry.py
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet registry/plugins.json; then
+            echo "registry/plugins.json 无变化，跳过提交"
+            exit 0
+          fi
+          git config user.name "registry-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add registry/plugins.json
+          git commit -m "registry: daily refresh $(date -u +%F)"
+          git push
