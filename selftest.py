@@ -664,6 +664,69 @@ def round20():
     ck("★ cli search：退出码 0 且命中输出",
        rc2 == 0 and "pdf" in buf2.getvalue().lower())
 
+    # --- 36. Registry 收录契约（registry-schema.json v2 + validate_registry.py）
+    # 三条盯防线：
+    # 1. 真实注册表永远能过契约 —— 收录质量基线，坏了这里直接 FAIL；
+    # 2. 契约真的会咬人 —— 常见坏形态（查重/枚举/哈希/截图域名/成套产物）
+    #    必须各报对 error；缺 license / 缺兼容性只警告不拦（早期收录不阻塞）；
+    # 3. 契约文件与校验器版本互锁 —— 防契约文档和执行者漂移。
+    import importlib.util as _ilv36
+    _spec36 = _ilv36.spec_from_file_location(
+        "validate_registry",
+        str(Path(__file__).resolve().parent / "scripts" / "validate_registry.py"))
+    vreg = _ilv36.module_from_spec(_spec36)
+    _spec36.loader.exec_module(vreg)
+
+    real_doc = json.loads(
+        (Path(__file__).resolve().parent / "registry" / "plugins.json")
+        .read_text(encoding="utf-8"))
+    errs36, _ = vreg.validate_registry(real_doc)
+    ck("★ 真实 registry/plugins.json 通过收录契约（0 error）", not errs36,
+       "; ".join(errs36[:2]))
+    schema_doc36 = json.loads(
+        (Path(__file__).resolve().parent / "registry" / "registry-schema.json")
+        .read_text(encoding="utf-8"))
+    ck("★ 契约 version 与校验器 CONTRACT_VERSION 互锁",
+       schema_doc36.get("version") == vreg.CONTRACT_VERSION
+       and schema_doc36.get("$schema", "").startswith("https://json-schema.org/draft/"))
+
+    def _errs36(doc):
+        return vreg.validate_registry(doc)[0]
+
+    base36 = {"repo": "owner/repo", "displayName": "X", "category": "开发工具",
+              "description": "一条足够长的描述文本。", "keywords": ["k"],
+              "addedAt": "2026-10-08", "trust": "reviewed",
+              "review": {"status": "reviewed", "reviewedAt": "2026-10-08",
+                         "method": "manual"},
+              "sourceCommit": "a" * 40}
+    doc36 = lambda *es: {"schema": 1, "updatedAt": "2026-10-08", "plugins": list(es)}  # noqa: E731
+    ck("★ 合法最小条目 → 0 error", not _errs36(doc36(base36)))
+    dup36 = dict(base36, repo="Owner/REPO")
+    ck("★ repo 大小写重复 → error（casefold 查重）",
+       any("大小写重复" in x for x in _errs36(doc36(base36, dup36))))
+    ck("★ trust 越枚举 → error",
+       any("trust" in x for x in _errs36(doc36(dict(base36, trust="super")))))
+    ck("★ sourceCommit 非 40 位 → error",
+       any("sourceCommit" in x for x in _errs36(doc36(dict(base36, sourceCommit="abc")))))
+    ck("★ official 未过审 → error（一致性）",
+       any("official" in x for x in _errs36(doc36(dict(
+           base36, trust="official",
+           review={"status": "pending", "reviewedAt": "2026-10-08",
+                   "method": "manual"})))))
+    ck("★ 截图域名不在白名单 → error（与 registry.py 同口径）",
+       any("截图域名" in x for x in _errs36(
+           doc36(dict(base36, screenshots=["https://evil.com/a.png"])))))
+    ck("★ packageUrl / packageHash 不成对 → error",
+       any("成对" in x for x in _errs36(
+           doc36(dict(base36, packageUrl="https://x/y.zip")))))
+    ck("★ 未知字段 → error（additionalProperties=false）",
+       any("未知字段" in x for x in _errs36(doc36(dict(base36, starring=1)))))
+    _pair = dict(base36, packageUrl="https://x/y.zip", packageHash="a" * 64)
+    errs_p, warns_p = vreg.validate_registry(doc36(_pair))
+    ck("★ 缺 license / 缺兼容性只警告不拦（早期收录不阻塞）",
+       not errs_p and any("license" in w for w in warns_p)
+       and any("兼容性" in w for w in warns_p))
+
 
 def round19():
     """v2.20：permissions / 兼容性检测 / 构建证明（协议 v0.3，第 34 节）。

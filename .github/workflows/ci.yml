@@ -30,6 +30,8 @@ jobs:
         run: python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py scripts/*.py
       - name: Privacy audit (tracked files)
         run: python scripts/privacy-audit.py
+      - name: Registry contract validation
+        run: python scripts/validate_registry.py registry/plugins.json
       - name: POSIX semantic smoke (Linux/macOS)
         if: runner.os != 'Windows'
         run: python scripts/posix-smoke.py

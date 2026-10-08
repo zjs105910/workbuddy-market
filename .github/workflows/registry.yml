@@ -35,6 +35,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # 只进请求头，脚本不落盘
         run: python scripts/build_registry.py
 
+      # 收录契约门禁（v2.22）：重建后的注册表过不了契约就中止——
+      # 宁可不开 PR，也不让坏数据走到人工合并那一步。
+      - name: Validate registry contract
+        run: python scripts/validate_registry.py registry/plugins.json
+
       - name: Create PR if changed
         env:
           GH_TOKEN: ${{ github.token }}
