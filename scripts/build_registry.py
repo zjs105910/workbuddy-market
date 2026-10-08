@@ -109,7 +109,14 @@ def main(argv: list | None = None) -> int:
             if new_e != entry:
                 changed += 1
             diff = " ".join(f"{k}={new_e[k]}" for k in DYNAMIC_FIELDS)
-            print(f"  ok  {repo}: {diff}")
+            # 上游漂移预警（v2.12）：收录时固定了 sourceCommit，上游又推进了
+            # → 这条目该重新审核了。只提示不改静态字段（重新审核是人工的事）。
+            warn = ""
+            sc = str(new_e.get("sourceCommit") or "")
+            ls = str(new_e.get("latestSha") or "")
+            if sc and ls and sc != ls:
+                warn = f"  ⚠ 上游已前移（审核 {sc[:12]}… → {ls[:12]}…），建议重新审核"
+            print(f"  ok  {repo}: {diff}{warn}")
             out_entries.append(new_e)
         except Exception as exc:  # noqa: BLE001 —— 单条失败保旧值
             failed += 1

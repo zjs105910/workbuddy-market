@@ -1,14 +1,19 @@
 name: Registry
 
 # 社区注册表每日重建：拉一遍 plugins.json 里每个仓库的 stars / pushedAt /
-# latestSha，有变化才提交。静态收录字段永远是人工维护的，机器只补动态数据。
+# latestSha，有变化就开 Pull Request。
+#
+# 供应链约束（v2.12）：本工作流**不再直推 main**——自动写主分支的链路
+# 改为「生成 → 分支 → PR → CI → 人工合并」，和插件安装一样 fail 闭环。
+# 静态收录字段永远是人工维护的，机器只补动态数据。
 on:
   schedule:
     - cron: "21 21 * * *"     # 每天 21:21 UTC（北京时间次日 5:21，避开整点高峰）
   workflow_dispatch:          # 手动触发（收录新条目后想立刻补数据时用）
 
 permissions:
-  contents: write             # 允许向本仓库提交重建结果
+  contents: write             # 推刷新分支
+  pull-requests: write        # 开 / 更新 PR
 
 concurrency:
   group: registry
@@ -18,9 +23,10 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # pin 到完整 SHA（与 ci.yml 同一约束）
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
@@ -29,14 +35,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # 只进请求头，脚本不落盘
         run: python scripts/build_registry.py
 
-      - name: Commit if changed
+      - name: Create PR if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet registry/plugins.json; then
-            echo "registry/plugins.json 无变化，跳过提交"
+            echo "registry/plugins.json 无变化，跳过"
             exit 0
           fi
+          BR="registry-refresh/$(date -u +%F)"
           git config user.name "registry-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BR"
           git add registry/plugins.json
           git commit -m "registry: daily refresh $(date -u +%F)"
-          git push
+          git push -f origin "$BR"
+          gh pr create --base main --head "$BR" \
+            --title "registry: daily refresh $(date -u +%F)" \
+            --body "自动刷新注册表动态字段（stars / pushedAt / latestSha）。静态字段未动；合并前等 CI 通过。" \
+            || echo "该分支的 PR 已存在，跳过创建"

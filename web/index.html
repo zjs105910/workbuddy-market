@@ -315,7 +315,11 @@ async function api(path, body){
   let data = {};
   try { data = await r.json(); } catch(e){}
   if(r.status === 403) throw new Error("本机服务拒绝了这次请求（口令失效，刷新页面即可）");
-  if(!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+  if(!r.ok || data.ok === false){
+    const err = new Error(data.error || ("HTTP " + r.status));
+    err.status = r.status; err.data = data;   // 409 漂移拦截等结构化错误要用
+    throw err;
+  }
   return data;
 }
 
@@ -435,6 +439,19 @@ function renderCards(){
   if(!local.length && !remote.length && q.length >= 2) ghEnsure(q);
 }
 
+/* ---------------- 信任分级（v2.12） ----------------
+   official = 官方收录 / reviewed = 社区精选（已人工审核）/ external = 未审核。
+   徽标必须如实 —— 搜索到不等于官方认可。 */
+function trustBadge(t){
+  return t === "official" ? '<span class="tag ok">✓ 官方</span>'
+       : t === "reviewed" ? '<span class="tag ok">✓ 已审核</span>'
+       : '<span class="tag warn">! 未审核</span>';
+}
+function regTrustOf(repo){
+  const e = (REG.plugins||[]).find(p => p.repo === repo);
+  return e ? (e.trust || "reviewed") : "external";
+}
+
 /* ---------------- GitHub 全网搜索（v2.10） ---------------- */
 function cardGh(r){
   const okLink = String(r.htmlUrl||"").indexOf("https://github.com/") === 0;
@@ -446,6 +463,7 @@ function cardGh(r){
       '<div class="icon">⌕</div>'+
       '<div style="flex:1"><h3>'+title+'</h3>'+
         '<div class="meta">'+
+          trustBadge("external")+
           (r.stars ? '<span>★ '+fmtNum(r.stars)+'</span>' : '')+
           (r.language ? '<span>'+esc(r.language)+'</span>' : '')+
           (r.pushedAt ? '<span>更新于 '+esc(r.pushedAt)+'</span>' : '')+
@@ -548,7 +566,7 @@ function cardRemote(r){
     : '<span class="state">○ 未安装</span>';
   const lv = liveOf(r.rawName);
   const stars = (lv && lv.stars) ? lv.stars : r.stars;
-  const meta = '<span>'+esc(r.category)+'</span>'+
+  const meta = '<span>'+esc(r.category)+'</span>'+trustBadge(regTrustOf(r.rawName))+
           (r.skillCount ? '<span>'+r.skillCount+' skill</span>' : '')+
           (stars ? '<span>★ '+fmtNum(stars)+'</span>' : '')+
           (lv && lv.pushedAt ? '<span>更新于 '+esc(lv.pushedAt)+'</span>' : '')+
@@ -604,6 +622,8 @@ function cardRegistry(e){
       '<div style="flex:1"><h3>'+title+'</h3>'+
         '<div class="meta">'+
           '<span>'+esc(e.category)+'</span>'+
+          trustBadge(e.trust || "reviewed")+
+          (e.license ? '<span>'+esc(e.license)+'</span>' : '')+
           '<code style="font-size:11px">'+esc(e.repo)+'</code>'+
           (e.stars ? '<span>★ '+fmtNum(e.stars)+'</span>' : '')+
           (e.pushedAt ? '<span>更新于 '+esc(e.pushedAt)+'</span>' : '')+
@@ -698,23 +718,49 @@ document.addEventListener("click", async (e) => {
   if(t.dataset.radd || t.dataset.rupdate){
     const repo = t.dataset.radd || t.dataset.rupdate;
     const isAdd = !!t.dataset.radd;
+    let allowNs = false;
     if(isAdd){
       const known = (STATE.remotes||[]).some(r => r.rawName === repo);
-      const regKnown = (REG.plugins||[]).some(p => p.repo === repo);
+      const regEntry = (REG.plugins||[]).find(p => p.repo === repo);
+      const regKnown = !!regEntry;
+      const trust = regEntry ? (regEntry.trust || "reviewed") : "external";
+      const trustNote = trust === "official"
+        ? '官方收录'
+        : regKnown ? '社区精选（已人工审核收录）' : '<b>未审核</b>（搜索结果，未经收录审核）';
       const note = known
         ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>安装走 ghpm，自带事务与回滚。</div>'
-        : regKnown
-        ? '<div class="note">来自<b>社区目录</b>（'+esc(((REG.plugins||[]).find(p=>p.repo===repo)||{}).category||"社区")+
-          '收录）。会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>'
-        : '<div class="note">这个仓库<b>不在精选收录里</b>，是搜索结果 —— 安装前请确认来源可信。<br>'+
-          '会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>';
+        : '<div class="note">来源：'+trustNote+'。会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>';
+      if(!regKnown){
+        // 供应链收紧（v2.12）：非收录仓库默认只装符合 Skill 协议的内容，
+        // 兼容模式必须在这里显式勾选放行。
+        note += '<label style="display:flex;gap:6px;align-items:flex-start;margin-top:8px;cursor:pointer">'+
+          '<input type="checkbox" id="cbCompat" style="margin-top:3px">'+
+          '<span>兼容模式：允许非标准 Skill 仓库（内容未经协议校验，<b>风险自负</b>）</span></label>';
+      }
       const ok = await confirmBox("从 GitHub 安装 "+repo+"？", note, "安装");
       if(!ok) return;
+      allowNs = !regKnown && !!($("#cbCompat") && $("#cbCompat").checked);
     }
     try{
-      const r = await api(isAdd ? "/api/remote/add" : "/api/remote/update", {repo});
+      const r = await api(isAdd ? "/api/remote/add" : "/api/remote/update",
+                          isAdd ? {repo, allowNonSkill: allowNs} : {repo});
       watchJob(r.jobId, (isAdd?"安装 ":"更新 ")+repo);
-    }catch(err){ toast(err.message, true); }
+    }catch(err){
+      // 409：注册表收录仓库的上游已前移（供应链固定校验，v2.12）。
+      // 把差异摆清楚让用户决定 —— 继续装的是当前版本，不是审核那一份。
+      if(isAdd && err.status === 409 && err.data && err.data.drift){
+        const d = err.data.drift;
+        const ok2 = await confirmBox("上游已前移：" + repo,
+          '<div class="note">审核时固定在 <code>'+esc(String(d.sourceCommit).slice(0,12))+'…</code>，'+
+          '上游已推进到 <code>'+esc(String(d.latestSha).slice(0,12))+'…</code>。<br>'+
+          '继续安装装到的是<b>当前版本</b>（内容可能与收录审核时不同）。</div>', "仍要安装");
+        if(!ok2) return;
+        try{
+          const r2 = await api("/api/remote/add", {repo, allowNonSkill: allowNs, force: true});
+          watchJob(r2.jobId, "安装 " + repo);
+        }catch(e2){ toast(e2.message, true); }
+      } else { toast(err.message, true); }
+    }
     return;
   }
 

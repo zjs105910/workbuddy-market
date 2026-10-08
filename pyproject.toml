@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "workbuddy-market"
+description = "Local-first plugin marketplace for WorkBuddy: package local skills, register into WorkBuddy, browse & install from a 127.0.0.1-only web UI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "zjs105910" }]
+keywords = ["workbuddy", "skill", "plugin", "marketplace"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.13",
+]
+# 版本号唯一来源仍是 src/workbuddy_market/version.py（约定不变），
+# 这里动态读取，避免出现第二个要同步的常量。
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/zjs105910/workbuddy-market"
+Changelog = "https://github.com/zjs105910/workbuddy-market/blob/main/CHANGELOG.md"
+
+[project.scripts]
+# 高级用户入口（在仓库 clone 目录内运行，操作当前 clone 的市场）；
+# Windows 新手入口仍是一键启动.cmd —— 两条路一个内核。
+workbuddy-market = "workbuddy_market.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "workbuddy_market.version.MARKET_VERSION" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

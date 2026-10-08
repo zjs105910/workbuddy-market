@@ -22,7 +22,15 @@
       "stars": 180048,
       "pushedAt": "2026-10-05",
       "latestSha": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "official",
+      "sourceCommit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-06",
+        "method": "manual"
+      },
+      "license": "Apache-2.0"
     },
     {
       "repo": "obra/superpowers",
@@ -44,7 +52,15 @@
       "stars": 296364,
       "pushedAt": "2026-10-06",
       "latestSha": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-06",
+        "method": "manual"
+      }
     },
     {
       "repo": "mattpocock/skills",
@@ -65,7 +81,15 @@
       "stars": 279450,
       "pushedAt": "2026-10-07",
       "latestSha": "f3fc5632f401156837ee3872f14fe33ccf1024ea",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "f3fc5632f401156837ee3872f14fe33ccf1024ea",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "garrytan/gstack",
@@ -86,7 +110,15 @@
       "stars": 135686,
       "pushedAt": "2026-10-07",
       "latestSha": "db745675bdf9f575276db2dcd132d3c047218a12",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "f67c478f05d8e0b39339599ad11c91a3478515ae",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "addyosmani/agent-skills",
@@ -107,7 +139,15 @@
       "stars": 102719,
       "pushedAt": "2026-10-03",
       "latestSha": "1401c8b8030e023baeebb31781a6653fe8e93026",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "1401c8b8030e023baeebb31781a6653fe8e93026",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "nexu-io/open-design",
@@ -128,7 +168,15 @@
       "stars": 99856,
       "pushedAt": "2026-10-07",
       "latestSha": "53231d40b778d88eba23f35547bf99485d3ae9fc",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "53231d40b778d88eba23f35547bf99485d3ae9fc",
+      "license": "Apache-2.0",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "Leonxlnx/taste-skill",
@@ -149,15 +197,23 @@
       "stars": 93490,
       "pushedAt": "2026-10-07",
       "latestSha": "b482f7a970abb98c4108d4a9f761e458c64cefc8",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "b482f7a970abb98c4108d4a9f761e458c64cefc8",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "K-Dense-AI/scientific-agent-skills",
       "displayName": "AI Scientist 科研技能库",
       "displayNameEn": "Claude Scientific Skills",
       "category": "科研",
-      "description": "号称使用量最大的科研 Agent 技能库（25 万+ 研究人员在用）：把任意 AI 智能体变成 AI Scientist，覆盖数据分析、文献、实验等科研全流程。",
-      "descriptionEn": "The #1 agent skills library for science (250,000+ researchers): turn any AI agent into an AI Scientist covering data analysis, literature and experiments.",
+      "description": "面向科研场景的 Agent 技能库：把 AI 智能体用于科研工作流，覆盖数据分析、文献处理、实验等环节。",
+      "descriptionEn": "Agent skills library for science: turn an AI agent into a research assistant covering data analysis, literature and experiments.",
       "keywords": [
         "科研",
         "科学",
@@ -170,7 +226,15 @@
       "stars": 47903,
       "pushedAt": "2026-10-05",
       "latestSha": "92ace75ac21efe19a620434e0ca4e356081fe807",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "92ace75ac21efe19a620434e0ca4e356081fe807",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "vercel-labs/agent-browser",
@@ -191,7 +255,15 @@
       "stars": 43622,
       "pushedAt": "2026-10-07",
       "latestSha": "98e8c79e2a1a8a8e7a88f22e4dbe89bfac232eba",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "0207911f1bd4d0393eddaa90f2e50f96e0fb8974",
+      "license": "Apache-2.0",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-06",
+        "method": "manual"
+      }
     },
     {
       "repo": "wshobson/agents",
@@ -214,7 +286,15 @@
       "stars": 40275,
       "pushedAt": "2026-10-05",
       "latestSha": "46891e7e60da0e52baf1050b7b6391b64e84c6d9",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "46891e7e60da0e52baf1050b7b6391b64e84c6d9",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-06",
+        "method": "manual"
+      }
     },
     {
       "repo": "affaan-m/ECC",
@@ -235,7 +315,15 @@
       "stars": 274875,
       "pushedAt": "2026-10-05",
       "latestSha": "ef648e01899ba3e8dc6371642deaaf64b4477775",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "ef648e01899ba3e8dc6371642deaaf64b4477775",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "multica-ai/andrej-karpathy-skills",
@@ -255,7 +343,14 @@
       "stars": 217428,
       "pushedAt": "2026-04-20",
       "latestSha": "2c606141936f1eeef17fa3043a72095b4765b9c2",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "2c606141936f1eeef17fa3043a72095b4765b9c2",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "DietrichGebert/ponytail",
@@ -275,7 +370,15 @@
       "stars": 157525,
       "pushedAt": "2026-10-05",
       "latestSha": "552acd5efd0aeae2583a12efe39373d2f076f25e",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "552acd5efd0aeae2583a12efe39373d2f076f25e",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "tt-a1i/archify",
@@ -295,7 +398,15 @@
       "stars": 79182,
       "pushedAt": "2026-10-07",
       "latestSha": "73aaa0696e8f72c232ea710e6fa94fd953f3e773",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "73aaa0696e8f72c232ea710e6fa94fd953f3e773",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "ayghri/i-have-adhd",
@@ -315,7 +426,15 @@
       "stars": 55032,
       "pushedAt": "2026-10-06",
       "latestSha": "723af7d9afaf43eb871dbcce6129e2bf80de90d5",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "723af7d9afaf43eb871dbcce6129e2bf80de90d5",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "blader/humanizer",
@@ -335,7 +454,15 @@
       "stars": 54636,
       "pushedAt": "2026-09-28",
       "latestSha": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "coreyhaines31/marketingskills",
@@ -356,7 +483,15 @@
       "stars": 53584,
       "pushedAt": "2026-10-07",
       "latestSha": "f719a8079c694e3267d47b6b60a62aa926055f2c",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "b9ba399dd88b082b926e261e8ccfb843d20aa066",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "Imbad0202/academic-research-skills",
@@ -377,7 +512,14 @@
       "stars": 50775,
       "pushedAt": "2026-10-03",
       "latestSha": "6ab4b03bf70a118a1b3ee7f3263ed9f19031061b",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "6ab4b03bf70a118a1b3ee7f3263ed9f19031061b",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "cathrynlavery/diagram-design",
@@ -397,7 +539,15 @@
       "stars": 44880,
       "pushedAt": "2026-10-06",
       "latestSha": "d1376371965f513d99cc9ec388835d255c5c88d5",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "f4547ee95f88e5b28a52517feff6b6c11cc657f9",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "zhaoxuya520/reverse-skill",
@@ -418,7 +568,15 @@
       "stars": 40051,
       "pushedAt": "2026-09-22",
       "latestSha": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "mukul975/Anthropic-Cybersecurity-Skills",
@@ -439,7 +597,15 @@
       "stars": 33912,
       "pushedAt": "2026-08-31",
       "latestSha": "54a798831d2266a3ca61ce68a7acb80b81160d57",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "54a798831d2266a3ca61ce68a7acb80b81160d57",
+      "license": "Apache-2.0",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "virgiliojr94/book-to-skill",
@@ -459,7 +625,15 @@
       "stars": 34066,
       "pushedAt": "2026-10-05",
       "latestSha": "e180fc46365e8c1aab0120778cc8a40b9515324b",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "e180fc46365e8c1aab0120778cc8a40b9515324b",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "Nutlope/hallmark",
@@ -479,7 +653,15 @@
       "stars": 29732,
       "pushedAt": "2026-08-06",
       "latestSha": "13ac0ec7e148655948100b6396439e481361d690",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "13ac0ec7e148655948100b6396439e481361d690",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "OthmanAdi/planning-with-files",
@@ -499,7 +681,15 @@
       "stars": 27323,
       "pushedAt": "2026-10-06",
       "latestSha": "41f60aeca8bae0b145ec0e9421a7abd747ae2b69",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "41f60aeca8bae0b145ec0e9421a7abd747ae2b69",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "phuryn/pm-skills",
@@ -520,7 +710,15 @@
       "stars": 26820,
       "pushedAt": "2026-09-14",
       "latestSha": "8607e3b077817f89bf4a9b623246219734ac3be0",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "8607e3b077817f89bf4a9b623246219734ac3be0",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "JimLiu/baoyu-skills",
@@ -540,7 +738,15 @@
       "stars": 26395,
       "pushedAt": "2026-09-10",
       "latestSha": "1567581c26ec29f4216c6e6835415bf30343b0e3",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "1567581c26ec29f4216c6e6835415bf30343b0e3",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "titanwings/distilly",
@@ -560,7 +766,15 @@
       "stars": 25377,
       "pushedAt": "2026-09-22",
       "latestSha": "b830d3dcbde006370f141155795b89021e3a947b",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "b830d3dcbde006370f141155795b89021e3a947b",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     },
     {
       "repo": "alchaincyf/huashu-design",
@@ -581,7 +795,15 @@
       "stars": 24650,
       "pushedAt": "2026-09-22",
       "latestSha": "0830494ecb1c117e25b313a8114fe55a6bf2b125",
-      "refreshedAt": "2026-10-07"
+      "refreshedAt": "2026-10-07",
+      "trust": "reviewed",
+      "sourceCommit": "0830494ecb1c117e25b313a8114fe55a6bf2b125",
+      "license": "MIT",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-07",
+        "method": "manual"
+      }
     }
   ]
 }

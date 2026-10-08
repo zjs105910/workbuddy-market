@@ -25,7 +25,10 @@
                               mode: missing(默认) / update / force
   POST /api/uninstall         {id, force, dryRun} 卸载；dryRun 只返回分级计划
   POST /api/trash/purge       清空回收站
-  POST /api/remote/add        {repo} ghpm add（后台任务）
+  POST /api/remote/add        {repo, allowNonSkill?, force?} ghpm add（后台任务）；
+                              默认只装符合 Skill 协议的仓库，allowNonSkill=true
+                              为兼容模式（用户显式确认，记 warn 日志）；
+                              注册表收录仓库上游漂移时回 409（force=true 放行）
   POST /api/remote/update     {repo} ghpm update（后台任务）
   POST /api/job/<id>/cancel   终止一个后台任务
   POST /api/open/path         {target, id?} 在资源管理器中打开市场内的目录
@@ -510,11 +513,46 @@ def running_jobs() -> int:
     return _RUNNER.running()
 
 
-def _remote_job(repo: str, action: str):
+def _registry_drift(repo: str) -> dict | None:
+    """供应链固定校验（v2.12）：注册表收录仓库的「上游漂移」检查。
+
+    注册表在审核收录时固定了 sourceCommit（人工审核看的是哪一份）；
+    CI 每天刷的 latestSha 是上游现在到哪了。两者都存在且不一致 = 上游
+    在收录之后又推进了，默认**拦下**（409），前端把差异摆给用户、用户
+    确认后带 force=True 才放行 —— 装，装的是当前版本而非审核版本，
+    这个事实必须先说清楚。
+
+    注册表拉不到（离线且无缓存）→ 返回 None 放行并记 warn：这道闸
+    守的是「收录过的仓库」，数据都不在就无从校验，但不能因此把人锁死。
+    """
+    try:
+        reg = core.get_registry()
+    except Exception as exc:          # noqa: BLE001 —— 校验本身绝不挡死安装
+        core.log("warn", "install", f"供应链校验跳过（注册表不可用：{exc}）：{repo}")
+        return None
+    entry = next((e for e in (reg.get("plugins") or [])
+                  if str(e.get("repo", "")).casefold() == str(repo).casefold()), None)
+    if not entry:
+        return None
+    src = str(entry.get("sourceCommit") or "")
+    latest = str(entry.get("latestSha") or "")
+    if not src or not latest or src == latest:
+        return None
+    return {"repo": repo, "sourceCommit": src, "latestSha": latest,
+            "error": f"{repo} 上游已前移：审核固定在 {src[:12]}…，"
+                     f"当前 HEAD 已到 {latest[:12]}…。继续安装装到的是当前版本，"
+                     "内容可能与收录审核时不同"}
+
+
+def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
     """起一个远端任务。**并发已满时返回 None**，由调用方回 429。
 
     闸门在创建任务之前就抢下，抢不到就直接拒绝 —— 不能先建任务再排队，
     那样任务表会被塞满，用户看到的是一串永远不动的"运行中"。
+
+    allow_non_skill 仅对 add 生效：默认**不带** --allow-non-skill（供应链
+    收紧，v2.12）—— 安装链路默认只接受符合 Skill 协议的仓库；只有前端
+    确认框里用户显式勾选「兼容模式」时才放行，且必须留下日志。
     """
     if not _RUNNER.acquire():
         core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝 {action} {repo}")
@@ -525,11 +563,18 @@ def _remote_job(repo: str, action: str):
         _RUNNER.release()                 # 建任务都失败了，令牌必须还回去
         raise
 
+    if allow_non_skill and action == "add":
+        core.log("warn", "job",
+                 f"{repo} 以兼容模式安装（--allow-non-skill）：仓库未验证 Skill 协议，用户已显式确认")
+
     core.log("info", "job", f"{action} {repo} 开始")
 
     def work():
         try:
-            ok = _run_ghpm([action, repo] + (["--allow-non-skill"] if action == "add" else []), jid)
+            args = [action, repo]
+            if action == "add" and allow_non_skill:
+                args.append("--allow-non-skill")
+            ok = _run_ghpm(args, jid)
             _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}")
             core.log("info" if ok else "error", "job",
                      f"{action} {repo} {'成功' if ok else '失败'}")
@@ -915,7 +960,15 @@ class Handler(BaseHTTPRequestHandler):
                 repo, err2 = _repo_arg(body)
                 if err2:
                     return self._json({"ok": False, "error": err2}, 400)
-                jid = _remote_job(repo, "add")
+                # 供应链固定校验（v2.12）：上游漂移默认拦下，force=True 才放行
+                if not body.get("force"):
+                    drift = _registry_drift(repo)
+                    if drift:
+                        return self._json({"ok": False, "error": drift["error"],
+                                           "drift": drift}, 409)
+                # 兼容模式必须显式传入（前端确认框勾选），默认关闭
+                allow_ns = bool(body.get("allowNonSkill"))
+                jid = _remote_job(repo, "add", allow_non_skill=allow_ns)
                 if jid is None:
                     return self._json({"ok": False, "error":
                                        f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"

@@ -43,7 +43,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.11"
+SELFTEST_VERSION = "2.12"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -62,6 +62,9 @@ if _ISOLATED:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import market_core as core  # noqa: E402
 import workbuddy_market as wm  # noqa: E402  （R3 起注入点迁到包命名空间时用）
+import workbuddy_market.ownership  # noqa: E402  （R4：所有权迁包）
+import workbuddy_market.transactions  # noqa: E402  （R4：事务迁包）
+import workbuddy_market.trash  # noqa: E402  （R4：回收站迁包）
 
 PASS, FAIL, SKIP = [], [], []
 
@@ -284,7 +287,7 @@ def run() -> None:
     own["skills"]["gamma"] = {"owner": "test-market", "plugin": "bundle-two",
                               "version": "2.0.0", "installedAt": core.now_iso(),
                               "hash": core.tree_hash(core.SKILLS_DIR / "gamma")}
-    core.save_ownership(own)
+    wm.ownership.save_ownership(own)
 
     plan = core.plugin_uninstall_plan("bundle-one")
     ck("alpha/beta 可安全卸载", sorted(plan["removable"]) == ["alpha", "beta"], str(plan["removable"]))
@@ -573,12 +576,12 @@ def round4():
     shutil.rmtree(core.TX_DIR, ignore_errors=True)
     own_before = dict(core.load_ownership()["skills"])
 
-    real_save_own = core.save_ownership
-    core.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟 .ownership.json 写失败"))
+    real_save_own = wm.ownership.save_ownership
+    wm.ownership.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟 .ownership.json 写失败"))
     try:
         r_tx = core.install_local_plugin("bundle-one", "missing")
     finally:
-        core.save_ownership = real_save_own
+        wm.ownership.save_ownership = real_save_own
 
     ck("★ 文件确实装上了", (core.SKILLS_DIR / "alpha" / "SKILL.md").is_file()
        and (core.SKILLS_DIR / "beta" / "SKILL.md").is_file())
@@ -617,11 +620,11 @@ def round4():
     (core.SKILLS_DIR / "alpha" / "notes.md").write_text("# user edited\n", encoding="utf-8")
     core.sync_packaging(quiet=True)
     old_hash = core.load_ownership()["skills"]["alpha"]["hash"]
-    core.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟写失败"))
+    wm.ownership.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟写失败"))
     try:
         r_up = core.install_local_plugin("bundle-one", "update")
     finally:
-        core.save_ownership = real_save_own
+        wm.ownership.save_ownership = real_save_own
     ck("★ 更新后本地内容已等于市场版本",
        core.tree_hash(core.SKILLS_DIR / "alpha")
        == core.tree_hash(core.PLUGINS_DIR / "bundle-one" / "skills" / "alpha"))
@@ -1447,16 +1450,16 @@ def faults():
     core.TRASH_INDEX_PATH.write_text(
         json.dumps({"version": 1, "items": {}}), encoding="utf-8")
 
-    real_save = core._save_trash_index
+    real_save = wm.trash._save_trash_index
 
     def save_boom(_idx):
         raise OSError("模拟 .index.json 写入失败")
 
-    core._save_trash_index = save_boom
+    wm.trash._save_trash_index = save_boom
     try:
         t = core.move_to_trash(core.SKILLS_DIR / "alpha", "reinstall")
     finally:
-        core._save_trash_index = real_save
+        wm.trash._save_trash_index = real_save
 
     ck("★ ★ 索引写失败时不再把整体判为失败（rename 已生效）",
        t is not None and Path(t).exists(), str(t))
@@ -1474,11 +1477,11 @@ def faults():
 
     # 整条安装流程同样不能被索引写失败带崩
     core.install_local_plugin("bundle-one", "force")     # 先把 alpha 装回来
-    core._save_trash_index = save_boom
+    wm.trash._save_trash_index = save_boom
     try:
         r_fs = core.install_local_plugin("bundle-one", "force")
     finally:
-        core._save_trash_index = real_save
+        wm.trash._save_trash_index = real_save
     ck("★ 索引写失败时安装仍报告成功",
        r_fs["ok"] and "alpha" in (r_fs["added"] + r_fs["updated"]), str(r_fs.get("added")))
     ck("★ 且新版本已正确落位",
@@ -1693,12 +1696,12 @@ def round5():
     shutil.rmtree(core.TX_DIR, ignore_errors=True)
     own_before = json.dumps(core.load_ownership()["skills"], sort_keys=True)
 
-    real_save_own = core.save_ownership
-    core.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟写失败"))
+    real_save_own = wm.ownership.save_ownership
+    wm.ownership.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟写失败"))
     try:
         core.install_local_plugin("bundle-one", "force")
     finally:
-        core.save_ownership = real_save_own
+        wm.ownership.save_ownership = real_save_own
     ck("（前提）确实留下了待补账的事务", bool(core.tx_list()))
 
     # 用户在这中间改了自己的那份
@@ -1736,11 +1739,11 @@ def round5():
     shutil.rmtree(core.TX_DIR, ignore_errors=True)
     ck("（前提）alpha 归本市场", "alpha" in core.load_ownership()["skills"])
 
-    core.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟 forget 失败"))
+    wm.ownership.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟 forget 失败"))
     try:
         r_un = core.uninstall_local_plugin("bundle-one")
     finally:
-        core.save_ownership = real_save_own
+        wm.ownership.save_ownership = real_save_own
 
     ck("★ 目录确实被搬走了", not (core.SKILLS_DIR / "alpha").exists())
     ck("★ 所有权还没清（这就是要补的账）",
@@ -2581,14 +2584,47 @@ def round9():
        and core.LOCK_PATH is wm.paths.LOCK_PATH
        and core.GHPM_PY is wm.paths.GHPM_PY
        and core.HASH_CHUNK_BYTES is wm.paths.HASH_CHUNK_BYTES)
+    # R4（v2.12）：trash / ownership / transactions 迁包后的 re-export 同一性
+    ck("回收站符号同一性（R4）",
+       core.move_to_trash is wm.trash.move_to_trash
+       and core.trash_stats is wm.trash.trash_stats
+       and core.prune_trash is wm.trash.prune_trash
+       and core.TrashIndex is wm.trash.TrashIndex
+       and core._save_trash_index is wm.trash._save_trash_index
+       and core._trash_entry is wm.trash._trash_entry
+       and core.TRASH_INDEX_PATH == wm.trash.TRASH_INDEX_PATH)
+    ck("所有权符号同一性（R4）",
+       core.load_ownership is wm.ownership.load_ownership
+       and core.save_ownership is wm.ownership.save_ownership
+       and core.record_owner is wm.ownership.record_owner
+       and core.forget_owner is wm.ownership.forget_owner)
+    ck("事务符号同一性（R4）",
+       core.tx_begin is wm.transactions.tx_begin
+       and core.tx_note_staged is wm.transactions.tx_note_staged
+       and core.tx_note_committed is wm.transactions.tx_note_committed
+       and core.tx_release is wm.transactions.tx_release
+       and core.tx_close is wm.transactions.tx_close
+       and core.tx_list is wm.transactions.tx_list
+       and core.recover_transactions is wm.transactions.recover_transactions
+       and core._TX_ACTIVE is wm.transactions._TX_ACTIVE)
 
-    # --- 24B. 注入点定义模块盯防（R2 core；R3 后 _scan/_walk_tree 等已迁 scanner）
+    # --- 24B. 注入点定义模块盯防（R2 core；R3 后 _scan/_walk_tree 等已迁 scanner；
+    #          R4 后 trash / ownership / transactions 已迁包，patch 落点随迁）
     for _name in ("quick_fingerprint", "tree_hash", "tree_hash_from_index",
-                  "save_ownership", "record_owner", "tx_begin",
-                  "tx_note_committed", "_stage_skill", "_commit_staged",
-                  "build_state"):
+                  "_stage_skill", "_commit_staged", "build_state"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
         ck(f"注入点仍定义在 core：{_name}", _mod == "market_core", _mod)
+    for _name, _want in (
+            ("save_ownership", "workbuddy_market.ownership"),
+            ("record_owner", "workbuddy_market.ownership"),
+            ("forget_owner", "workbuddy_market.ownership"),
+            ("tx_begin", "workbuddy_market.transactions"),
+            ("tx_note_committed", "workbuddy_market.transactions"),
+            ("recover_transactions", "workbuddy_market.transactions"),
+            ("move_to_trash", "workbuddy_market.trash"),
+            ("prune_trash", "workbuddy_market.trash")):
+        _mod = getattr(getattr(core, _name), "__module__", "?")
+        ck(f"注入点已迁包（v2.12 R4）：{_name}", _mod == _want, _mod)
     for _name in ("_scan", "_walk_tree", "_scan_many", "file_index",
                   "SkillScanCache", "parse_skill_meta"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
@@ -2612,7 +2648,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.11.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.12.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2693,9 +2729,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.11.0"
-       and core.MARKET_VERSION == "2.11.0"
-       and SELFTEST_VERSION == "2.11", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.12.0"
+       and core.MARKET_VERSION == "2.12.0"
+       and SELFTEST_VERSION == "2.12", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -3291,6 +3327,72 @@ def round12():
     finally:
         httpd4.shutdown()
         httpd4.server_close()
+
+    # --- 27H. 供应链固定校验（v2.12）：/api/remote/add 的上游漂移闸门
+    # 收录时固定的 sourceCommit ≠ CI 刷出的 latestSha → 默认 409 拦下，
+    # force=True 才放行；注册表不可用时不锁死安装（闸门守的是「收录过的」）。
+    httpd5 = srv.make_server(0, token=TOKR)
+    PORT5 = httpd5.server_address[1]
+    threading.Thread(target=httpd5.serve_forever, daemon=True).start()
+
+    def post5(path, obj, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT5, timeout=10)
+        c.request("POST", path, body=json.dumps(obj).encode(),
+                  headers={"Content-Type": "application/json", **(headers or {})})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        try:
+            return r.status, json.loads(raw)
+        except Exception:
+            return r.status, raw.decode("utf-8", "replace")
+
+    SHA_A, SHA_B = "a" * 40, "b" * 40
+    fake_reg = {"plugins": [
+        {"repo": "owner/drift", "sourceCommit": SHA_A, "latestSha": SHA_B},
+        {"repo": "owner/fresh", "sourceCommit": SHA_B, "latestSha": SHA_B},
+        {"repo": "owner/nosha", "sourceCommit": SHA_A},
+    ]}
+    real_getreg = core.get_registry
+    core.get_registry = lambda force=False, now=None: fake_reg
+    captured = {}
+    real_rjob5 = srv._remote_job
+
+    def fake_rjob(repo, action, allow_non_skill=False):
+        captured.update(repo=repo, action=action, allow_non_skill=allow_non_skill)
+        return "fake-jid"
+
+    srv._remote_job = fake_rjob
+    try:
+        st, js = post5("/api/remote/add", {"repo": "owner/drift"}, AUTHR)
+        ck("★ 上游漂移 → 409 拦截并带凭证",
+           st == 409 and js.get("drift", {}).get("sourceCommit") == SHA_A
+           and js.get("drift", {}).get("latestSha") == SHA_B,
+           f"{st} {str(js)[:80]}")
+        st, js = post5("/api/remote/add", {"repo": "owner/drift", "force": True}, AUTHR)
+        ck("★ force=True 显式放行", st == 200 and js.get("jobId") == "fake-jid", str(st))
+        st, js = post5("/api/remote/add", {"repo": "owner/fresh"}, AUTHR)
+        ck("★ 未漂移照常放行", st == 200 and js.get("ok") is True, str(st))
+        st, js = post5("/api/remote/add", {"repo": "owner/nosha"}, AUTHR)
+        ck("★ 缺 latestSha 不误拦（无法判定 ≠ 判定漂移）", st == 200, str(st))
+        st, js = post5("/api/remote/add",
+                       {"repo": "owner/fresh", "allowNonSkill": True}, AUTHR)
+        ck("★ 兼容模式必须显式传入才开启",
+           st == 200 and captured.get("allow_non_skill") is True, str(captured))
+        st, js = post5("/api/remote/add", {"repo": "owner/fresh"}, AUTHR)
+        ck("★ 默认关闭兼容模式",
+           st == 200 and captured.get("allow_non_skill") is False, str(captured))
+
+        def reg_boom(force=False, now=None):
+            raise RuntimeError("离线")
+        core.get_registry = reg_boom
+        st, js = post5("/api/remote/add", {"repo": "owner/anything"}, AUTHR)
+        ck("★ 注册表不可用时跳过校验、不锁死安装", st == 200, f"{st} {str(js)[:60]}")
+    finally:
+        srv._remote_job = real_rjob5
+        core.get_registry = real_getreg
+        httpd5.shutdown()
+        httpd5.server_close()
 
     core.REGISTRY_PATH.unlink(missing_ok=True)      # 收尾：留干净环境
     ck("收尾：注册表缓存已清理", not core.REGISTRY_PATH.exists())

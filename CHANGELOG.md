@@ -2,7 +2,59 @@
 
 本项目的版本号唯一来源是 `src/workbuddy_market/version.py` 的 `MARKET_VERSION`。
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
-更详细的每轮变更说明见 `README.md` 第十节起（v2 → v2.11 各一节）。
+更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
+
+## 2.12.0 — 2026-10-08（供应链信任 + R4 模块化收尾 + CI 加固）
+
+**三级信任模型**
+- 注册表条目新增 `trust` 字段：`official`（官方收录）/ `reviewed`
+  （社区精选，人工审核）/ `external`（未审核）。`parse_registry`
+  白名单放行，值不认识降为 `reviewed`；当前 28 条 = 1 官方 + 27 已审核。
+- 网页卡片徽标：✓ 官方 / ✓ 已审核 / ! 未审核——GitHub 全网搜索结果
+  一律标「! 未审核」，搜索到 ≠ 官方认可；安装确认框同步标注来源等级。
+
+**供应链固定来源**
+- 注册表新增 `sourceCommit`（审核时固定的 commit，28/28 已补齐）、
+  `license`（26/28，其余如实留空）、`review{status,reviewedAt,method}`
+  字段（可选增量，schema 保持 1——向前向后兼容，不破坏既有消费者）。
+- 安装闸门：`POST /api/remote/add` 对收录仓库比对 `sourceCommit` 与
+  CI 刷出的 `latestSha`，上游已前移 → **409 拦下**并带凭证；前端把
+  差异摆给用户，`force=true` 显式放行（装的是当前版本、非审核版本，
+  这个事实先说清楚）。注册表不可用时跳过校验、不锁死安装。
+- `build_registry.py` 对漂移条目输出「建议重新审核」预警（静态字段
+  仍只许人工改）。
+- 收紧 `--allow-non-skill`：默认**不带**，安装链路默认只接受符合
+  Skill 协议的仓库；兼容模式必须在确认框显式勾选，且记 warn 日志。
+- 注册表描述去营销化（"250,000+ researchers" 之类未经验证的数字清出，
+  registry 是 metadata 不是广告页）。
+
+**CI / 供应链加固**
+- `.github/workflows/*.yml`：第三方 action（checkout / setup-python）
+  全部 pin 到完整 SHA（升级换 SHA 并同步注释版本号）。
+- `registry.yml` 每日刷新**不再直推 main**：生成 → 分支 → PR → CI →
+  人工合并（`permissions` 增 `pull-requests: write`）。
+
+**R4 模块化收尾**（逐字搬迁，行为零变化）
+- trash / ownership / transactions 迁入 `src/workbuddy_market/`
+  （`market_core.py` 2445 → 1755 行；`_measure` 等对 `core._scan` /
+  `tree_hash` / `quick_fingerprint` / `say` / `_sweep_staging` 的依赖
+  改为调用点晚绑定 `import market_core`——这些注入点的 patch 语义与
+  v2.11 前完全一致）。
+- selftest patch 落点随迁：`save_ownership` → `wm.ownership`、
+  `_save_trash_index` → `wm.trash`；第 24 节新增迁包符号的 module 归属
+  与 re-export 同一性盯防。
+
+**产品化**
+- 新增 `pyproject.toml`（版本动态读 `version.py`，不出现第二个常量）+
+  `workbuddy-market` console script + `python -m workbuddy_market`
+  （`cli.py` 向上定位 clone 根后委托 `launcher.main()`，行为与
+  `python launcher.py` 一致；不在 clone 内则明确报错）。
+- README 瘦身：1256 → 429 行；v2 → v2.11 各轮详解迁 `docs/versions.md`，
+  历史摘要收敛为一张表；注册表口径更新（trust / sourceCommit）。
+
+**自检**：509 → 523 项（R4 同一性/归属盯防 + 第 27H 节漂移闸门端到端
+7 项：409 凭证、force 放行、未漂移放行、缺 latestSha 不误拦、兼容模式
+显式传参、注册表不可用不锁死）。Windows 隔离模式全绿。
 
 ## 2.11.0 — 2026-10-07（社区注册表 + 端口修复）
 

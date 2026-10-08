@@ -161,6 +161,26 @@ def parse_registry(data) -> dict:
             "homepage": _clean_text(it.get("homepage"), 300),
             "addedAt": _clean_text(it.get("addedAt"), 10),
         }
+        # 信任分级（v2.12）：official=官方收录 / reviewed=社区精选（人工审核）
+        # / external=未审核。静态字段，只许人工维护；值不认识就降为 reviewed。
+        trust = _clean_text(it.get("trust"), 16) or "reviewed"
+        entry["trust"] = trust if trust in ("official", "reviewed", "external") else "reviewed"
+        # 供应链字段（v2.12，可选增量，schema 保持 1）：审核时固定下来的来源
+        # commit 与许可证。sourceCommit 是「审核时看的是哪一份」的凭证，
+        # 安装端拿它和 CI 刷出来的 latestSha 比对，检测上游漂移。
+        lic = _clean_text(it.get("license"), 64)
+        if lic:
+            entry["license"] = lic
+        sc = _clean_text(it.get("sourceCommit"), 64)
+        if sc:
+            entry["sourceCommit"] = sc
+        rv = it.get("review")
+        if isinstance(rv, dict):
+            review = {k: _clean_text(rv.get(k), 40)
+                      for k in ("status", "reviewedAt", "method")}
+            review = {k: v for k, v in review.items() if v}
+            if review:
+                entry["review"] = review
         # 动态字段：CI 每天重建；类型不对就当没有，绝不让坏数据进前端
         stars = it.get("stars")
         if isinstance(stars, int) and not isinstance(stars, bool) and stars >= 0:
