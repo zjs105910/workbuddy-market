@@ -32,10 +32,10 @@ src/workbuddy_market/
 selftest patch 落点随迁、每轮 selftest 全绿。
 
 ### 2. 定义 Marketplace Package 协议（manifest.json）
-**讨论稿已定稿：docs/plugin-spec.md（v0.1，2026-10-08）** ——
-含包布局、manifest schema、与现有安全模型的衔接、生命周期、
-6 项开放问题。下一步：冻结开放问题 → schema v1 定稿 →
-实现 `pack` / `verify`（packaging.py）。
+**v0.2 已冻结全部六项开放问题，pack / verify 已实现**
+（`workbuddy_market/packaging.py`，selftest 第 30 节全覆盖攻击面；
+详见 docs/plugin-spec.md §6/§7）。剩余：registry 安装链路接入
+（条目带 packageHash，安装走 verify）。
 
 ### 3. 可复现安装（immutable artifact）
 现状的 trust 模型解决「上游变了会提醒」，但安装的仍是**当时的
@@ -84,6 +84,11 @@ UI 提供「安装审核版本 / 安装当前版本」双入口。
 ---
 
 ## 已落地的部分
+
+**v2.15**：
+- ✅ P0-2 完成：plugin-spec 六项开放问题全部冻结（v0.2）+
+  `packaging.py` 的 pack / verify 纯函数层（攻击面全覆盖）
+- ✅ round5 自检零网络漏洞修复（remote/add 假接缝）
 
 **v2.14（R5）**：
 - ✅ P0-1 半程：installer / uninstaller 迁包（core 1755 → 1379 行），

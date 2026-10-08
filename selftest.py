@@ -30,6 +30,9 @@
 第 29 节   v2.14/R5：installer / uninstaller 迁包——re-export 同一性、
            core 注入点晚绑定端到端（quick_fingerprint / tx_begin 拦截
            包内编排）、模块归属盯防（24B 已扩展）
+第 30 节   v2.15：Market Package pack / verify——规范化 JSON 确定性、
+           重打包哈希稳定、四类攻击面（改文件 / 塞文件 / 改清单 /
+           路径穿越）、链接拒绝、平台 force 口径、依赖声明形状
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -49,7 +52,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.14"
+SELFTEST_VERSION = "2.15"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -535,6 +538,9 @@ def run() -> None:
 
     # ============ 29. v2.14：R5 安装/卸载迁包 ============
     round14()
+
+    # ============ 30. v2.15：Market Package pack / verify ============
+    round15()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -1864,7 +1870,15 @@ def round5():
         for v in ["../../x", "foo", "owner/", "-x/y", "a/b/c"]:
             st, js = hit5("/api/remote/add", {"repo": v})
             ck(f"★ /api/remote/add 拒绝 {v!r}", st == 400, f"{st} {str(js)[:50]}")
-        st_ok, js_ok = hit5("/api/remote/add", {"repo": "owner/repo"})
+        # 漂移闸门会经 get_registry 走 registry 三路兜底 —— 那是真网络。
+        # 本节测的是路由与参数校验，不是 registry（27H 已有专用端到端），
+        # 所以这里按零网络纪律打假接缝：空注册表 → 无漂移 → 照常放行。
+        real_getreg5 = core.get_registry
+        core.get_registry = lambda force=False, now=None: {"plugins": []}
+        try:
+            st_ok, js_ok = hit5("/api/remote/add", {"repo": "owner/repo"})
+        finally:
+            core.get_registry = real_getreg5
         ck("★ /api/remote/add 接受合法 repo", st_ok == 200 and js_ok.get("jobId"),
            f"{st_ok} {str(js_ok)[:50]}")
 
@@ -2669,7 +2683,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.14.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.15.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2750,9 +2764,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.14.0"
-       and core.MARKET_VERSION == "2.14.0"
-       and SELFTEST_VERSION == "2.14", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.15.0"
+       and core.MARKET_VERSION == "2.15.0"
+       and SELFTEST_VERSION == "2.15", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -3684,6 +3698,144 @@ def round14():
        str(r_u.get("plan", {}).get("counts"))[:80])
     r_back = core.install_local_plugin("bundle-one", "missing")
     ck("★ 装回（环境归零，后续轮次不受影响）", r_back.get("ok") is True)
+
+
+def round15():
+    """v2.15：Market Package pack / verify（docs/plugin-spec.md v0.2）。
+
+    本轮冻结了协议的 6 项开放问题并实现纯函数层：pack（本地插件目录 →
+    带 manifest 的包）与 verify（不可信输入，按攻击面处理）。安装链路
+    的接入是下一步，不在本轮。
+
+    攻击面用例（spec §7.3 点名的三类 + 双向一致）：
+    改文件内容 / 塞未列出文件 / 改清单字段 / 路径穿越 / 链接 / 平台。
+    """
+    section("30. v2.15：Market Package pack / verify")
+    import workbuddy_market.packaging as pk
+
+    tmp = _TMP / "pkg-lab"
+    shutil.rmtree(tmp, ignore_errors=True)
+    src = tmp / "src"
+    (src / "skills" / "alpha" / "sub").mkdir(parents=True)
+    (src / "skills" / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\nversion: 1.0.0\n---\n# alpha\n", encoding="utf-8")
+    (src / "skills" / "alpha" / "sub" / "x.txt").write_text("X" * 64, encoding="utf-8")
+    (src / "README.md").write_text("# demo\n", encoding="utf-8")
+
+    # --- 30A. 规范化 JSON：键序无关 + 中文原样（冻结决定 #2 的可复现口径）
+    a = pk.canonical_json({"b": 1, "a": 2})
+    b = pk.canonical_json({"a": 2, "b": 1})
+    ck("规范化 JSON：键序无关且紧凑", a == b and a == b'{"a":2,"b":1}')
+    ck("规范化 JSON：非 ASCII 按原样编码（ensure_ascii=False）",
+       pk.canonical_json({"k": "中"}) == '{"k":"中"}'.encode("utf-8"))
+
+    # --- 30B. pack happy path + 重打包确定性
+    r1 = pk.pack_package(src, tmp / "pkg1", pid="demo-pkg", name="Demo",
+                         version="1.0.0", license="MIT",
+                         source={"type": "github", "repo": "o/r", "ref": "a" * 40})
+    ck("★ pack：包落位且 manifest 齐全",
+       r1.get("ok") and (tmp / "pkg1" / "manifest.json").is_file()
+       and r1["files"] == 3, str(r1.get("files")))
+    r2 = pk.pack_package(src, tmp / "pkg2", pid="demo-pkg", name="Demo",
+                         version="1.0.0", license="MIT",
+                         source={"type": "github", "repo": "o/r", "ref": "a" * 40})
+    ck("★ 重打包整包哈希稳定（immutable 口径）",
+       r2["packageHash"] == r1["packageHash"],
+       f"{r1['packageHash'][:12]} vs {r2['packageHash'][:12]}")
+    ck("pack：id/version 复用配置层校验（坏 id 拒绝）",
+       _raises(pk.pack_package, core.ConfigError,
+               src, tmp / "pkgX", pid="../evil", name="X", version="1.0.0"))
+
+    # --- 30C. verify happy path
+    v = pk.verify_package(tmp / "pkg1")
+    ck("★ verify：合法包通过且零告警",
+       v["ok"] and not v["errors"] and not v["warnings"],
+       "; ".join(v["errors"])[:100])
+    ck("★ verify：packageHash 与 pack 一致",
+       v["packageHash"] == r1["packageHash"])
+
+    def _fresh():
+        """从 pkg2 复制一份干净的包（pk2 本轮永不改动）。"""
+        d = tmp / "pkg-t"
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.copytree(tmp / "pkg2", d)
+        return d
+
+    def _rewrite(d: Path, mutate):
+        m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+        mutate(m)
+        (d / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+
+    # --- 30D. 攻击面：改文件 / 塞文件 / 改清单 / 穿越
+    d = _fresh()
+    (d / "skills" / "alpha" / "sub" / "x.txt").write_text("Y" * 64, encoding="utf-8")
+    ck("★ 攻击：篡改文件内容 → 拒绝", not pk.verify_package(d)["ok"])
+    d = _fresh()
+    (d / "extra.txt").write_text("evil", encoding="utf-8")
+    ck("★ 攻击：塞未列出文件（双向一致）→ 拒绝", not pk.verify_package(d)["ok"])
+    d = _fresh()
+    (d / "skills" / "alpha" / "sub" / "x.txt").unlink()
+    ck("★ 攻击：删清单内文件 → 拒绝", not pk.verify_package(d)["ok"])
+    d = _fresh()
+    _rewrite(d, lambda m: m.update(version="9.9.9"))
+    ck("★ 攻击：改清单字段（自哈希不符）→ 拒绝", not pk.verify_package(d)["ok"])
+    d = _fresh()
+    _rewrite(d, lambda m: m.update(skills=["skills/../../.."]))
+    ck("★ 攻击：skills 路径穿越 → 拒绝（ensure_child 闸）",
+       not pk.verify_package(d)["ok"])
+    d = _fresh()
+    _rewrite(d, lambda m: m.update(id="../evil"))
+    ck("★ 攻击：坏 id → 拒绝（validate_id 复用）", not pk.verify_package(d)["ok"])
+    d = _fresh()
+    _rewrite(d, lambda m: m.update(dependencies={"skills": [{"id": 1}]}))
+    ck("攻击：依赖声明形状非法 → 拒绝（声明不解析，形状必须对）",
+       not pk.verify_package(d)["ok"])
+    d = _fresh()
+    (d / "manifest.json").write_text("{broken", encoding="utf-8")
+    ck("攻击：manifest 不是 JSON → 拒绝且不抛", not pk.verify_package(d)["ok"])
+
+    # --- 30E. 链接防线
+    link_type = _make_link(src, src / "skills" / "alpha" / "sub" / "link-dir")
+    if link_type:
+        try:
+            refused = False
+            try:
+                pk.pack_package(src, tmp / "pkg-link", pid="demo-pkg",
+                                name="Demo", version="1.0.0")
+            except OSError as exc:
+                refused = "链接" in str(exc) or "junction" in str(exc)
+            ck("★ pack：源含重解析点 → 拒绝打包", refused)
+        finally:
+            _drop_link(src / "skills" / "alpha" / "sub" / "link-dir")
+    else:
+        sk("pack：源含重解析点 → 拒绝打包",
+           "本环境建不出 junction / symlink（无管理员或宿主拦截）")
+
+    # --- 30F. 平台口径（冻结决定 #4：默认拒绝，force 放行并记 warning）
+    alien = "linux" if os.name == "nt" else "windows"
+    rp = pk.pack_package(src, tmp / "pkg-plat", pid="demo-pkg", name="Demo",
+                         version="1.0.0", platforms=[alien])
+    ck("pack：platforms 写进 manifest 且自哈希含它",
+       rp["manifest"]["platforms"] == [alien])
+    v = pk.verify_package(tmp / "pkg-plat")
+    ck("★ 平台不匹配 → 默认拒绝",
+       not v["ok"] and any("平台不匹配" in e for e in v["errors"]),
+       "; ".join(v["errors"])[:80])
+    v = pk.verify_package(tmp / "pkg-plat", force=True)
+    ck("★ force=True → 放行并如实记 warning",
+       v["ok"] and v["warnings"] and "平台不匹配" in v["warnings"][0],
+       "; ".join(v["warnings"])[:80])
+
+    # 收尾
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _raises(fn, exc_type, *args, **kwargs) -> bool:
+    try:
+        fn(*args, **kwargs)
+        return False
+    except exc_type:
+        return True
 
 
 if __name__ == "__main__":

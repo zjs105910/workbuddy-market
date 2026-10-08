@@ -1,9 +1,10 @@
-# WorkBuddy Market Package 协议（讨论稿 v0.1，2026-10-08）
+# WorkBuddy Market Package 协议（v0.2，2026-10-08）
 
-> 状态：**讨论稿（DRAFT）**。本文是 v3-roadmap P0-2 的设计起点，
-> 只定 schema 与语义讨论，**不含任何实现**。实现前需要冻结的决策点
-> 见文末「开放问题」。schema 版本独立于市场版本号演进
-> （`schemaVersion` 从 1 开始，向后兼容的字段新增不升版）。
+> 状态：**v0.2 —— 六项开放问题已冻结（见 §6），`pack` / `verify` 纯函数
+> 层已实现（`workbuddy_market/packaging.py`，selftest 第 30 节盯防）**。
+> 安装链路接入（registry 带 manifestHash → 安装走 verify）是下一步。
+> schema 版本独立于市场版本号演进（`schemaVersion` 从 1 开始，
+> 向后兼容的字段新增不升版）。
 
 ## 1. 动机：第四层抽象
 
@@ -113,27 +114,37 @@ fetch（provider: github/local/http → 不可变产物）
 verify 失败 = 整包拒绝，无半截状态（与「任何一步失败源目录原样保留」
 同一纪律）。
 
-## 6. 开放问题（实现前必须冻结）
+## 6. 开放问题（v0.2 已全部冻结 ✅）
 
-1. **产物从哪来**：审核后由 CI 构建 artifact（release attachment）
-   还是从源 repo 原地取 commit？前者才真正做到 immutable，后者实现
-   成本低但复现性弱。倾向前者。
-2. **规范化 JSON**：manifest 哈希的规范化口径（键序、空白、UTF-8
-   形式）需要精确规定，否则跨工具不可复现。
-3. **签名**：v0.1 只有哈希（完整性），不做签名（真实性由 trust +
-   source.ref 承担）。何时引入 GPG / sigstore？
-4. **平台不匹配**：警告还是拒绝？（倾向：默认拒绝，`--force` 放行
-   并记 warn —— 与 `--allow-non-skill` 同一口径。）
-5. **与 ghpm 兼容**：现有 remote 源装出来的内容没有 manifest。
-   过渡期：无 manifest 的安装走现有路径并标注「无完整性清单」。
-6. **依赖解析时机**：v0.1 声明不解析；依赖系统（P2）落地时的
-   冲突 / 循环检测语义另立文档。
+1. **产物从哪来** → ✅ **不可变 artifact（CI 构建）**。审核后由 CI
+   构建产物并分发（release attachment / registry 登记 `packageHash`）；
+   从源 repo 原地取 commit 的路径只作为过渡兼容。`pack` 的
+   `source.ref` 固定来源 commit。
+2. **规范化 JSON** → ✅ **UTF-8（无 BOM）+ 键按 Unicode 码位排序 +
+   紧凑分隔符 `,` `:` + ensure_ascii=False + 末尾无换行**。
+   实现见 `packaging.canonical_json()`；manifest 自哈希与
+   `packageHash`（对「相对路径 → 文件哈希」映射的规范化序列化再哈希）
+   都用这个口径。
+3. **签名** → ✅ **v0.1 不做**。完整性由 sha256 清单承担，真实性由
+   trust 三级 + source.ref 承担；`integrity.signature` 预留字段位，
+   引入 GPG / sigstore 时升 schemaVersion。
+4. **平台不匹配** → ✅ **默认拒绝，`force=True` 放行并记 warning**
+   （与 `--allow-non-skill` 同一口径）。实现见 `verify_package(force=)`。
+5. **ghpm 兼容** → ✅ **无 manifest 的安装走现有路径**，注册表/界面
+   如实标注「无完整性清单」；不做格式转换。
+6. **依赖解析时机** → ✅ **v0.1 声明不解析**：`verify_package` 只校验
+   依赖声明形状（skills=[{id,range}] / system / workbuddy），
+   冲突 / 循环检测等解析语义在依赖系统（P2）落地时另立文档。
 
 ## 7. 落地顺序（对应 v3-roadmap）
 
-1. 冻结 §6 开放问题 → schema v1 定稿（本文档转正式 spec）；
-2. `pack`：本地目录 → 合法 Package（打包工具 + checksums 生成）；
-3. `verify`：独立纯函数（`workbuddy_market/packaging.py`），
-   selftest 覆盖路径穿越 / 哈希篡改 / 链接三类攻击用例；
-4. registry 接入：条目带 `manifestHash`，安装走 verify 链路；
+1. ~~冻结 §6 开放问题 → schema v1 定稿~~ ✅（2026-10-08，本文档 v0.2）
+2. ~~`pack`：本地目录 → 合法 Package~~ ✅（`packaging.pack_package`：
+   复制 + 链接拒绝 + 逐文件 sha256 + manifest 自哈希 + packageHash）
+3. ~~`verify`：独立纯函数~~ ✅（`packaging.verify_package`：不可信输入、
+   自哈希 → 逐文件 → **双向一致**（多一个未列出文件也算失败）→
+   链接防线 → 路径穿越 → 平台 force 口径 → 依赖形状；
+   selftest 第 30 节覆盖全部攻击面）
+4. registry 接入：条目带 `packageHash` / `manifestHash`，安装走 verify
+   链路（下一步）
 5. 依赖系统（P2）另起。

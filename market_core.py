@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.14）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.15）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
 → v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1）
 → v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表）
 → v2.12（R4）→ v2.13（跨卷原子化 + API v1 + doctor）
-→ v2.14（R5：installer / uninstaller 迁包，当前）。
+→ v2.14（R5：installer / uninstaller 迁包）
+→ v2.15（Market Package 协议冻结 + pack/verify，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 

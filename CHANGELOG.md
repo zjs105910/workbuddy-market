@@ -4,6 +4,42 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.15.0 — 2026-10-08（Market Package 协议冻结 + pack / verify 实现）
+
+**协议冻结**（`docs/plugin-spec.md` v0.1 → v0.2，六项开放问题全部定稿）
+1. 产物来源 = **不可变 artifact（CI 构建）**；从源 repo 原地取 commit
+   只作过渡兼容；
+2. 规范化 JSON = **UTF-8（无 BOM）+ 键按码位排序 + 紧凑分隔符 +
+   ensure_ascii=False + 末尾无换行**（`packaging.canonical_json`）；
+3. 签名 = v0.1 不做，`integrity.signature` 预留字段位；
+4. 平台不匹配 = **默认拒绝，force=True 放行并记 warning**
+   （与 `--allow-non-skill` 同一口径）；
+5. ghpm 兼容 = 无 manifest 走现有路径，如实标注「无完整性清单」；
+6. 依赖 = **声明不解析**，verify 只校验声明形状。
+
+**pack / verify 纯函数层**（新模块 `workbuddy_market/packaging.py`，
+P0-2 落地第一步；安装链路接入是下一步）
+- `pack_package()`：本地插件目录 → 带 manifest 的 Market Package。
+  源含重解析点拒绝；skill 目录必须有 SKILL.md；id / version 复用
+  配置层 `validate_id` / `validate_version`；逐文件 sha256 +
+  manifest 自哈希（canonical_json）+ 整包 `packageHash`（对
+  「相对路径 → 文件哈希」映射规范化再哈希）—— **重打包哈希稳定**；
+  失败即清理，不留半截包。
+- `verify_package()`：不可信输入按攻击面处理，校验序 fail-closed：
+  manifest 形状（schemaVersion / 必填 / id / version）→ skills 路径
+  （skills/ 前缀 + ensure_child 越界闸）→ manifest 自哈希 → 逐文件
+  哈希 + **双向一致**（磁盘上多出任何未列出文件也算失败）→ 链接
+  防线（包内任何重解析点即失败）→ SKILL.md 存在性 → 平台
+  （force 口径）→ 依赖声明形状。坏 JSON / 缺文件返回 errors 不抛。
+- `content_hash()`：整包内容哈希（P1 packageHash 全量固定的地基）。
+
+**自检**：560 → 579 项（第 30 节 19 项：规范化键序无关与中文原样、
+重打包哈希稳定、攻击面八连（改文件 / 塞文件 / 删文件 / 改清单 /
+穿越 / 坏 id / 坏依赖形状 / 坏 JSON）、链接拒绝、平台默认拒绝 +
+force 放行）。另修 round5 零网络漏洞：`/api/remote/add` 用例的漂移
+闸门原先会真发 registry 请求（代理抽风时拖垮整个自检），改为空
+注册表假接缝（27H 已有该闸门的专用端到端，无覆盖损失）。
+
 ## 2.14.0 — 2026-10-08（R5：installer / uninstaller 迁包 + manifest 协议讨论稿）
 
 **R5 模块化**（逐字搬迁，行为零变化；core 1755 → 1379 行）

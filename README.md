@@ -161,7 +161,9 @@ workbuddy-market/
 │                                        v2.10 增 catalog，v2.11 增 registry，
 │                                        v2.12/R4 增 trash / ownership / transactions，
 │                                        v2.13 增 doctor（clone 外可跑的体检），
-│                                        v2.14/R5 增 installer / uninstaller
+│                                        v2.14/R5 增 installer / uninstaller，
+│                                        v2.15 增 packaging（Market Package
+│                                        pack / verify，协议见 docs/plugin-spec.md）
 ├── registry/plugins.json             ← 社区注册表（v2.11）：静态收录人工维护，
 │                                        动态字段（stars 等）由每日 CI 重建；
 │                                        v2.12 增 trust / sourceCommit / license /
@@ -170,7 +172,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 560 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 579 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -208,7 +210,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 560 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 579 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -412,31 +414,33 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | v2 → v2.11 | 七轮代码评审 + 开源重构 R1~R3 + GitHub 动态目录 + 社区注册表 | [docs/versions.md](docs/versions.md) |
 | v2.12 | 供应链信任（trust 分级 / sourceCommit 固定 / 漂移拦截）+ R4 模块化收尾 + CI 加固 | [CHANGELOG.md](CHANGELOG.md) 2.12.0 条目 |
 | v2.13 | 跨卷回收站原子化 + API /api/v1 版本化 + doctor 体检 + v3.0 路线定稿 | [CHANGELOG.md](CHANGELOG.md) 2.13.0 条目 |
-| **v2.14** | **R5：installer / uninstaller 迁包（core 1755 → 1379 行）+ manifest 协议讨论稿** | [CHANGELOG.md](CHANGELOG.md) 2.14.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) |
+| v2.14 | R5：installer / uninstaller 迁包（core 1755 → 1379 行）+ manifest 协议讨论稿 | [CHANGELOG.md](CHANGELOG.md) 2.14.0 条目 |
+| **v2.15** | **Market Package 协议冻结 + pack / verify 实现（packaging.py）** | [CHANGELOG.md](CHANGELOG.md) 2.15.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) |
 
-### v2.14 摘要（2026-10-08）
+### v2.15 摘要（2026-10-08）
 
-- **R5 迁包**：`classify_skill` / `plugin_uninstall_plan` /
-  `uninstall_local_plugin` 等迁 `workbuddy_market/uninstaller.py`，
-  两阶段安装全家（`_stage_skill` / `_commit_staged` /
-  `install_local_plugin` / `INSTALL_MODES`）迁
-  `workbuddy_market/installer.py` —— core 1755 → 1379 行，
-  逐字搬迁、行为零变化；
-- **注入点语义原样**：对 core 注入点（`_scan` / `tree_hash*` /
-  `quick_fingerprint` / `tx_*` / `record_owner` / `_sync_packaging`）
-  一律调用点晚绑定 `import market_core` —— 崩溃矩阵与
-  「tx_begin 失败 → OSError、磁盘零改动」契约经全部既有用例回归；
-- **manifest 协议讨论稿**：`docs/plugin-spec.md` 定义 Market Package
-  第四层抽象（manifest schema / 完整性 / 可复现安装），
-  v0.1 只定稿讨论，不含实现；开放问题 6 项待冻结；
-- 自检 545 → 560 项（第 29 节：installer/uninstaller 同一性、
-  core 注入点晚绑定端到端、迁移后全流程回归）。
+- **协议冻结**：`docs/plugin-spec.md` 升 v0.2，六项开放问题全部定稿 ——
+  不可变 artifact（CI 构建）、规范化 JSON（UTF-8 + 键排序 + 紧凑分隔符）、
+  v0.1 不做签名（预留 integrity.signature）、平台不匹配默认拒绝 +
+  force 放行、无 manifest 走现有路径、依赖声明不解析；
+- **pack / verify 纯函数层**（`workbuddy_market/packaging.py`）：
+  `pack_package` 把本地插件目录打成带 manifest 的 Market Package
+  （链接拒绝 + 逐文件 sha256 + manifest 自哈希 + 整包 packageHash，
+  重打包哈希稳定）；`verify_package` 按攻击面处理不可信输入 ——
+  自哈希 → 逐文件 → **双向一致**（塞一个未列出文件也算失败）→
+  链接防线 → 路径穿越 → 平台 force 口径 → 依赖声明形状；
+- id / version 校验复用配置层 `validate_id` / `validate_version`；
+- 安装链路接入（registry 带 packageHash → 安装走 verify）是下一步；
+- 自检 560 → 579 项（第 30 节 19 项：规范化确定性、重打包稳定性、
+  全部攻击面、平台口径）。另把 round5 的 `/api/remote/add` 用例
+  改成零网络假接缝（漂移闸门原先会真发 registry 请求，代理抽风时
+  拖垮整个自检）。
 
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 560 passed, 0 failed
+python selftest.py        # 579 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
