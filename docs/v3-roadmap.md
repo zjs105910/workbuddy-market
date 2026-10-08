@@ -87,6 +87,28 @@ pytest 试点（tests/unit 平台无关用例）也在双平台跑。完整 self
 
 ---
 
+## 外部评审 #2：dsh-market 对比（2026-10-08 定稿）
+
+第二轮外部走查拿本仓库与 dsh-market（DeepSeek Harness 宿主内插件市场）
+逐项对比，结论：dsh-market 赢在产品成熟度与生态规模，本仓库赢在
+本机安全、可恢复、可复现、私有化能力；路线不是把自己变成
+「小号 dsh-market」，而是把内核能力包装成「本机优先、安全可验证、
+可复现安装」的 Marketplace。评审给的 5 件事映射如下
+（v2.20 当轮落地的部分标 ✅）：
+
+| 评审建议 | 取舍与落点 |
+|---|---|
+| 1. WorkBuddy 原生插件市场 UI（评审的 P0） | **记录理由，暂不做原生面板**：5.7.6 实测宿主面板没有市场 UI 位（见 docs/WorkBuddy-5.7.6-面板实测.md），「市场必须在宿主里面」在这台宿主上走不通；现实路径 = Web UI 产品化（✅ v2.20 详情弹窗 / 风险预览；收藏 / 更新中心 / 截图进 P2） |
+| 2. 插件详情 + Screenshot + Compatibility | ✅ v2.20：详情弹窗（来源 / 信任 / 产物对账 / 兼容性声明 / 权限）+ 宿主版本与平台三态检测；screenshots 需要注册表截图字段与「仅 GitHub 图源」的策展规范，进 P2 |
+| 3. Trust + Permissions + Security Scan | ✅ v2.20：permissions 声明 + 安装前风险预览 + attestation 对账（trust / sourceCommit v2.12 已有）；第三方 skill 的静态安全扫描是独立工程，进 P2/P3 评估 |
+| 4. Registry 独立化 + Artifact 分发 | Artifact 分发 ✅（v2.17 CI 产物源）；独立 registry 仓库（PR 投稿 / review 流 / 评分）进 P3 —— 当前 `registry/` 目录 + 每日 PR 回写已具备同构形态，拆仓是运营动作不是代码动作 |
+| 5. Profile / Bundle 一键环境 | 依赖系统（P2）落地后再做：bundle = 一组 skill 的声明式集合 + 拓扑安装，语义上是依赖系统的薄壳；先做「收藏 / 分组」的纯前端形态起步 |
+
+其余记录（一并进 v3.x 候选）：更新中心（后端已有 /api/remote/update，
+产品化成「全部更新」入口）、多平台 CI 矩阵真相化（P0-5 延续）、
+marketplace.json / plugin.json 独立身份（docs/protocol/manifest-v1.md
+设计稿）。节奏不变：每轮只做能被 selftest 全绿背书的部分。
+
 ## 已落地的部分
 
 **v2.17**：

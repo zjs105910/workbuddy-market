@@ -47,11 +47,11 @@ jobs:
           TAG="registry-artifacts-$(date -u +%F)"
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" artifacts/*.zip artifacts/report.json --clobber
+            gh release upload "$TAG" artifacts/*.zip artifacts/*.attestation.json artifacts/report.json --clobber
           else
-            gh release create "$TAG" artifacts/*.zip artifacts/report.json \
+            gh release create "$TAG" artifacts/*.zip artifacts/*.attestation.json artifacts/report.json \
               --title "Registry artifacts $(date -u +%F)" \
-              --notes "按 registry/plugins.json 的 sourceCommit 构建的不可变产物。packageHash 见 report.json；安装端（v2.16+）会逐包校验。"
+              --notes "按 registry/plugins.json 的 sourceCommit 构建的不可变产物。packageHash 见 report.json；安装端（v2.16+）逐包校验；*.attestation.json 为构建证明（v2.20，可与注册表固定值对账）。"
           fi
 
       - name: Patch registry with artifact fields

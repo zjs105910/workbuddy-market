@@ -6,6 +6,27 @@
 
 一句话：**双击 `一键启动.cmd` 就完事。**
 
+> **定位：A local-first, secure and reproducible plugin marketplace for WorkBuddy.**  
+> 一个本机优先、安全可验证、可复现安装的 WorkBuddy 插件市场。核心卖点：
+> **Local-first**（内容与状态全在本机）/ **Privacy-first**（本机 skill 不上传、
+> 配置不入库）/ **Reproducible**（收录固定 sourceCommit、安装按 packageHash
+> 逐包校验）/ **Recoverable**（事务日志 + 崩溃恢复 + 回收站回滚）/
+> **Self-hostable**（离线兜底，私有注册表路线已留好）。
+
+四层架构（内核与产品分离，实现全部在 `src/workbuddy_market/`）：
+
+| 层 | 载体 | 管什么 |
+|---|---|---|
+| Core | `src/workbuddy_market/`（installer / transactions / ownership / trash / artifact / packaging …） | 安装事务、安全卸载、崩溃恢复、哈希校验 |
+| Protocol | [docs/plugin-spec.md](docs/plugin-spec.md)（Market Package v0.3） | manifest schema、permissions、兼容性、attestation |
+| Registry | `registry/plugins.json` + 每日 CI | 精选收录、产物回写、信任分级 |
+| Clients | 网页界面 / `launcher.py` / `workbuddy-market` CLI（含 `verify`） | 浏览、安装、体检、对账 |
+
+> **兼容层说明**：根目录 `market_core.py` 自 v2.19 起只是兼容 shim
+> （re-export + 注入点留驻，<400 行有自检盯防），新代码请
+> `import workbuddy_market.*`；`market_server.py` / `launcher.py` 是
+> 用户入口与既有编排，按 v3 路线逐步收进包内。
+
 > **新手疑问先看 [docs/FAQ.md](docs/FAQ.md)**：社区注册表的内容怎么来的、
 > 和 anthropics/skills 这类官方仓库是什么关系（商品 vs 货架）、
 > 「报菜名」式的收录与安装怎么玩、数据多久更新、装错了怎么恢复。
@@ -176,7 +197,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 661 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 692 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -214,7 +235,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 661 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 692 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -424,6 +445,7 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | **v2.17** | **WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点 + wheel/POSIX CI** | [CHANGELOG.md](CHANGELOG.md) 2.17.0 条目 |
 | **v2.18** | **快赢包：artifact 版本回退修复 + FAQ 自检数漂移修复 + 隐私历史审计 CI + macOS 冒烟槽位** | [CHANGELOG.md](CHANGELOG.md) 2.18.0 条目 |
 | **v2.19** | **R6 收尾：state / application 迁包，market_core 收成 294 行兼容 shim** | [CHANGELOG.md](CHANGELOG.md) 2.19.0 条目 |
+| **v2.20** | **供应链安全轮：manifest permissions + 风险预览 + 兼容性检测 + 构建证明 attestation + CLI verify** | [CHANGELOG.md](CHANGELOG.md) 2.20.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) v0.3 |
 
 ### v2.17 摘要（2026-10-08）
 
@@ -499,13 +521,44 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 - 自检 647 → 661 项（第 33 节 14 项：符号同一性 / 归属盯防 /
   patch 语义回归 / shim 防膨胀）；pytest 37 项不变。
 
+### v2.20 摘要（2026-10-08）
+
+外部评审 #2（dsh-market 对比走查）与既定供应链计划的交集当轮落地，
+协议升级 [plugin-spec v0.3](docs/plugin-spec.md)（向后兼容，schemaVersion 不升）：
+
+- **permissions（权限声明 + 风险预览）**：manifest 新增可选
+  `permissions`（五类固定键：文件系统 / 网络 / Shell / 凭据 / 子进程；
+  值为布尔或限定范围的字符串数组）。声明不强制 —— 市场把「要什么」
+  摆上台面：`risk_summary()` 归一化为 none / scoped / broad 三档，
+  Web 安装确认框、注册表详情弹窗、任务日志、CLI verify 同一消费口径。
+  CI 把人工审核的 permissions 固化进 manifest（受 manifestHash 保护）
+  并回写注册表 —— **安装前风险预览不需要先下载包**；
+- **兼容性检测（宿主感知）**：`compatibility_report()` 三态口径
+  （满足 / 不满足 / **未知**）—— 探测不到宿主版本时如实标 △，
+  绝不虚报。`detect_host_version()` 只认显式来源（WORKBUDDY_VERSION
+  环境变量 + WorkBuddy 自己写的 `~/.workbuddy/last-launch.json`，
+  实测 5.7.6 存在）；verify 对 `minWorkBuddyVersion` 不满足默认拒绝
+  （force 放行并记 warning，与平台冻结决定 #4 同口径）；`semver_gte()`
+  数字段逐位比较（5.10 > 5.9）；
+- **构建证明 attestation（v0.1）**：CI 构建产物时随 zip 发布
+  `<asset>.attestation.json`（packageHash / manifestHash / sourceCommit /
+  builder），`--patch-registry` 回写 `attestationUrl`；注册表详情弹窗
+  提供对账入口。v0.1 不带签名（冻结决定 #3 的 signature 位预留）——
+  防篡改仍由安装端逐包 packageHash 校验承担，attestation 的价值是
+  **可对账**；
+- **可验证安装的呈现**：artifact 安装链改为分步清单输出（[1/4] 下载 →
+  [2/4] 哈希与 manifest 校验 → [3/4] 兼容性与权限 → [4/4] 事务安装）；
+  Web 新增注册表卡片「详情」弹窗；CLI 新增 `workbuddy-market verify
+  <zip|dir>` 包级子命令（不依赖 clone 布局，--json 供脚本消费）；
+- 自检 661 → 692 项（第 34 节 31 项）；pytest 37 项不变。
+
 ---
 
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 661 passed, 0 failed
+python selftest.py        # 692 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

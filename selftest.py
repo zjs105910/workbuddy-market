@@ -45,6 +45,11 @@
            假接缝 / --patch-registry 回写）
 第 33 节   v2.19：R6 收尾 —— state / application 迁包 + core 收成兼容
            shim（符号同一性 / 归属盯防 / patch 语义回归 / shim 防膨胀）
+第 34 节   v2.20：permissions（pack 形状 fail-fast / verify 攻击面 /
+           风险预览三档）、兼容性检测（平台 + 宿主版本三态口径）、
+           构建证明 attestation（build_one 对账 / patch-registry 回写 /
+           registry 成套采纳 / fail-closed）、detect_host_version、
+           cli verify 端到端
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -64,7 +69,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.19"
+SELFTEST_VERSION = "2.20"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -562,6 +567,258 @@ def run() -> None:
 
     # ============ 33. v2.19：R6 收尾（state / application 迁包 + core shim） ============
     round18()
+
+    # ============ 34. v2.20：permissions / 兼容性检测 / 构建证明 ============
+    round19()
+
+
+def round19():
+    """v2.20：permissions / 兼容性检测 / 构建证明（协议 v0.3，第 34 节）。
+
+    四条盯防线：
+    1. permissions：pack 写入前形状校验（fail-fast）、verify 查形状、
+       manifest 自哈希覆盖它（改一个字都过不了）；
+    2. 风险预览 / 兼容性报告（纯函数）：level 三档、ok 三态 ——
+       「宿主版本未知」必须如实标 △，绝不冒充满足或不满足；
+    3. 宿主版本门槛：minWorkBuddyVersion 与平台同口径（默认拒绝、
+       force 放行并记 warning）；探测不到 → 跳过，不算失败；
+    4. 构建证明：build_one 产出 attestation 且与包对账一致，篡改
+       packageHash / sourceCommit 立即现形；--patch-registry 回写
+       attestationUrl / permissions，registry 解析层成套采纳 + fail-closed。
+    """
+    section("34. v2.20：permissions / 兼容性检测 / 构建证明（协议 v0.3）")
+    import workbuddy_market.packaging as pk
+    import workbuddy_market.registry as wr
+
+    from workbuddy_market.adapters.workbuddy import detect_host_version
+
+    lab = _TMP / "r19-lab"
+    shutil.rmtree(lab, ignore_errors=True)
+    lab.mkdir(parents=True)
+
+    src = lab / "src"
+    (src / "skills" / "alpha").mkdir(parents=True)
+    (src / "skills" / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\nversion: 1.0.0\n---\n# alpha\n", encoding="utf-8")
+
+    PERMS = {"network": ["github.com", "api.github.com"],
+             "shell": ["python"], "credentials": False}
+
+    # --- 34A. permissions：pack 固化 + verify 形状闸
+    r = pk.pack_package(src, lab / "pkg-perm", pid="demo-pkg", name="Demo",
+                        version="1.0.0", permissions=PERMS)
+    ck("★ pack：permissions 写进 manifest 且自哈希覆盖它",
+       r["manifest"]["permissions"] == PERMS
+       and pk.verify_package(lab / "pkg-perm")["ok"])
+    ck("pack：未知能力键 → 打包期拒绝（fail-fast）",
+       _raises(pk.pack_package, core.ConfigError,
+               src, lab / "pkg-bad1", pid="demo-pkg", name="Demo", version="1.0.0",
+               permissions={"gpu": True}))
+    ck("pack：空数组范围 → 打包期拒绝",
+       _raises(pk.pack_package, core.ConfigError,
+               src, lab / "pkg-bad2", pid="demo-pkg", name="Demo", version="1.0.0",
+               permissions={"shell": []}))
+
+    d = lab / "pkg-t"
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.copytree(lab / "pkg-perm", d)
+    m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    m["permissions"] = {"mystery": True}
+    (d / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    v = pk.verify_package(d)
+    ck("★ 攻击：manifest 里的 permissions 形状非法 → 拒绝（形状独立于自哈希）",
+       not v["ok"] and any(e.startswith("permissions") for e in v["errors"]),
+       "; ".join(v["errors"])[:90])
+
+    # --- 34B. risk_summary：三档 level + 归一化
+    ck("★ risk_summary：布尔 true → broad（未限定范围的全量授权）",
+       pk.risk_summary({"permissions": {"shell": True}})["level"] == "broad")
+    ck("★ risk_summary：数组范围 → scoped 且 scope 转人话",
+       (lambda s: s["level"] == "scoped" and s["items"][0]["scope"] == "github.com")(
+           pk.risk_summary({"permissions": {"network": ["github.com"]}})))
+    ck("★ risk_summary：false 也是声明（declared=True、granted=False、level=none）",
+       (lambda s: s["declared"] and s["level"] == "none"
+        and s["items"][0]["granted"] is False)(
+           pk.risk_summary({"permissions": {"credentials": False}})))
+    ck("risk_summary：未声明 → declared=False；非 dict manifest 不炸",
+       not pk.risk_summary({})["declared"] and not pk.risk_summary(None)["declared"])
+
+    # --- 34C. compatibility_report：ok 三态（True / False / None=未知）
+    ck("★ 兼容性：无声明 → 平台默认全平台（ok=True）",
+       pk.compatibility_report({})["ok"] is True)
+    ck("★ 兼容性：平台不匹配 → ok=False",
+       pk.compatibility_report({"platforms": ["linux"]},
+                               platform="windows")["ok"] is False)
+    ck("★ 兼容性：宿主版本低于要求 → ok=False（数字段比较：5.10 > 5.9）",
+       pk.compatibility_report({"minWorkBuddyVersion": "5.8"},
+                               host_version="5.7.6")["ok"] is False
+       and pk.semver_gte("5.10", "5.9"))
+    ck("★ 兼容性：宿主版本未知 → ok=None（△ 未知），整体不算失败",
+       (lambda c: c["checks"][-1]["ok"] is None and c["ok"] is True)(
+           pk.compatibility_report({"minWorkBuddyVersion": "5.8"}, host_version=None)))
+    ck("semver_gte 口径：补零等值 / 预发布视为相等 / v 前缀 / 低位反例",
+       pk.semver_gte("5.7", "5.7.0") and pk.semver_gte("5.7.6-beta", "5.7.6")
+       and pk.semver_gte("v5.8.1", "5.8") and not pk.semver_gte("5.6.9", "5.7"))
+
+    # --- 34D. verify 的宿主版本门槛（与平台同口径：默认拒绝 / force 放行）
+    pk.pack_package(src, lab / "pkg-min", pid="demo-pkg", name="Demo",
+                    version="1.0.0", min_workbuddy_version="999.0.0")
+    ck("★ 宿主版本不满足 → 默认拒绝",
+       not pk.verify_package(lab / "pkg-min", host_version="5.7.6")["ok"])
+    v = pk.verify_package(lab / "pkg-min", host_version="5.7.6", force=True)
+    ck("★ force=True → 放行并如实记 warning",
+       v["ok"] and any("宿主版本" in w for w in v["warnings"]),
+       "; ".join(v["warnings"])[:80])
+    ck("★ 宿主版本未知 → 跳过（不算失败，诚实口径）",
+       pk.verify_package(lab / "pkg-min", host_version=None)["ok"])
+
+    # --- 34E. 构建证明：build_one → attestation → 对账 → 回写
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_artifacts_r19",
+        str(Path(__file__).resolve().parent / "scripts" / "build_artifacts.py"))
+    bld = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bld)
+    import io as _io19
+    import tarfile as _tf19
+
+    lab2 = _TMP / "r19-lab2"
+    shutil.rmtree(lab2, ignore_errors=True)
+    lab2.mkdir(parents=True)
+
+    def _mk_tar19(path, entries, prefix="owner_repo-abc123"):
+        with _tf19.open(path, "w:gz") as tf:
+            for name, data in entries:
+                ti = _tf19.TarInfo(f"{prefix}/{name}" if prefix else name)
+                ti.size = len(data.encode("utf-8"))
+                tf.addfile(ti, _io19.BytesIO(data.encode("utf-8")))
+
+    _mk_tar19(lab2 / "t.tar.gz", [("SKILL.md", "---\nname: solo\n---\n")])
+    tar_bytes = (lab2 / "t.tar.gz").read_bytes()
+    ref19 = "b" * 40
+    out_dir = lab2 / "artifacts"
+    entry19 = {"repo": "owner/repo", "displayName": "Demo", "sourceCommit": ref19,
+               "permissions": {"network": ["github.com"]}}
+    rr = bld.build_one(entry19, out_dir,
+                       fetch=lambda url: (tar_bytes
+                                          if url == "https://codeload.github.com/owner/repo/tar.gz/" + ref19
+                                          else (_ for _ in ()).throw(OSError(url))),
+                       work_root=lab2 / "w")
+    att = json.loads((out_dir / rr["attestationFile"]).read_text(encoding="utf-8"))
+    ck("★ build_one：attestation 落盘且与包对账一致",
+       (out_dir / rr["attestationFile"]).is_file()
+       and not pk.verify_attestation(att, package_hash=rr["packageHash"],
+                                     manifest_hash=rr["manifestHash"],
+                                     source_commit=ref19),
+       str(pk.verify_attestation(att, package_hash=rr["packageHash"]))[:90])
+    ck("★ 收录条目的静态 permissions 被 CI 固化进 manifest（从此受 manifestHash 保护）",
+       rr["permissions"] == {"network": ["github.com"]}
+       and rr["minWorkBuddyVersion"] == "")
+    ck("★ 对账：attestation 的 packageHash 被篡改 → 立即现形",
+       (lambda a, errs: errs and any("packageHash" in e for e in errs))(
+           {**att, "packageHash": "0" * 64},
+           pk.verify_attestation({**att, "packageHash": "0" * 64},
+                                 package_hash=rr["packageHash"])))
+    ck("对账：sourceCommit 不符 / attestation 形状坏 → 都拦",
+       pk.verify_attestation(att, package_hash=rr["packageHash"],
+                             source_commit="c" * 40) != []
+       and pk.verify_attestation(["nope"], package_hash=rr["packageHash"])
+       == ["attestation 必须是 JSON 对象"])
+
+    (out_dir / "report.json").write_text(json.dumps(
+        {"built": [rr], "failed": []}, ensure_ascii=False), encoding="utf-8")
+    reg_file = lab2 / "plugins.json"
+    reg_file.write_text(json.dumps({"schema": 1, "updatedAt": "", "plugins": [
+        {"repo": "owner/repo", "trust": "reviewed", "sourceCommit": ref19},
+        {"repo": "other/one", "trust": "reviewed"}]}, ensure_ascii=False),
+        encoding="utf-8")
+    rc = bld.main(["--patch-registry", "--out", str(out_dir),
+                   "--registry", str(reg_file),
+                   "--release-tag", "registry-artifacts-2026-10-08"])
+    doc_after = json.loads(reg_file.read_text(encoding="utf-8"))
+    e0 = doc_after["plugins"][0]
+    ck("★ 回写：attestationUrl + permissions 进条目（无产物条目不被触碰）",
+       rc == 0
+       and e0["attestationUrl"] ==
+       ("https://github.com/zjs105910/workbuddy-market/releases/download/"
+        f"registry-artifacts-2026-10-08/{rr['attestationFile']}")
+       and e0["permissions"] == {"network": ["github.com"]}
+       and "attestationUrl" not in doc_after["plugins"][1])
+
+    # --- 34F. registry 解析层：新字段白名单采纳 + fail-closed
+    good = {"schema": 1, "updatedAt": "", "plugins": [{
+        "repo": "o/k", "trust": "reviewed",
+        "packageUrl": "https://github.com/z/releases/download/t/x.zip",
+        "packageHash": "a" * 64,
+        "attestationUrl": "https://github.com/z/releases/download/t/x.zip.attestation.json",
+        "permissions": {"network": ["github.com"]},
+        "platforms": ["windows", "solaris"],
+        "minWorkBuddyVersion": "5.7"}]}
+    parsed = wr.parse_registry(json.dumps(good))["plugins"][0]
+    ck("★ 解析层：attestationUrl / permissions / platforms / minWorkBuddyVersion 采纳（platforms 过白名单）",
+       parsed.get("attestationUrl", "").endswith(".attestation.json")
+       and parsed.get("permissions") == {"network": ["github.com"]}
+       and parsed.get("platforms") == ["windows"]
+       and parsed.get("minWorkBuddyVersion") == "5.7",
+       str(parsed)[:140])
+    noart = {"schema": 1, "updatedAt": "", "plugins": [{
+        "repo": "o/k", "trust": "reviewed",
+        "attestationUrl": "https://github.com/z/releases/download/t/x.zip.attestation.json"}]}
+    ck("★ 解析层：没有成套产物字段 → attestationUrl 不采纳（没有包的证明没有意义）",
+       "attestationUrl" not in wr.parse_registry(json.dumps(noart))["plugins"][0])
+    badperm = {"schema": 1, "updatedAt": "", "plugins": [{
+        "repo": "o/k", "trust": "reviewed",
+        "packageUrl": "https://github.com/z/releases/download/t/x.zip",
+        "packageHash": "a" * 64,
+        "permissions": {"shell": {"oops": 1}}}]}
+    ck("★ 解析层：permissions 形状非法 → 整个字段当没有（fail-closed）",
+       "permissions" not in wr.parse_registry(json.dumps(badperm))["plugins"][0])
+
+    # --- 34G. detect_host_version：显式来源 + 不可信状态文件口径
+    _old_env = os.environ.get("WORKBUDDY_VERSION")
+    os.environ["WORKBUDDY_VERSION"] = "5.9.9"
+    try:
+        ck("★ 宿主版本：WORKBUDDY_VERSION 显式注入优先",
+           detect_host_version() == "5.9.9")
+    finally:
+        if _old_env is None:
+            os.environ.pop("WORKBUDDY_VERSION", None)
+        else:
+            os.environ["WORKBUDDY_VERSION"] = _old_env
+    hd = lab / "host"
+    hd.mkdir(parents=True, exist_ok=True)
+    (hd / "last-launch.json").write_text(
+        '{"version": "5.7.6", "build": "x", "timestamp": "t"}', encoding="utf-8")
+    ck("★ 宿主版本：last-launch.json 是可靠来源（WorkBuddy 自己写的启动记录）",
+       detect_host_version(host_dir=hd) == "5.7.6")
+    (hd / "last-launch.json").write_text('{"version": 576}', encoding="utf-8")
+    ck("宿主版本：形状不对（非字符串）→ 当没有",
+       detect_host_version(host_dir=hd) is None)
+    ck("宿主版本：文件不存在 → None（绝不猜安装目录 / 注册表）",
+       detect_host_version(host_dir=lab / "nope") is None)
+
+    # --- 34H. cli verify：包级子命令端到端
+    import contextlib
+    import io as _ioh
+    from workbuddy_market import cli as wcli
+    with contextlib.redirect_stdout(_ioh.StringIO()) as buf:
+        rc_ok = wcli.main(["verify", str(lab / "pkg-perm")])
+    ck("★ cli verify：合法包 → 退出码 0 且输出风险预览",
+       rc_ok == 0 and "风险预览" in buf.getvalue(), buf.getvalue()[-90:])
+    with contextlib.redirect_stdout(_ioh.StringIO()) as bufj:
+        rc_json = wcli.main(["verify", str(lab / "pkg-perm"), "--json"])
+    ck("cli verify：--json 可解析且 level=scoped",
+       rc_json == 0 and json.loads(bufj.getvalue())["risk"]["level"] == "scoped")
+    bad_pkg = lab / "pkg-badfile"
+    shutil.copytree(lab / "pkg-perm", bad_pkg)
+    (bad_pkg / "skills" / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\nversion: 9.9.9\n---\n# evil\n", encoding="utf-8")
+    with contextlib.redirect_stdout(_ioh.StringIO()):
+        rc_bad = wcli.main(["verify", str(bad_pkg)])
+    ck("★ cli verify：被篡改的包 → 退出码 1", rc_bad == 1)
+
+    shutil.rmtree(lab, ignore_errors=True)
+    shutil.rmtree(lab2, ignore_errors=True)
 
 
 def round18():
@@ -2784,7 +3041,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.19.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.20.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2865,9 +3122,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.19.0"
-       and core.MARKET_VERSION == "2.19.0"
-       and SELFTEST_VERSION == "2.19", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.20.0"
+       and core.MARKET_VERSION == "2.20.0"
+       and SELFTEST_VERSION == "2.20", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")

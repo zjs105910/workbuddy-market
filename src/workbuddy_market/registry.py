@@ -43,6 +43,7 @@ from .errors import ConfigError
 from .fsutil import atomic_write_text, read_json
 from .hasher import normalize_sha256
 from .logging import now_iso
+from .packaging import _perm_errors          # noqa: PLC2701 —— 同包内私有：权限形状只留一把尺
 from .paths import MARKET_ROOT, REGISTRY_PATH
 from .version import MARKET_VERSION
 
@@ -197,6 +198,28 @@ def parse_registry(data) -> dict:
         ver = _clean_text(art.get("version") or it.get("version"), 32)
         if ver:
             entry["version"] = ver
+        # 权限 / 兼容性声明与构建证明（v2.20，可选增量，schema 保持 1）：
+        # 由 artifacts CI 从打包 manifest 固化回写（动态字段只许 CI 改，
+        # build_registry.refresh_entry 的 dict(entry) 复制会原样保留）。
+        # attestationUrl 只在成套产物字段存在时采纳 —— 证明文件描述的
+        # 就是那一份包，没有包的证明没有意义；permissions 过与 packaging
+        # 同一把形状尺，形状不对就当没有（不可信输入，绝不带病进前端）。
+        if "packageUrl" in entry and "packageHash" in entry:
+            au = _clean_text(it.get("attestationUrl"), 500)
+            if au.startswith("https://"):
+                entry["attestationUrl"] = au
+            perms = it.get("permissions")
+            if isinstance(perms, dict) and not _perm_errors(perms):
+                entry["permissions"] = perms
+            plats = it.get("platforms")
+            if isinstance(plats, list) and plats:
+                vals = [str(x) for x in plats
+                        if str(x) in ("windows", "macos", "linux")]
+                if vals:
+                    entry["platforms"] = vals
+            mwb = _clean_text(it.get("minWorkBuddyVersion"), 32)
+            if mwb and any(c.isdigit() for c in mwb):
+                entry["minWorkBuddyVersion"] = mwb
         rv = it.get("review")
         if isinstance(rv, dict):
             review = {k: _clean_text(rv.get(k), 40)

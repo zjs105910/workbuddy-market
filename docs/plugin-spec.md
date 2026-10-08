@@ -1,10 +1,12 @@
-# WorkBuddy Market Package 协议（v0.2，2026-10-08）
+# WorkBuddy Market Package 协议（v0.3，2026-10-08）
 
-> 状态：**v0.2 —— 六项开放问题已冻结（见 §6），`pack` / `verify` 纯函数
-> 层已实现（`workbuddy_market/packaging.py`，selftest 第 30 节盯防）；
+> 状态：**v0.3 —— v0.2 六项开放问题已冻结（见 §6），`pack` / `verify`
+> 纯函数层已实现（`workbuddy_market/packaging.py`，selftest 第 30 节盯防）；
 > 安装链路已接入（v2.16：`workbuddy_market/artifact.py` 下载 / 解包 /
 > 校验 → `installer.install_package_skills` 两阶段事务安装，selftest
-> 第 31 节盯防）**。
+> 第 31 节盯防）。v0.3（v2.20）增补 permissions（§8.1）、兼容性检测
+> （§8.2）与构建证明 attestation（§8.3）—— 向后兼容，schemaVersion
+> 不升**。
 > schema 版本独立于市场版本号演进（`schemaVersion` 从 1 开始，
 > 向后兼容的字段新增不升版）。
 
@@ -66,6 +68,13 @@ wbm-package/
     "system": {"python": ">=3.10"},
     "workbuddy": ">=5.7"
   },
+  "permissions": {
+    "filesystem": false,
+    "network": ["github.com", "api.github.com"],
+    "shell": ["python"],
+    "credentials": false,
+    "subprocess": true
+  },
   "source": {
     "type": "github",
     "repo": "owner/repo",
@@ -89,6 +98,11 @@ wbm-package/
 * `platforms`：缺省 = 全平台；与本机不符时安装期警告（不是拒绝，
   「警告还是拒绝」见开放问题 4）；
 * `dependencies`：v0.1 只**声明不解析**（P2 依赖系统落地前原样透传）；
+* `permissions`（v0.3）：键固定五类（filesystem / network / shell /
+  credentials / subprocess），值 = 布尔（要 / 不要）或**非空**字符串数组
+  （要，且限定范围）。与依赖同口径 —— **声明不强制**：执行期沙箱是
+  宿主的事，市场把「要什么」摆上台面（风险预览见 §8.1）。形状非法 =
+  整包拒绝（verify 第 9 步）；
 * `source.ref`：打包时固定的 commit / tag；`ref` 缺失 = 不可复现包，
   注册表侧必须标 `unverified`；
 * `integrity.manifest`：对 manifest 自身（去掉 integrity 字段）做
@@ -153,4 +167,67 @@ verify 失败 = 整包拒绝，无半截状态（与「任何一步失败源目�
    下载 → 解包 → verify → 事务安装全链，条目无成套字段时诚实报错；
    packageHash 进事务日志与 ownership，恢复补记不丢。
    剩余：CI 侧批量构建并发布 artifact 产物源）
-5. 依赖系统（P2）另起。
+5. ~~permissions / 兼容性 / attestation~~ ✅（v2.20，§8；selftest 第 34 节）
+6. 依赖系统（P2）另起。
+
+## 8. v0.3 增补：permissions / 兼容性 / attestation（v2.20）
+
+### 8.1 permissions —— 安装前风险预览
+
+声明的消费方是「安装前的风险预览」：`packaging.risk_summary()` 把
+manifest 归一化为三档 —— `none`（没声明或全不要）/ `scoped`（限定
+范围）/ `broad`（布尔 true = 未限定范围的全量授权，预览里必须显眼）。
+Web 安装确认框、注册表条目详情、任务日志、CLI verify 全部消费同一
+口径。声明**不强制**（与依赖同口径）：执行期沙箱是宿主的事，市场只
+负责把「要什么」在下载之前摆上台面。
+
+分发侧：artifacts CI 把收录条目人工审核过的 permissions 固化进打包
+manifest（从此受 manifestHash 保护），并回写注册表条目 —— 所以风险
+预览**不需要先下载包**。registry 解析层对 permissions 过同一把形状尺
+（`packaging._perm_errors`），形状不对整个字段当没有（fail-closed）。
+
+### 8.2 兼容性检测 —— 三态口径
+
+`packaging.compatibility_report()` 输出平台与 WorkBuddy 版本两项检查，
+每项 `ok` 三态：True 满足 / False 不满足 / **None 未知**。「宿主版本
+探测不到」必须如实标 △ —— 绝不冒充满足，也不冒充不满足。
+
+宿主版本探测（`adapters.detect_host_version()`）只用**显式**来源：
+`WORKBUDDY_VERSION` 环境变量，或 WorkBuddy 自己写的
+`~/.workbuddy/last-launch.json`（实测 5.7.6 存在；属不可信状态文件 ——
+形状不对当没有）。绝不猜安装目录 / 注册表 / 进程参数。
+
+裁决在 `verify_package`（单一裁决点）：`minWorkBuddyVersion` 不满足 →
+默认拒绝，`force=True` 放行并记 warning（与平台冻结决定 #4 同口径）；
+host_version 为 None → 跳过。版本比较用 `semver_gte()`：数字段逐位
+（5.10 > 5.9），段数补零等值（5.7 == 5.7.0），预发布后缀视为相等
+（保守、可预期）。
+
+### 8.3 attestation —— 构建证明（v0.1）
+
+`scripts/build_artifacts.py` 构建 artifact 时随 zip 产出
+`<asset>.attestation.json` 并随 Release 分发（artifacts.yml 上传）：
+
+```json
+{
+  "schemaVersion": 1,
+  "type": "workbuddy-market-package-attestation",
+  "package": "owner-repo-1.2.0.zip",
+  "packageHash": "<packageHash>",
+  "manifestHash": "<integrity.manifest>",
+  "version": "1.2.0",
+  "source": {"type": "github", "repo": "owner/repo", "ref": "<sourceCommit>"},
+  "builder": {"tool": "workbuddy-market", "toolVersion": "2.20.0",
+              "entrypoint": "scripts/build_artifacts.py"},
+  "builtAt": "<UTC>"
+}
+```
+
+`--patch-registry` 把 `attestationUrl` 回写进注册表条目（解析层只在
+成套产物字段存在时采纳 —— 没有包的证明没有意义）。`verify_attestation()`
+对 attestation 做形状与一致性校验，任何人可拿它与注册表固定值对账。
+
+v0.1 **不带签名**（冻结决定 #3 的 signature 位仍预留）：威胁模型是
+「记录与对账」—— 防篡改仍由安装端逐包 packageHash 校验（哈希不符无
+放行出口）承担，attestation 的价值是把「谁、按哪份 commit、构建出了
+哪个哈希」钉成可复核的公开记录。引入 GPG / sigstore 时升 schemaVersion。

@@ -31,6 +31,7 @@ adapter 的意义。
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from datetime import datetime, timezone
@@ -40,7 +41,7 @@ from ..config import ConfigError, load_config
 from ..fsutil import atomic_write_text, read_json
 from ..locking import locked
 from ..logging import log
-from ..paths import BACKUP_DIR, BACKUP_KEEP, KNOWN_PATH, MARKET_ROOT
+from ..paths import BACKUP_DIR, BACKUP_KEEP, KNOWN_PATH, MARKET_ROOT, WB
 
 WORKBUDDY_ADAPTER_VERSION = 1
 
@@ -60,6 +61,33 @@ _CAPABILITIES = {
 def capabilities() -> dict:
     """宿主能力矩阵（诚实口径：没验证过的能力一律 False，不虚报）。"""
     return dict(_CAPABILITIES)
+
+
+def detect_host_version(host_dir: Path | None = None) -> str | None:
+    """探测宿主 WorkBuddy 版本（v2.20，诚实口径：找不到就 None）。
+
+    来源（按序，全部是**显式**来源）：
+
+      1. 环境变量 ``WORKBUDDY_VERSION``（宿主 / 测试显式注入）；
+      2. ``<宿主目录>/last-launch.json`` 的 ``version`` 字段 —— WorkBuddy
+         每次启动自己写的启动记录（实测 5.7.6 存在）。属**不可信状态
+         文件**：形状不对、不是字符串、不含数字 → 当没有。
+
+    绝不去猜安装目录、注册表或进程参数 —— 探测不到就返回 None，
+    调用方（verify_package / compatibility_report）如实标「宿主版本
+    未知」，绝不把「不知道」说成「满足」或「不满足」。
+    """
+    env = (os.environ.get("WORKBUDDY_VERSION") or "").strip()
+    if env:
+        return env[:32]
+    d = Path(host_dir) if host_dir is not None else WB
+    data = read_json(d / "last-launch.json", None)
+    if not isinstance(data, dict):
+        return None
+    v = data.get("version")
+    if not isinstance(v, str) or not v.strip() or not any(c.isdigit() for c in v):
+        return None
+    return v.strip()[:32]
 
 
 # ---------------------------------------------------------------- known 读取

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核兼容层（v2.19，R6 收尾）。
+"""market_core —— WorkBuddy 本机插件市场的内核兼容层（v2.20）。
 
 v2.19 起本文件只是一个**兼容 shim**：真正的实现全部在
 src/workbuddy_market/ 包里。这里保留三样东西：

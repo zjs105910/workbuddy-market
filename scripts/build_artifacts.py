@@ -43,8 +43,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from workbuddy_market.config import validate_id, validate_version  # noqa: E402
-from workbuddy_market.packaging import pack_package                # noqa: E402
+from workbuddy_market.packaging import (                           # noqa: E402
+    ATTESTATION_SCHEMA_VERSION, ATTESTATION_TYPE, pack_package)
 from workbuddy_market.registry import REGISTRY_REPO                # noqa: E402
+from workbuddy_market.version import MARKET_VERSION                # noqa: E402
 
 DEFAULT_REGISTRY_FILE = REPO_ROOT / "registry" / "plugins.json"
 TARBALL_TIMEOUT = 120.0
@@ -229,20 +231,49 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
         root = safe_extract_tar(tar_path, tmp / "src")
         src, skills = choose_skills_root(root, slug)
         pkg_dir = tmp / "pkg"
+        # 收录条目若人工审核过 permissions（静态字段），打包时固化进
+        # manifest —— 从此它受 manifestHash 保护，改一个字都过不了 verify。
+        entry_perms = entry.get("permissions")
         packed = pack_package(src, pkg_dir, pid=slug, name=entry.get("displayName") or slug,
                               version=version,
                               description=entry.get("description", ""),
                               license=str(entry.get("license") or ""),
                               skills=skills,
+                              permissions=entry_perms if isinstance(entry_perms, dict) else None,
                               source={"type": "github", "repo": repo, "ref": ref})
         asset = f"{slug}-{version}.zip"
         zip_path = out_dir / asset
         zip_dir(pkg_dir, zip_path)
+        # 构建证明（v2.20 / plugin-spec v0.3）：把「谁、按哪份 commit、
+        # 构建出了哪个哈希」钉成随 Release 分发的 JSON 记录。v0.1 不带
+        # 签名（冻结决定 #3 的 signature 位预留）—— 防篡改仍由安装端
+        # 逐包 packageHash 校验承担，attestation 的价值是**可对账**。
+        attestation = {
+            "schemaVersion": ATTESTATION_SCHEMA_VERSION,
+            "type": ATTESTATION_TYPE,
+            "package": asset,
+            "packageHash": packed["packageHash"],
+            "manifestHash": packed["manifest"]["integrity"]["manifest"],
+            "version": version,
+            "source": {"type": "github", "repo": repo, "ref": ref},
+            "builder": {"tool": "workbuddy-market", "toolVersion": MARKET_VERSION,
+                        "entrypoint": "scripts/build_artifacts.py"},
+            "builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        att_name = f"{asset}.attestation.json"
+        (out_dir / att_name).write_text(
+            json.dumps(attestation, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8", newline="\n")
+        manifest = packed["manifest"]
         return {"repo": repo, "slug": slug, "version": version,
                 "sourceCommit": ref,
                 "packageHash": packed["packageHash"],
-                "manifestHash": packed["manifest"]["integrity"]["manifest"],
-                "asset": asset, "skills": skills,
+                "manifestHash": manifest["integrity"]["manifest"],
+                "asset": asset, "attestationFile": att_name,
+                "permissions": manifest.get("permissions") or {},
+                "platforms": manifest.get("platforms") or [],
+                "minWorkBuddyVersion": manifest.get("minWorkBuddyVersion") or "",
+                "skills": skills,
                 "bytes": zip_path.stat().st_size}
     finally:
         import shutil
@@ -290,6 +321,17 @@ def main(argv: list | None = None) -> int:
                                    f"/releases/download/{args.release_tag}/{b['asset']}")
             entry["packageHash"] = b["packageHash"]
             entry["manifestHash"] = b["manifestHash"]
+            # v2.20：构建证明与权限/兼容性声明随产物字段一起回写 ——
+            # 与 packageUrl 同源同批，动态字段只许 CI 改的口径不变。
+            entry["attestationUrl"] = (
+                f"https://github.com/{REGISTRY_REPO}"
+                f"/releases/download/{args.release_tag}/{b['attestationFile']}")
+            if b.get("permissions"):
+                entry["permissions"] = b["permissions"]
+            if b.get("platforms"):
+                entry["platforms"] = b["platforms"]
+            if b.get("minWorkBuddyVersion"):
+                entry["minWorkBuddyVersion"] = b["minWorkBuddyVersion"]
             patched += 1
         if patched == 0:
             print("没有可回写的条目（report 里没有成功构建的产物）。", file=sys.stderr)

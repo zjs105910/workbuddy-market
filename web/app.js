@@ -53,12 +53,61 @@ function confirmBox(title, html, yesLabel){
     $("#cfmTitle").textContent = title;
     $("#cfmBody").innerHTML = html;
     $("#cfmYes").textContent = yesLabel || "确定";
+    $("#cfmNo").style.display = "";
     $("#cfm").classList.add("show");
     const done = v => { $("#cfm").classList.remove("show"); resolve(v); };
     $("#cfmYes").onclick = () => done(true);
     $("#cfmNo").onclick = () => done(false);
     $("#cfm").onclick = e => { if(e.target.id === "cfm") done(false); };
   });
+}
+
+// 单按钮信息弹窗（v2.20）：注册表条目详情用 —— 只读展示，没有「取消」语义。
+function infoBox(title, html){
+  return new Promise(resolve => {
+    $("#cfmTitle").textContent = title;
+    $("#cfmBody").innerHTML = html;
+    $("#cfmYes").textContent = "关闭";
+    $("#cfmNo").style.display = "none";
+    $("#cfm").classList.add("show");
+    const done = v => { $("#cfm").classList.remove("show"); $("#cfmNo").style.display = ""; resolve(v); };
+    $("#cfmYes").onclick = () => done(true);
+    $("#cfmNo").onclick = () => done(false);
+    $("#cfm").onclick = e => { if(e.target.id === "cfm") done(false); };
+  });
+}
+
+/* ---------------- 权限声明（v2.20，协议 v0.3） ----------------
+   manifest.permissions / 注册表条目 permissions 的展示口径：
+   布尔 true = 需要（未限定范围，显眼标 warn）；数组 = 需要且限定范围；
+   false = 明确不需要。没声明的键不显示 —— 不替包编造「可能需要」。 */
+const PERM_META = {
+  filesystem: {icon:"🗂", label:"文件系统"},
+  network:    {icon:"🌐", label:"网络访问"},
+  shell:      {icon:"💻", label:"Shell 命令"},
+  credentials:{icon:"🔐", label:"凭据访问"},
+  subprocess: {icon:"📦", label:"子进程"}
+};
+function permRows(perms){
+  if(!perms || typeof perms !== "object") return "";
+  const rows = [];
+  for(const k in PERM_META){
+    if(!(k in perms)) continue;
+    const v = perms[k], m = PERM_META[k];
+    if(v === true)
+      rows.push('<div class="perm"><span>'+m.icon+' '+m.label+'</span><span class="ptag warn">需要（未限定范围）</span></div>');
+    else if(v === false)
+      rows.push('<div class="perm"><span>'+m.icon+' '+m.label+'</span><span class="ptag grey">不需要</span></div>');
+    else if(Array.isArray(v) && v.length)
+      rows.push('<div class="perm"><span>'+m.icon+' '+m.label+'</span><span class="ptag">'+esc(v.join("、"))+'</span></div>');
+  }
+  return rows.join("");
+}
+function permBlock(perms){
+  const rows = permRows(perms);
+  if(!rows)
+    return '<div class="note">该条目未声明权限清单（协议 v0.3 起支持；哈希校验链不受影响）。</div>';
+  return '<div class="grp"><h5>需要的权限</h5>'+rows+'</div>';
 }
 
 /* ---------------- 渲染 ---------------- */
@@ -358,6 +407,7 @@ function cardRegistry(e){
     '<div class="kw">'+(e.keywords||[]).map(k=>'<i>'+esc(k)+'</i>').join("")+
       '<i>社区目录</i></div>'+
     '<div class="card-foot">'+stTxt+
+      '<button class="tiny" data-regdetail="'+attr(e.repo)+'">详情</button>'+
       (inst
         ? '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>'
         : '<button class="tiny primary" data-radd="'+attr(e.repo)+'">一键安装</button>')+
@@ -365,10 +415,52 @@ function cardRegistry(e){
   '</div>';
 }
 
+/* ---------------- 注册表条目详情（v2.20） ----------------
+   安装之前先了解插件：来源与信任、不可变产物（对账入口）、
+   兼容性声明、权限声明 —— 全部来自注册表条目，如实展示。 */
+function regDetailHtml(e){
+  const href = e.homepage && String(e.homepage).indexOf("https://") === 0
+    ? e.homepage : "https://github.com/"+e.repo;
+  let h = '<div class="grp"><h5>来源与信任</h5><ul>'+
+    '<li>仓库：<a href="'+attr(href)+'" target="_blank" rel="noopener">'+esc(e.repo)+'</a></li>'+
+    '<li>信任分级：'+trustBadge(e.trust || "reviewed")+'</li>'+
+    (e.license ? '<li>许可证：'+esc(e.license)+'</li>' : '')+
+    (e.version ? '<li>产物版本：'+esc(e.version)+'</li>' : '')+
+    (e.addedAt ? '<li>收录时间：'+esc(e.addedAt)+'</li>' : '')+
+    '</ul></div>';
+  if(e.packageHash){
+    h += '<div class="grp"><h5>不可变产物（可复现安装）</h5><ul>'+
+      '<li>packageHash：<code>'+esc(String(e.packageHash).slice(0,16))+'…</code></li>'+
+      (e.manifestHash ? '<li>manifestHash：<code>'+esc(String(e.manifestHash).slice(0,16))+'…</code></li>' : '')+
+      (e.attestationUrl
+        ? '<li>构建证明：<a href="'+attr(e.attestationUrl)+'" target="_blank" rel="noopener">attestation.json</a>'+
+          '（记录 sourceCommit 与 packageHash，可与本页对账）</li>'
+        : '')+
+      '</ul></div>';
+  }
+  const plat = Array.isArray(e.platforms) && e.platforms.length ? e.platforms.join("、") : "未声明（默认全平台）";
+  h += '<div class="grp"><h5>兼容性（声明）</h5><ul>'+
+    '<li>平台：'+esc(plat)+'</li>'+
+    (e.minWorkBuddyVersion
+      ? '<li>WorkBuddy 版本：≥ '+esc(e.minWorkBuddyVersion)+'</li>'
+      : '<li>WorkBuddy 版本：未声明</li>')+
+    '</ul></div>';
+  h += permBlock(e.permissions);
+  if(e.descriptionEn) h += '<div class="grp"><h5>English</h5><p class="desc" style="margin:0">'+esc(e.descriptionEn)+'</p></div>';
+  return h;
+}
+
 /* ---------------- 交互 ---------------- */
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-path],[data-crefresh]");
+  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh]");
   if(!t) return;
+
+  if(t.dataset.regdetail){
+    const entry = (REG.plugins||[]).find(p => p.repo === t.dataset.regdetail);
+    if(!entry) return toast("注册表里找不到这个条目", true);
+    await infoBox(entry.displayName || entry.repo, regDetailHtml(entry));
+    return;
+  }
 
   if(t.dataset.c !== undefined && t.classList.contains("chip")){ cat = t.dataset.c; render(); return; }
   if(t.dataset.f){
@@ -462,6 +554,9 @@ document.addEventListener("click", async (e) => {
       const note = known
         ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>'+routeNote+'</div>'
         : '<div class="note">来源：'+trustNote+'。会联网下载并写入 <code>~/.workbuddy/skills</code>，'+routeNote+'</div>';
+      // v2.20 风险预览：包声明的权限在**下载之前**就摆出来 ——
+      // 数据来自注册表条目（CI 从打包 manifest 固化回写）。
+      if (usePkg) note += permBlock(regEntry.permissions);
       if(!regKnown){
         // 供应链收紧（v2.12）：非收录仓库默认只装符合 Skill 协议的内容，
         // 兼容模式必须在这里显式勾选放行。

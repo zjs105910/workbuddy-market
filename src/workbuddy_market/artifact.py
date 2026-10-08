@@ -14,6 +14,12 @@ v2.15 冻结了协议（docs/plugin-spec.md v0.2）：分发单元 = CI 构建�
 装到的是活的代码；这条新链装到的是**审核时固定的那一份字节** ——
 上游漂移在 artifact 链路里天然不存在（哈希钉死的就是那一份）。
 
+v2.20：安装过程按**分步校验清单**输出（[1/4] 下载 → [2/4] 哈希与
+manifest 校验 → [3/4] 兼容性与权限 → [4/4] 事务安装），并把包声明的
+兼容性事实与 permissions 打进任务日志 —— 可验证安装要看得见，不能只
+藏在代码里。宿主版本探测走 adapters.detect_host_version（探测不到
+如实标「未知」，绝不虚报）。
+
 安全纪律：
 
   · **哈希对不上没有放行一说。** packageHash 是审核时固定的那一份，
@@ -41,6 +47,7 @@ from pathlib import Path
 from .config import ConfigError, ensure_child
 from .errors import ArtifactError
 from .hasher import normalize_sha256
+from .adapters.workbuddy import detect_host_version
 from .logging import log
 from .version import MARKET_VERSION
 
@@ -199,6 +206,7 @@ def prepare_package(source, work_dir, *, expected_package_hash=None,
                     expected_manifest_hash=None, force: bool = False,
                     size_limit: int = MAX_ARTIFACT_BYTES,
                     timeout: float = ARTIFACT_TIMEOUT,
+                    host_version: str | None = None,
                     fetch=None) -> dict:
     """artifact（http(s) URL 或本地 zip 路径）→ 解包 → verify → 可安装的包目录。
 
@@ -213,6 +221,9 @@ def prepare_package(source, work_dir, *, expected_package_hash=None,
     所以这里的校验全部发生在**解包之后**：verify 不过 / packageHash 或
     manifestHash 与注册表固定值不符 → {"ok": False, "errors": [...]}，
     工作目录清理。fail-closed：任何失败路径都不把半截包交出去。
+
+    ``host_version``（v2.20）透传给 verify_package：探测到且低于包声明
+    的 minWorkBuddyVersion → 默认拒绝（force 放行）；None → 跳过。
     """
     from .packaging import verify_package          # noqa: PLC0415 —— 避免加重 import 环
     work_dir = Path(work_dir)
@@ -233,7 +244,7 @@ def prepare_package(source, work_dir, *, expected_package_hash=None,
             zip_path = Path(s)
         pkg_dir = work_dir / "pkg"
         unpack_zip(zip_path, pkg_dir, size_limit=size_limit)
-        v = verify_package(pkg_dir, force=force)
+        v = verify_package(pkg_dir, force=force, host_version=host_version)
         if not v["ok"]:
             return _fail(v["errors"], v["warnings"])
         errors: list[str] = []
@@ -292,10 +303,13 @@ def install_from_entry(entry: dict, *, mode: str = "missing", force: bool = Fals
             f"wbm-artifact-{os.getpid()}-{time.time_ns() % 1_000_000:06d}")
     work_root = Path(work_root)
 
-    say(f"下载不可变 artifact：{url}")
+    say(f"[1/4] 下载不可变 artifact：{url}")
     try:
+        from .packaging import compatibility_report, risk_summary   # noqa: PLC0415
+        hv = detect_host_version()
         prep = prepare_package(url, work_root, expected_package_hash=ph,
-                               expected_manifest_hash=mh, force=force, fetch=fetch)
+                               expected_manifest_hash=mh, force=force,
+                               host_version=hv, fetch=fetch)
         if not prep.get("ok"):
             for e in prep.get("errors", []):
                 say(f"! {e}")
@@ -306,14 +320,26 @@ def install_from_entry(entry: dict, *, mode: str = "missing", force: bool = Fals
                   if isinstance(s, str) and "/" in str(s)]
         if not skills:
             return {"ok": False, "error": "包里没有可安装的 skill"}
-        say(f"校验通过（packageHash {str(prep.get('packageHash'))[:12]}…），"
-            f"开始安装 {len(skills)} 个 skill")
+        say(f"[2/4] ✓ 校验通过：manifest 清单逐文件 SHA-256 一致，packageHash "
+            f"{str(prep.get('packageHash'))[:12]}… 与注册表固定值相符")
+        # v2.20：兼容性事实与权限声明打进任务日志 —— 可验证安装要看得见。
+        for c in compatibility_report(manifest, host_version=hv)["checks"]:
+            mark = {True: "✓", False: "✗", None: "△"}[c["ok"]]
+            say(f"[3/4] {mark} 兼容性 · {c['label']} —— {c['detail']}")
+        risk = risk_summary(manifest)
+        granted = [it for it in risk["items"] if it["granted"]]
+        for it in granted:
+            say(f"      权限 · {it['label']}"
+                + (f"（{it['scope']}）" if it["scope"] else "（未限定范围）"))
+        if not granted:
+            say("[3/4] ✓ 权限 · 包未申请文件系统 / 网络 / Shell / 凭据 / 子进程能力")
         # install_package_skills 的契约是「skills 根目录」：包内即 <pkg>/skills。
+        say(f"[4/4] 事务安装 {len(skills)} 个 skill …")
         r = _core.install_package_skills(
             Path(prep["pkg"]) / "skills", skills=skills, pid=repo, version=ver,
             package_hash=ph, mode=mode)
         if r.get("ok"):
-            say(f"完成：新增 {len(r.get('added', []))} 更新 "
+            say(f"[4/4] ✓ 完成：新增 {len(r.get('added', []))} 更新 "
                 f"{len(r.get('updated', []))} 跳过 {len(r.get('skipped', []))} "
                 f"非本市场 {len(r.get('foreign', []))} 失败 {len(r.get('failed', []))}")
         return r

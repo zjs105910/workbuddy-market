@@ -4,6 +4,66 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.20.0 — 2026-10-08（供应链安全轮：permissions / 兼容性检测 / 构建证明）
+
+外部评审 #2（dsh-market 对比走查）与既定 v2.20 供应链计划的交集当轮
+落地。协议升级 plugin-spec v0.3 —— 向后兼容，schemaVersion 不升
+（新增字段 + 新增 §8：permissions / 兼容性 / attestation）。
+
+**permissions（权限声明 + 风险预览）**
+- manifest 新增可选 `permissions` 字段：键固定五类（filesystem / network /
+  shell / credentials / subprocess），值为布尔或非空字符串数组（限定
+  范围）。与依赖同口径：**声明不强制** —— 执行期沙箱是宿主的事，
+  市场先把「要什么」摆上台面；
+- `packaging.pack_package` 写入前过形状校验（fail-fast）；verify 查形状
+  （形状检查独立于 manifest 自哈希，改一个字都现形）；`risk_summary()`
+  归一化为 none / scoped / broad 三档；
+- artifacts CI 把收录条目人工审核的 permissions 固化进打包 manifest
+  （从此受 manifestHash 保护）并回写注册表条目 —— 安装前风险预览
+  **不需要先下载包**；registry 解析层过同一把形状尺，形状不对整个
+  字段当没有（fail-closed）。
+
+**兼容性检测（宿主感知，三态口径）**
+- `packaging.compatibility_report()`：平台 + WorkBuddy 版本，每项 ok
+  三态（满足 / 不满足 / **未知**）—— 探测不到宿主版本时如实标 △，
+  绝不冒充满足或不满足；整体 ok 只在出现 False 时为 False；
+- `adapters.detect_host_version()`：显式来源只有 `WORKBUDDY_VERSION`
+  环境变量与 WorkBuddy 自己写的 `~/.workbuddy/last-launch.json`
+  （实测 5.7.6 存在，不可信状态文件口径：形状不对当没有）；
+  绝不猜安装目录 / 注册表 / 进程参数；
+- `verify_package` 新增 host_version 门槛：包声明 `minWorkBuddyVersion`
+  且探测值不满足 → 默认拒绝（force 放行并记 warning，与平台冻结决定
+  #4 同口径）；None → 跳过（单一裁决点仍在 verify）；
+- `packaging.semver_gte()`：数字段逐位比较（5.10 > 5.9，字符串比较会
+  错），段数补零等值（5.7 == 5.7.0），预发布后缀视为相等（保守、可预期）。
+
+**构建证明 attestation（v0.1）**
+- `build_artifacts.build_one` 随 zip 产出 `<asset>.attestation.json`
+  （schemaVersion / type / package / packageHash / manifestHash /
+  sourceCommit / builder / builtAt），artifacts.yml 随 Release 分发；
+  `--patch-registry` 回写 `attestationUrl`（连同 permissions / platforms /
+  minWorkBuddyVersion，动态字段只许 CI 改的口径不变）；
+- `packaging.verify_attestation()` 纯函数：形状 + 与已知值对账。
+  v0.1 不带签名（冻结决定 #3 的 signature 位预留）—— 防篡改仍由
+  安装端逐包 packageHash 校验承担，attestation 的价值是**可对账**。
+
+**可验证安装的呈现（内核能力浮出水面）**
+- `artifact.install_from_entry` 改为分步清单输出：[1/4] 下载 → [2/4]
+  哈希与 manifest 校验 → [3/4] 兼容性与权限 → [4/4] 事务安装；
+- Web：安装确认框渲染权限清单（usePkg 链路，数据来自注册表条目）；
+  注册表卡片新增「详情」弹窗（来源与信任 / 不可变产物对账入口 /
+  兼容性声明 / 权限声明）；confirmBox/infoBox 复用同一弹窗骨架；
+- CLI 新增 `workbuddy-market verify <zip|dir>` 包级子命令（不依赖
+  clone 布局，与 doctor 同分发层）：完整校验 + 风险预览 + 兼容性报告，
+  `--json` 供脚本消费，zip 走安装链同一套 unpack 防线后即删。
+
+**版本同步**：version 2.20.0；selftest 661 → 692 项（第 34 节 31 项：
+permissions 形状 / 风险预览三档 / 兼容性三态 / 宿主版本门槛 /
+attestation 对账与回写 / registry 成套采纳 / detect_host_version /
+cli verify 端到端）；pytest 37 项不变。README 新增定位声明与四层
+架构说明（评审 #2 第 20/21/24/25 节）；v3-roadmap 并入评审 #2 的
+P0-P4 映射与取舍（第 26 节）。
+
 ## 2.19.0 — 2026-10-08（R6 收尾：state / application 迁包，core 收成兼容 shim）
 
 外部评审 1/2 号 P0（架构减重）的当轮落地。R4/R5 同一套迁包纪律：

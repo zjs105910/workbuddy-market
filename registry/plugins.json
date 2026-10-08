@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "updatedAt": "2026-10-07",
-  "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建，请勿手工编辑动态字段。收录标准：仓库内含 SKILL.md 技能（可直接被 ghpm 安装到 ~/.workbuddy/skills）、非归档、活跃维护。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。",
+  "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords / trust / sourceCommit / license / review / permissions）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建；产物与声明字段（packageUrl / packageHash / manifestHash / attestationUrl / platforms / minWorkBuddyVersion / version）由 .github/workflows/artifacts.yml（v2.17/v2.20）按打包 manifest 回写 —— 后两类请勿手工编辑。收录标准：仓库内含 SKILL.md 技能（可直接被 ghpm 安装到 ~/.workbuddy/skills）、非归档、活跃维护。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。",
   "plugins": [
     {
       "repo": "anthropics/skills",
