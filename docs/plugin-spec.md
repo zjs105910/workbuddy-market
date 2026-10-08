@@ -1,8 +1,10 @@
 # WorkBuddy Market Package 协议（v0.2，2026-10-08）
 
 > 状态：**v0.2 —— 六项开放问题已冻结（见 §6），`pack` / `verify` 纯函数
-> 层已实现（`workbuddy_market/packaging.py`，selftest 第 30 节盯防）**。
-> 安装链路接入（registry 带 manifestHash → 安装走 verify）是下一步。
+> 层已实现（`workbuddy_market/packaging.py`，selftest 第 30 节盯防）；
+> 安装链路已接入（v2.16：`workbuddy_market/artifact.py` 下载 / 解包 /
+> 校验 → `installer.install_package_skills` 两阶段事务安装，selftest
+> 第 31 节盯防）**。
 > schema 版本独立于市场版本号演进（`schemaVersion` 从 1 开始，
 > 向后兼容的字段新增不升版）。
 
@@ -145,6 +147,10 @@ verify 失败 = 整包拒绝，无半截状态（与「任何一步失败源目�
    自哈希 → 逐文件 → **双向一致**（多一个未列出文件也算失败）→
    链接防线 → 路径穿越 → 平台 force 口径 → 依赖形状；
    selftest 第 30 节覆盖全部攻击面）
-4. registry 接入：条目带 `packageHash` / `manifestHash`，安装走 verify
-   链路（下一步）
+4. ~~registry 接入：条目带 `packageHash` / `manifestHash`，安装走 verify
+   链路~~ ✅（v2.16：registry 解析采纳成套的 packageUrl + packageHash
+   （manifestHash 可选）；`artifact.install_from_entry` 走
+   下载 → 解包 → verify → 事务安装全链，条目无成套字段时诚实报错；
+   packageHash 进事务日志与 ownership，恢复补记不丢。
+   剩余：CI 侧批量构建并发布 artifact 产物源）
 5. 依赖系统（P2）另起。

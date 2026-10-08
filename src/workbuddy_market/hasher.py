@@ -7,9 +7,28 @@ hash_chunk_bytes()（读配置），留在 market_core，R3 拆 config/scanner �
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from .paths import HASH_CHUNK_BYTES
+
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def normalize_sha256(value) -> str | None:
+    """把外部给的 sha256 值归一成裸小写 hex；不合法返回 None（v2.16 新增）。
+
+    接受 ``"裸 hex"`` 与 ``"sha256:<hex>"`` 两种写法（manifest / 注册表 /
+    命令行三种来源的口径不一，这里统一）。**返回 None 是刻意的**：让
+    调用方自己决定「没给哈希」与「给了坏哈希」分别怎么 fail-closed，
+    本函数不做策略。
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower()
+    if v.startswith("sha256:"):
+        v = v[len("sha256:"):]
+    return v if _HEX64_RE.match(v) else None
 
 
 def fingerprint_from_index(index: dict, links=()) -> dict:

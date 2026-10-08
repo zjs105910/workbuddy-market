@@ -57,6 +57,13 @@ v2.13 API 版本化：
   含 /api/job/<id>[/cancel] 这类带参数的路由），实现见 `_normalize_api_path()`。
   别名在**鉴权 / Origin 校验之前**归一化 —— 版本前缀不提供任何绕过闸门的
   途径。今后接口行为变化走 /api/v2，/api/v1 与裸 /api 共存。
+
+v2.16 包安装链路：
+  POST /api/registry/install {repo, mode?} 走不可变 artifact 链路
+  （后台任务）：注册表条目带 packageUrl + packageHash 时，下载 →
+  哈希校验（对不上整包拒绝，无放行）→ verify_package → 两阶段事务安装。
+  条目没有成套 artifact 字段时任务失败并提示走 /api/remote/add。
+  哈希钉死的那一份不存在上游漂移，因此无需 remote/add 的 409 闸门。
 """
 from __future__ import annotations
 
@@ -591,6 +598,58 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
     return jid
 
 
+def _registry_install_job(repo: str, mode: str = "missing", force: bool = False):
+    """社区注册表的**包安装**任务（v2.16）：不可变 artifact → verify → 事务安装。
+
+    与 _remote_job 同一套闸门与任务表（并发满员返回 None，由调用方回 429）。
+    与 ghpm 路线的本质区别：装的是注册表条目钉死的那一份字节（packageHash
+    校验，对不上整包拒绝），不是仓库当前的 HEAD —— 上游漂移在这条链路里
+    天然不存在，所以这里不需要 _registry_drift 的 409 闸门。
+    条目没有成套 artifact 字段时任务会失败并给出诚实提示（走 remote/add）。
+    """
+    if not _RUNNER.acquire():
+        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝包安装 {repo}")
+        return None
+    try:
+        jid = _new_job(f"包安装 {repo}")
+    except BaseException:
+        _RUNNER.release()
+        raise
+
+    core.log("info", "job", f"registry-install {repo} 开始（artifact 链路）")
+
+    def work():
+        try:
+            reg = core.get_registry()
+            entry = next((e for e in reg.get("plugins", [])
+                          if str(e.get("repo", "")).casefold() == str(repo).casefold()),
+                         None)
+            if not entry:
+                _job_push(jid, f"注册表里没有 {repo}")
+                _job_finish(jid, False, "失败 · 社区注册表")
+                core.log("error", "job", f"registry-install {repo} 失败：条目不存在")
+                return
+            r = core.install_from_entry(entry, mode=mode, force=force,
+                                        progress=lambda m: _job_push(jid, m))
+            ok = bool(r.get("ok"))
+            if not ok and r.get("errors"):
+                for e in r["errors"]:
+                    _job_push(jid, f"! {e}")
+            _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}")
+            core.log("info" if ok else "error", "job",
+                     f"registry-install {repo} {'成功' if ok else '失败'}")
+            invalidate_state()
+        except Exception as exc:  # noqa: BLE001 —— 任务里的一切都转成失败展示
+            _job_push(jid, f"✗ 包安装失败：{exc}")
+            _job_finish(jid, False, "失败 · " + str(repo))
+            core.log("error", "job", f"registry-install {repo} 失败：{exc}")
+        finally:
+            _RUNNER.release()             # 无论成功、失败还是异常，都要还令牌
+
+    threading.Thread(target=work, daemon=True).start()
+    return jid
+
+
 # ---------------------------------------------------------------- GitHub 目录（v2.10）
 
 SEARCH_TTL = 120.0                 # GitHub 搜索的进程内缓存（秒）
@@ -1002,6 +1061,23 @@ class Handler(BaseHTTPRequestHandler):
                 if err2:
                     return self._json({"ok": False, "error": err2}, 400)
                 jid = _remote_job(repo, "update")
+                if jid is None:
+                    return self._json({"ok": False, "error":
+                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
+                                       "请等当前任务完成或取消它"}, 429)
+                return self._json({"ok": True, "jobId": jid})
+            if path == "/api/registry/install":
+                # 包安装（v2.16）：注册表条目带不可变 artifact 时走这条链路 ——
+                # 下载 → packageHash 校验 → verify → 两阶段事务安装。
+                repo, err2 = _repo_arg(body)
+                if err2:
+                    return self._json({"ok": False, "error": err2}, 400)
+                mode = body.get("mode") or "missing"
+                if mode not in core.INSTALL_MODES:
+                    return self._json({"ok": False,
+                                       "error": f"未知安装模式 {mode}"}, 400)
+                jid = _registry_install_job(repo, mode=mode,
+                                            force=bool(body.get("force")))
                 if jid is None:
                     return self._json({"ok": False, "error":
                                        f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"

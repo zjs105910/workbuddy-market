@@ -4,6 +4,73 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.16.0 — 2026-10-08（包接入安装链：不可变 artifact → verify → 事务安装）
+
+**安装链闭环**（plugin-spec v0.2 冻结后的第一步落地，本轮 P0 主题）
+
+之前安装走的是 `Registry → GitHub repo → ghpm → 当前 HEAD`，装到的是
+活的代码；现在注册表条目可携带不可变产物，安装端只信哈希：
+
+    Registry（packageUrl + packageHash + manifestHash）
+      → download_artifact   流式下载，边下边算 sha256，超限即断
+      → unpack_zip          zip-slip / 绝对路径 / 链接成员 / zip bomb 全拒绝
+      → verify_package      manifest 自哈希 → 逐文件双向一致 → 链接 → 穿越
+      → install_package_skills   两阶段事务安装（与本地插件同一条链路）
+
+- **新模块 `workbuddy_market/artifact.py`**：
+  - `download_artifact()`：流式分块（内存 O(chunk)）、`.part` 临时文件 +
+    `os.replace` 原子落位、落位文件名取哈希前 16 位（不可变命名）、
+    `expected_hash` 对不上即拒绝（**供应链校验无放行出口**，不像
+    `--allow-non-skill` 有 force）、大小上限在读取路径上数（不信
+    Content-Length）；网络接缝只有 `_artifact_open()` 一处；
+  - `unpack_zip()`：`..` 段 / 绝对路径 / 盘符成员拒绝（且逐路径过
+    `ensure_child`）；Unix mode 类型位非普通文件/目录（符号链接等）拒绝；
+    声明值与实际写出量双重计数防 zip bomb；失败清理无半截状态；
+  - `prepare_package()`：URL 或本地 zip → 解包 → verify → 与注册表
+    固定的 packageHash / manifestHash 比对。哈希语义分层：packageHash
+    是包**内容**哈希（manifest 口径，解包后重算比对），不是 zip 文件哈希；
+  - `install_from_entry()`：条目没有成套的 packageUrl + packageHash 时
+    **诚实报错并提示走 ghpm 路线** —— 绝不静默降级（「看起来走了校验链、
+    实际走的是 clone」是最坏情况）。
+- **安装循环归一**（`installer.py`）：新增 `install_package_skills()`，
+  `install_local_plugin()` 委托它 —— 本地插件目录与 Market Package 走
+  同一条两阶段事务链路（暂存 → 校验 → 换位 → 记账），foreign 绝不覆盖。
+- **packageHash 全程携带**：`tx_begin()` 顶层、`tx_note_staged()` 条目、
+  `record_owner()`（ownership 记录新增可选 `packageHash` 字段，
+  OWNERSHIP_SCHEMA 保持 1）、`recover_transactions()` 补记不丢 ——
+  「我安装的到底是哪一个不可变产物」全程可审计，为按 artifact 回滚打底。
+- **服务端** `POST /api/registry/install {repo, mode?}`：与 remote/add
+  同一套 `_RUNNER` 并发闸门与任务表；进度回调直喂任务面板；条目无
+  artifact 时任务失败并给出诚实提示。哈希钉死的那一份不存在上游漂移，
+  因此无需 remote/add 的 409 漂移闸门。网页确认框按条目能力如实切换
+  安装路线与文案（v2.16）。
+
+**信任 fail-closed**（评审供应链细节项）
+- `parse_registry()`：trust 缺失 / 值不认识（拼写错误、未来的
+  "official-ish"）一律 **external**。旧口径降为 reviewed，等于把
+  「来历不明」自动洗成「社区已审核」；现网 28 条全有显式 trust，
+  行为不受影响；
+- artifact 字段**成套采纳**：packageUrl + packageHash 同时合法才进条目
+  （半套比没有更危险），manifestHash / version 可选；平铺与嵌套
+  `artifact{}` 两种写法都收。
+
+**性能与 CI**
+- `pack_package()` / `verify_package()` 的逐文件哈希从 `read_bytes()`
+  整读改为 `sha256_file()` 流式分块（1 GB 的包不再整个进内存，
+  与全项目「大文件 fail-safe」原则对齐）；
+- `scripts/build_registry.py` **last-known-good**：全部失败 → 不写盘、
+  不 bump updatedAt、退出码 1；零成功刷新 → 同样不写盘。旧口径在
+  changed==0 且 failed>0 时也会重写 updatedAt，制造一次假更新 + 假 PR
+  —— 「CI → registry → PR」从此只反映真实刷新。
+
+**自检**：579 → 625 项（第 31 节 46 项）：假接缝下载矩阵（哈希不符 /
+超限 / .part 清理 / URL 协议）、zip 攻击面（四类 zip-slip / 链接成员 /
+zip bomb / 清理）、prepare 端到端（URL 全链 / manifestHash 不符 /
+篡改拒绝）、install_from_entry 全链（无 artifact 诚实报错 / 装入 /
+ownership 带 packageHash / 重复 skipped / foreign 不覆盖）、事务
+packageHash（tx_begin 顶层 / staged 条目 / 崩溃恢复补记）、
+build_registry last-known-good 三态、registry 解析 fail-closed。
+
 ## 2.15.0 — 2026-10-08（Market Package 协议冻结 + pack / verify 实现）
 
 **协议冻结**（`docs/plugin-spec.md` v0.1 → v0.2，六项开放问题全部定稿）

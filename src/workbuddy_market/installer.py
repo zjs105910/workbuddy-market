@@ -150,19 +150,57 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
       update      补缺 + 覆盖「本市场装的且内容已变」的
       force       补缺 + 覆盖全部同名目录
 
-    每个 skill 都走「暂存 → 校验 → 换位」两阶段：任何一步失败，
-    本机原来的那份**原样还在**。三种模式都绝不静默覆盖非本市场安装的 skill。
+    v2.16 起真正的安装循环搬进了 install_package_skills() —— 本地插件
+    目录与 Market Package 走**同一条**两阶段事务链路（这正是包协议
+    接入安装链的意义：不再有「两条安装路径、两套纪律」）。本函数只
+    负责本地插件特有的前置：找 spec、必要时触发一次同步打包。
 
-    core 注入点（classify_skill / _stage_skill / _commit_staged /
-    tree_hash* / tx_* / _sync_packaging）一律经 ``market_core`` 晚绑定：
-    安装编排是这些注入点最重要的消费方，patch core.X 的语义不能变。
-    classify_skill 与 _stage_skill / _commit_staged 虽已同包（R5），
-    但它们的内部依赖（quick_fingerprint / tree_hash / _scan）是 core
-    注入点，经由 core 命名空间调用才能让一次 patch 拦到全链路。
+    三种模式都绝不静默覆盖非本市场安装的 skill。
     """
     import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
     if mode not in INSTALL_MODES:
         return {"ok": False, "error": f"未知安装模式 {mode}（可选：{', '.join(INSTALL_MODES)}）"}
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        return {"ok": False, "error": f"配置不可用：{exc}"}
+    spec = next((p for p in cfg.get("localPlugins", []) if p["name"] == plugin_id), None)
+    if not spec:
+        return {"ok": False, "error": f"市场里没有插件 {plugin_id}"}
+    src_root = PLUGINS_DIR / plugin_id / "skills"
+    if not src_root.is_dir():
+        _core._sync_packaging(quiet=True)
+    if not src_root.is_dir():
+        return {"ok": False, "error": f"插件 {plugin_id} 尚未打包，请先运行同步"}
+    return install_package_skills(
+        src_root, spec.get("skills", []), pid=plugin_id,
+        version=spec.get("version", "1.0.0"), mode=mode)
+
+
+def install_package_skills(src_root, skills: list, *, pid: str, version: str,
+                           package_hash: str | None = None,
+                           mode: str = "missing") -> dict:
+    """把 ``src_root/skills/<name>`` 下的 skill 两阶段装进 ~/.workbuddy/skills/。
+
+    本地插件目录（install_local_plugin）与 Market Package
+    （artifact.install_from_entry → verify → 这里）共用这一条链路。
+    纪律与 v2.14 以来的 install_local_plugin 完全一致：
+
+      · 两阶段：先备好新的（暂存 + 校验），再动旧的；
+      · 凭证先于磁盘变更：tx_begin 早于一切，expected hash 在 os.replace
+        之前写进日志（约定 12）；packageHash（v2.16）跟 expected 一起进
+        日志 —— 恢复补记的所有权记录能带上「装的是哪一份包」；
+      · 安装决策精确判定（purpose="install"，约定 2），foreign 绝不覆盖。
+
+    core 注入点（classify_skill / _stage_skill / _commit_staged /
+    tree_hash* / tx_* / record_owner / recover_transactions）一律经
+    ``market_core`` 晚绑定：安装编排是这些注入点最重要的消费方，
+    patch core.X 的语义不能变。
+    """
+    import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
+    if mode not in INSTALL_MODES:
+        return {"ok": False, "error": f"未知安装模式 {mode}（可选：{', '.join(INSTALL_MODES)}）"}
+    src_root = Path(src_root)
 
     with locked():
         op = f"install-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
@@ -170,24 +208,14 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
             cfg = load_config()
         except ConfigError as exc:
             return {"ok": False, "error": f"配置不可用：{exc}"}
-        spec = next((p for p in cfg.get("localPlugins", []) if p["name"] == plugin_id), None)
-        if not spec:
-            return {"ok": False, "error": f"市场里没有插件 {plugin_id}"}
 
         # 先把上一次未完成的事务补上（比如上次正好卡在
         # 「文件已落位、所有权还没写」那一步）
         rec = _core.recover_transactions(quiet=True)
         recovered = rec["recovered"]
 
-        src_root = PLUGINS_DIR / plugin_id / "skills"
-        if not src_root.is_dir():
-            _core._sync_packaging(quiet=True)
-        if not src_root.is_dir():
-            return {"ok": False, "error": f"插件 {plugin_id} 尚未打包，请先运行同步"}
-
         SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 
-        version = spec.get("version", "1.0.0")
         own = load_ownership()
         added, updated, skipped, foreign, failed, warnings = [], [], [], [], [], []
         expected_by_skill = {}          # 换位前算好的「期望状态」，收尾直接复用
@@ -196,11 +224,13 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
         # 事务日志**必须早于任何磁盘变更**。哪怕后面一个 skill 都不用装，
         # 也只是一份空日志，收尾时会被删掉 —— 代价是一次原子写，
         # 换来的是「从这里起无论死在哪一行都有凭证」。
-        tx = _core.tx_begin("install", plugin_id, spec.get("skills", []),
-                            version=version, mode=mode)
+        tx_extra = {"version": version, "mode": mode}
+        if package_hash:
+            tx_extra["packageHash"] = package_hash    # v2.16：装的是哪一份不可变产物
+        tx = _core.tx_begin("install", pid, skills, **tx_extra)
 
         try:
-            for sname in spec.get("skills", []):
+            for sname in skills:
                 src = src_root / sname
                 if not (src / "SKILL.md").is_file():
                     continue
@@ -212,7 +242,7 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
                     continue
 
                 # 安装决策必须精确：指纹只服务网页显示，绝不用来决定要不要覆盖
-                kind = _core.classify_skill(plugin_id, sname, cfg, own,
+                kind = _core.classify_skill(pid, sname, cfg, own,
                                             purpose="install")["kind"]
 
                 if kind == "foreign" or kind == "other_plugin":
@@ -240,7 +270,8 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
                     "fingerprint": fingerprint_from_index(st["index"], st["links"]),
                 }
                 _core.tx_note_staged(tx, sname, expected,
-                                     plugin=plugin_id, version=version)
+                                     plugin=pid, version=version,
+                                     package_hash=package_hash)
 
                 try:
                     _core._commit_staged(st["tmp"], dst, sname, index=trash_index)
@@ -260,9 +291,10 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
             if done:
                 try:
                     # 这些 hash / 指纹就是上面刚算过的，不用再读一遍新版本
-                    _core.record_owner(plugin_id, done, version,
+                    _core.record_owner(pid, done, version,
                                        snapshots={s: expected_by_skill[s]
-                                                  for s in done if s in expected_by_skill})
+                                                  for s in done if s in expected_by_skill},
+                                       package_hash=package_hash)
                     for s in done:
                         _core.tx_drop(tx, s)
                 except (OSError, ConfigError) as exc:
@@ -273,7 +305,7 @@ def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
                         "下次启动/下次安装会自动补记）")
                     log("error", "install", warnings[-1], op_id=op)
 
-            msg = (f"{plugin_id}[{mode}]: 新增 {len(added)} 更新 {len(updated)} "
+            msg = (f"{pid}[{mode}]: 新增 {len(added)} 更新 {len(updated)} "
                    f"跳过 {len(skipped)} 非本市场 {len(foreign)} 失败 {len(failed)}")
             log("warn" if (failed or warnings) else "info", "install", msg, op_id=op)
             return {"ok": True, "mode": mode, "op": op, "added": added, "updated": updated,

@@ -41,6 +41,7 @@ import urllib.request
 from .config import validate_repo
 from .errors import ConfigError
 from .fsutil import atomic_write_text, read_json
+from .hasher import normalize_sha256
 from .logging import now_iso
 from .paths import MARKET_ROOT, REGISTRY_PATH
 from .version import MARKET_VERSION
@@ -162,9 +163,13 @@ def parse_registry(data) -> dict:
             "addedAt": _clean_text(it.get("addedAt"), 10),
         }
         # 信任分级（v2.12）：official=官方收录 / reviewed=社区精选（人工审核）
-        # / external=未审核。静态字段，只许人工维护；值不认识就降为 reviewed。
-        trust = _clean_text(it.get("trust"), 16) or "reviewed"
-        entry["trust"] = trust if trust in ("official", "reviewed", "external") else "reviewed"
+        # / external=未审核。静态字段，只许人工维护。
+        # **v2.16 fail-closed**：值不认识（拼写错误、未来的 "official-ish"）
+        # 或干脆没写 → 一律 external。旧口径是降为 reviewed —— 那等于把
+        # 「来历不明」自动洗成「社区已审核」，供应链方向反了。现网 28 条
+        # 全部有显式 trust，行为不受影响。
+        trust = _clean_text(it.get("trust"), 16)
+        entry["trust"] = trust if trust in ("official", "reviewed", "external") else "external"
         # 供应链字段（v2.12，可选增量，schema 保持 1）：审核时固定下来的来源
         # commit 与许可证。sourceCommit 是「审核时看的是哪一份」的凭证，
         # 安装端拿它和 CI 刷出来的 latestSha 比对，检测上游漂移。
@@ -174,6 +179,24 @@ def parse_registry(data) -> dict:
         sc = _clean_text(it.get("sourceCommit"), 64)
         if sc:
             entry["sourceCommit"] = sc
+        # 不可变产物字段（v2.16，可选增量，schema 保持 1）：CI 发布的
+        # artifact。**成套采纳**：packageUrl + packageHash 必须同时合法
+        # 才进条目 —— 只给 URL 没法校验、只给哈希没处下载，半套字段
+        # 比没有更危险（会让人误以为「可校验」）。manifestHash 可选，
+        # 有则一并固定。平铺与嵌套 artifact{} 两种写法都收（嵌套是
+        # plugin-spec 讨论稿的数据模型方向，平铺是当前注册表的实际形态）。
+        art = it.get("artifact") if isinstance(it.get("artifact"), dict) else {}
+        pu = _clean_text(art.get("packageUrl") or it.get("packageUrl"), 500)
+        ph = normalize_sha256(art.get("packageHash") or it.get("packageHash"))
+        if pu and ph:
+            entry["packageUrl"] = pu
+            entry["packageHash"] = ph
+            mh = normalize_sha256(art.get("manifestHash") or it.get("manifestHash"))
+            if mh:
+                entry["manifestHash"] = mh
+        ver = _clean_text(art.get("version") or it.get("version"), 32)
+        if ver:
+            entry["version"] = ver
         rv = it.get("review")
         if isinstance(rv, dict):
             review = {k: _clean_text(rv.get(k), 40)

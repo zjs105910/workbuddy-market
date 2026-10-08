@@ -14,6 +14,15 @@ class FileLockTimeout(RuntimeError):
     pass
 
 
+class ArtifactError(RuntimeError):
+    """Market Package artifact 下载 / 校验失败（v2.16 新增）。
+
+    供应链哈希不符没有「放行」一说（不像 --allow-non-skill 有显式确认
+    出口）—— 哈希对不上就是整包拒绝，调用方拿到这个异常时磁盘上
+    不应残留任何半截状态（下载临时文件 / 解包目录由抛出方负责清理）。
+    """
+
+
 class ScanError(OSError):
     """目录扫描不完整。
 

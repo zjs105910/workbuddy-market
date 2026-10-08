@@ -32,16 +32,18 @@ src/workbuddy_market/
 selftest patch 落点随迁、每轮 selftest 全绿。
 
 ### 2. 定义 Marketplace Package 协议（manifest.json）
-**v0.2 已冻结全部六项开放问题，pack / verify 已实现**
-（`workbuddy_market/packaging.py`，selftest 第 30 节全覆盖攻击面；
-详见 docs/plugin-spec.md §6/§7）。剩余：registry 安装链路接入
-（条目带 packageHash，安装走 verify）。
+**v0.2 已冻结全部六项开放问题，pack / verify 已实现，安装链路已接入**
+（v2.16：`artifact.py` 下载/解包/校验 → `install_package_skills`
+两阶段事务安装，selftest 第 30/31 节全覆盖攻击面；详见
+docs/plugin-spec.md §6/§7）。剩余：CI 侧为注册表条目批量构建并发布
+artifact（客户端链路已就绪，等产物源）。
 
 ### 3. 可复现安装（immutable artifact）
-现状的 trust 模型解决「上游变了会提醒」，但安装的仍是**当时的
-最新版**。目标：reviewed commit → 不可变产物 → sha256 → install，
-UI 提供「安装审核版本 / 安装当前版本」双入口。
-（本轮 v2.13 的漂移闸门 + sourceCommit 固定是前置。）
+**v2.16 已落地客户端全链**：Registry（packageUrl + packageHash）→
+不可变产物 → sha256 校验（无放行出口）→ install → packageHash 进
+ownership 与事务日志。装到的是审核时固定的那一份字节，上游漂移在这条
+链路里天然不存在。剩余：CI 发布产物源 + UI「安装审核版本 / 安装当前
+版本」双入口（ghpm 路线仍是当前版本入口）。
 
 ### 4. 真正可安装的 CLI
 现状：`workbuddy-market` 仍需位于 clone 目录（除 v2.13 的 doctor）。
@@ -66,7 +68,7 @@ UI 提供「安装审核版本 / 安装当前版本」双入口。
 | /api/v1 稳定化 | v2.13 已落地别名；后续加 schemas + 契约测试，破坏性变化走 /api/v2 | 已开始 |
 | Provider 抽象 | `Provider` Protocol：get_metadata / search / download / resolve_version / verify；先收编 catalog+registry 的 GitHub 路径，再考虑 Gitee / 本地 / HTTP | manifest 协议 |
 | WorkBuddy Adapter | 把「读 known_marketplaces / 写 skills 目录」等对 WorkBuddy 内部格式的依赖收进 adapters/workbuddy.py，抵御宿主格式变化 | — |
-| packageHash 全量固定 | 安装产物整包哈希进所有权与事务日志，补全可复现安装链 | §3 |
+| packageHash 全量固定 | ✅ v2.16 完成：安装产物整包哈希进所有权与事务日志（含崩溃恢复补记），补全可复现安装链 | §3 |
 
 ## P2（v3.x / 生态期）
 
@@ -84,6 +86,13 @@ UI 提供「安装审核版本 / 安装当前版本」双入口。
 ---
 
 ## 已落地的部分
+
+**v2.16**：
+- ✅ P0-2 收官：包接入安装链全链闭环（artifact 下载/解包/校验 →
+  两阶段事务安装），packageHash 进 ownership + 事务日志
+- ✅ 供应链信任收紧：trust 缺失/未知 fail-closed 为 external；
+  artifact 字段成套采纳；verify/pack 流式哈希；build_registry
+  last-known-good
 
 **v2.15**：
 - ✅ P0-2 完成：plugin-spec 六项开放问题全部冻结（v0.2）+

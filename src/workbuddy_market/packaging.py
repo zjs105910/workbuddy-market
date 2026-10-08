@@ -4,9 +4,9 @@ docs/plugin-spec.md v0.2）。
 
 定位：**纯函数层**。pack 把一个本地插件目录打成带 manifest 的
 Market Package（第四层抽象：Skill / Plugin / GitHub Repo 之外的可校验
-分发单元）；verify 对一个包做完整校验 —— 本轮只落地这两个纯函数，
-安装链路（registry 带 manifestHash → 安装走 verify）是下一步，
-Remote 无 manifest 的包仍走现有路径并标「无完整性清单」。
+分发单元）；verify 对一个包做完整校验。v2.16 起接入安装链：
+registry 带 packageUrl + packageHash → artifact.py 下载解包 →
+verify → installer.install_package_skills 两阶段事务安装。
 
 六项开放问题的冻结决定（2026-10-08，详见 plugin-spec.md §6）：
 
@@ -37,6 +37,7 @@ from pathlib import Path
 
 from .config import ConfigError, ensure_child, validate_id, validate_version
 from .fsutil import atomic_write_text
+from .hasher import sha256_file
 from .scanner import _scan
 
 MANIFEST_NAME = "manifest.json"
@@ -129,7 +130,9 @@ def pack_package(src: Path, out: Path, *, pid: str, name: str, version: str,
             rel = p.relative_to(out).as_posix()
             if rel == MANIFEST_NAME:
                 continue
-            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            # v2.16：流式分块（约定 8/19）—— pack 路径此前是 read_bytes()
+            # 整读，100 MB 的包会整个进内存；sha256_file 峰值 O(chunk)。
+            digest = sha256_file(p).hex()
             files[rel] = digest
             total += p.stat().st_size
         for s in skills:
@@ -233,7 +236,9 @@ def verify_package(pkg: Path, *, force: bool = False,
             if not f.is_file():
                 errors.append(f"清单声明了但包里没有：{rel}")
                 continue
-            actual = hashlib.sha256(f.read_bytes()).hexdigest()
+            # v2.16：流式分块哈希。verify 是安装链的必经闸门，1 GB 的
+            # 文件用 read_bytes() 会把整个文件吃进内存（评审 P1 实锤）。
+            actual = sha256_file(f).hex()
             if actual != digest:
                 errors.append(f"文件哈希不符（内容被改动过）：{rel}")
         for rel in sorted(set(disk) - set(files_ref)):

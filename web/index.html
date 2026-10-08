@@ -723,13 +723,20 @@ document.addEventListener("click", async (e) => {
       const known = (STATE.remotes||[]).some(r => r.rawName === repo);
       const regEntry = (REG.plugins||[]).find(p => p.repo === repo);
       const regKnown = !!regEntry;
-      const trust = regEntry ? (regEntry.trust || "reviewed") : "external";
+      // v2.16：注册表条目带成套 artifact 字段 → 走不可变包安装链路
+      const usePkg = !!(regEntry && regEntry.packageUrl && regEntry.packageHash);
+      const trust = regEntry ? (regEntry.trust || "external") : "external";
       const trustNote = trust === "official"
         ? '官方收录'
         : regKnown ? '社区精选（已人工审核收录）' : '<b>未审核</b>（搜索结果，未经收录审核）';
+      let routeNote = '安装走 ghpm，自带事务与回滚。';
+      if (usePkg){
+        routeNote = '安装走<b>不可变产物</b>：下载后先做 SHA-256 供应链校验'
+          + '（与收录审核时固定的哈希比对，不符即整包拒绝），再进事务安装。';
+      }
       const note = known
-        ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>安装走 ghpm，自带事务与回滚。</div>'
-        : '<div class="note">来源：'+trustNote+'。会联网下载并写入 <code>~/.workbuddy/skills</code>，安装走 ghpm，自带事务与回滚。</div>';
+        ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>'+routeNote+'</div>'
+        : '<div class="note">来源：'+trustNote+'。会联网下载并写入 <code>~/.workbuddy/skills</code>，'+routeNote+'</div>';
       if(!regKnown){
         // 供应链收紧（v2.12）：非收录仓库默认只装符合 Skill 协议的内容，
         // 兼容模式必须在这里显式勾选放行。
@@ -742,8 +749,11 @@ document.addEventListener("click", async (e) => {
       allowNs = !regKnown && !!($("#cbCompat") && $("#cbCompat").checked);
     }
     try{
-      const r = await api(isAdd ? "/api/remote/add" : "/api/remote/update",
-                          isAdd ? {repo, allowNonSkill: allowNs} : {repo});
+      const ep = isAdd ? (usePkg ? "/api/registry/install" : "/api/remote/add")
+                       : "/api/remote/update";
+      const body = isAdd ? (usePkg ? {repo} : {repo, allowNonSkill: allowNs})
+                         : {repo};
+      const r = await api(ep, body);
       watchJob(r.jobId, (isAdd?"安装 ":"更新 ")+repo);
     }catch(err){
       // 409：注册表收录仓库的上游已前移（供应链固定校验，v2.12）。

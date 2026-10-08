@@ -123,16 +123,27 @@ def main(argv: list | None = None) -> int:
             print(f"  !!  {repo}: {type(exc).__name__}: {exc}", file=sys.stderr)
             out_entries.append(entry)
 
+    # last-known-good（v2.16）：只有「至少成功刷新一项」才允许动文件。
+    # 旧口径在 changed == 0、failed > 0 时也会重写 updatedAt —— 明明
+    # 一条都没刷新成功，却制造一次文件变化 + 一条假 PR，「CI → registry
+    # → PR」就不再可靠。现在：全部失败 → 不写盘、退出码 1；没有任何
+    # 变化 → 同样不写盘（失败条目沿用旧值，下轮再试）。只有真的有
+    # 条目刷新成功了，才 bump updatedAt 并落盘。
+    total = len(doc["plugins"])
+    if total and failed == total:
+        print("\n全部条目刷新失败：不写盘、不更新 updatedAt（last-known-good）。",
+              file=sys.stderr)
+        return 1
+    if changed == 0:
+        print(f"\n没有任何条目刷新成功（成功 0 / 失败 {failed}）：不写盘。")
+        return 0
+
     doc["plugins"] = out_entries
     doc["updatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     text = json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
 
     if args.dry_run:
         print(f"\n[dry-run] {changed} 条会更新，{failed} 条失败，文件未写。")
-        return 1 if (failed and changed == 0) else 0
-
-    if changed == 0 and failed == 0:
-        print("\n全部条目无变化，不写盘。")
         return 0
 
     # 原子写：临时文件同目录 + os.replace（同卷 rename 原子）
@@ -149,7 +160,7 @@ def main(argv: list | None = None) -> int:
             pass
         raise
     print(f"\n已写回 {REGISTRY_FILE}（更新 {changed} 条，失败 {failed} 条）。")
-    return 1 if (failed and changed == 0) else 0
+    return 0
 
 
 if __name__ == "__main__":

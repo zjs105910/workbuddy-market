@@ -115,7 +115,8 @@ def _tx_put(tx: dict, sname: str, **fields) -> None:
 
 
 def tx_note_staged(tx: dict, sname: str, expected: dict | None = None,
-                   plugin: str | None = None, version: str | None = None) -> None:
+                   plugin: str | None = None, version: str | None = None,
+                   package_hash: str | None = None) -> None:
     """**换位之前**落盘：记下这次 commit 完成之后应该长什么样。
 
     为什么要提前记：如果只记「已交付」，那么「os.replace 成功 → 写日志」这个
@@ -126,11 +127,14 @@ def tx_note_staged(tx: dict, sname: str, expected: dict | None = None,
       · 磁盘内容 == expected  → 其实换成功了（崩在 replace 之后）→ 认领
       · 磁盘内容 != expected  → 没换，或已被改动 → **不认领**（也不报冲突，
         因为这次交付本来就没完成）
+
+    package_hash（v2.16）：本次安装依据的不可变 artifact 哈希，跟
+    expected 一起进日志 —— 恢复补记的所有权记录能带上「装的是哪一份包」。
     """
     _tx_put(tx, sname, state="staged",
             hash=(expected or {}).get("hash"),
             fingerprint=(expected or {}).get("fingerprint"),
-            plugin=plugin, version=version)
+            plugin=plugin, version=version, packageHash=package_hash)
     tx_save(tx)
 
 
@@ -269,6 +273,9 @@ def recover_transactions(quiet: bool = True, discard_conflicts: bool = False) ->
                     continue
                 claim.append(s)
                 snapshots[s] = {"hash": got, "fingerprint": entry.get("fingerprint")}
+                ph = entry.get("packageHash")
+                if isinstance(ph, str) and ph:
+                    snapshots[s]["packageHash"] = ph      # v2.16：补记不丢「装的是哪份包」
                 versions[s] = entry.get("version") or tx.get("version") or ""
 
             if claim:
@@ -278,8 +285,14 @@ def recover_transactions(quiet: bool = True, discard_conflicts: bool = False) ->
                     by_version.setdefault(versions.get(s) or "", []).append(s)
                 failed_here = False
                 for ver, group in by_version.items():
-                    snaps = {s: (snapshots[s] if full else {"hash": snapshots[s]["hash"]})
-                             for s in group}
+                    snaps = {}
+                    for s in group:
+                        if full:
+                            snaps[s] = snapshots[s]
+                        else:
+                            snaps[s] = {"hash": snapshots[s]["hash"]}
+                            if snapshots[s].get("packageHash"):
+                                snaps[s]["packageHash"] = snapshots[s]["packageHash"]
                     try:
                         # 按版本分组写：不能把不同版本号的 skill 混成一条记录
                         record_owner(tx.get("plugin") or "", group, ver, snapshots=snaps)

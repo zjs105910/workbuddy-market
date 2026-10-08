@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.15）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.16）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
@@ -7,7 +7,9 @@ v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮�
 → v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表）
 → v2.12（R4）→ v2.13（跨卷原子化 + API v1 + doctor）
 → v2.14（R5：installer / uninstaller 迁包）
-→ v2.15（Market Package 协议冻结 + pack/verify，当前）。
+→ v2.15（Market Package 协议冻结 + pack/verify）
+→ v2.16（包接入安装链：artifact 下载/解包/verify → 两阶段事务安装，
+  packageHash 进 ownership 与事务日志，trust fail-closed，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -343,14 +345,14 @@ from workbuddy_market.paths import (          # noqa: E402,F401
     LOG_MAX_BYTES, LOG_KEEP, BACKUP_KEEP, HASH_CHUNK_BYTES,
 )
 from workbuddy_market.errors import (         # noqa: E402,F401
-    ConfigError, FileLockTimeout, ScanError,
+    ConfigError, FileLockTimeout, ScanError, ArtifactError,
 )
 from workbuddy_market.fsutil import (         # noqa: E402,F401
     _fsync_dir, atomic_write_bytes, atomic_write_text, write_text_if_changed,
     read_json,
 )
 from workbuddy_market.hasher import (         # noqa: E402,F401
-    fingerprint_from_index, sha256_file, _same_content,
+    fingerprint_from_index, sha256_file, _same_content, normalize_sha256,
 )
 from workbuddy_market.locking import (        # noqa: E402,F401
     FileLock, locked, _HELD, _NullLock,
@@ -404,7 +406,11 @@ from workbuddy_market.transactions import (  # noqa: E402,F401  （v2.12 R4 新�
 )
 from workbuddy_market.installer import (     # noqa: E402,F401  （v2.14 R5 新增）
     INSTALL_MODES, _stage_dir, _sweep_staging, _stage_skill, _commit_staged,
-    install_local_plugin,
+    install_local_plugin, install_package_skills,
+)
+from workbuddy_market.artifact import (      # noqa: E402,F401  （v2.16 新增）
+    MAX_ARTIFACT_BYTES, ARTIFACT_TIMEOUT, _artifact_open,
+    download_artifact, unpack_zip, prepare_package, install_from_entry,
 )
 from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新增）
     classify_skill, inspect_skill, plugin_uninstall_plan, uninstall_local_plugin,
@@ -413,6 +419,8 @@ from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新�
 
 # CLASSIFY_PURPOSES / EXACT_PURPOSES 已迁 workbuddy_market.config（v2.9 R3），
 # 此处 re-export（见上方 import 块）。INSTALL_MODES 已迁 installer（v2.14 R5）。
+# artifact 编排层（v2.16）经 core 命名空间调 install_package_skills ——
+# 注入点晚绑定纪律要求 re-export 在先。
 
 
 # ---------------------------------------------------------------- 小工具

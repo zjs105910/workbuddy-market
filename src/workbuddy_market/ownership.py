@@ -47,15 +47,19 @@ def save_ownership(own: dict) -> None:
 
 
 def record_owner(plugin_id: str, skills: list, version: str,
-                 snapshots: dict | None = None) -> None:
+                 snapshots: dict | None = None, package_hash: str | None = None) -> None:
     """记下「这些 skill 是本市场这个插件装的」，并留两层指纹。
 
     hash         内容 SHA-256（准，但要读全部文件）
     fingerprint  文件数 / 总字节 / mtime_ns 聚合（廉价，只 stat）
+    packageHash  安装所依据的不可变 artifact 哈希（v2.16 可选增量，
+                 OWNERSHIP_SCHEMA 保持 1 —— 读端只认 hash/fingerprint，
+                 多一个字段不破坏旧逻辑）
 
-    snapshots: {skill: {"hash": ..., "fingerprint": ...}}。
+    snapshots: {skill: {"hash": ..., "fingerprint": ..., "packageHash": ...}}。
     安装路径会把暂存阶段已经算好的结果传进来 —— 落位用的是同一批文件、
     内容一模一样，没必要在 commit 之后把新版本整个重扫一遍再算一次哈希。
+    崩溃恢复补记（transactions）也会把日志里的 packageHash 带回来。
     """
     import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
     own = load_ownership()
@@ -66,7 +70,7 @@ def record_owner(plugin_id: str, skills: list, version: str,
         if not (d / "SKILL.md").is_file():
             continue
         pre = snaps.get(s) if isinstance(snaps.get(s), dict) else {}
-        own["skills"][s] = {
+        rec = {
             "owner": mid,
             "plugin": plugin_id,
             "version": version,
@@ -74,6 +78,11 @@ def record_owner(plugin_id: str, skills: list, version: str,
             "hash": pre.get("hash") or _core.tree_hash(d),
             "fingerprint": pre.get("fingerprint") or _core.quick_fingerprint(d),
         }
+        ph = pre.get("packageHash") if isinstance(pre.get("packageHash"), str) else None
+        ph = ph or (package_hash if isinstance(package_hash, str) else None)
+        if ph:
+            rec["packageHash"] = ph
+        own["skills"][s] = rec
     save_ownership(own)
 
 
