@@ -59,15 +59,16 @@ def main() -> int:
     # 阻塞（这正是 locking.locked() 需要线程级重入计数器的原因）。
     # 所以「独占」只能在**子进程**里验，同进程两个实例必然都成功。
     child = (
-        "import sys;"
-        "sys.path.insert(0, r'%s');"
-        "import market_core as c;"
-        "try:"
-        "    with c.FileLock(c.LOCK_PATH, timeout=0.3):"
-        "        sys.exit(1)"          # 拿到了 → 独占失效
-        "except c.FileLockTimeout:"
-        "    sys.exit(0)"              # 等锁超时 → 独占成立
-    ) % str(Path(__file__).resolve().parents[1])
+        "import sys\n"
+        "sys.path.insert(0, r'" + str(Path(__file__).resolve().parents[1]) + "')\n"
+        "import market_core as c\n"
+        "try:\n"
+        "    with c.FileLock(c.LOCK_PATH, timeout=0.3):\n"
+        "        sys.exit(1)\n"          # 拿到了 → 独占失效
+        "except c.FileLockTimeout:\n"
+        "    sys.exit(0)\n"              # 等锁超时 → 独占成立
+    )
+    compile(child, "<lock-child>", "exec")   # 先自证语法（CI 上它以 -c 运行）
     with core.FileLock(core.LOCK_PATH, timeout=5):
         import subprocess
         p = subprocess.run([sys.executable, "-c", child], env=dict(os.environ),
