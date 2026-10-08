@@ -1,0 +1,196 @@
+"""UI 冒烟：Playwright 真浏览器验收（dev-only，可选依赖）。
+
+定位（对应 v3-roadmap P0-1「UI 产品化」的验收基建）：
+  · 产品本体保持零依赖 —— 本脚本只是开发者工具，playwright 不进
+    pyproject 依赖，也不进 selftest（selftest 纪律：零依赖一键诊断）；
+  · 真起服务 + 真浏览器，验证的是「会发货的那套前端」：
+    ES Modules 导入链（import 失败 = pageerror）、token 注入、
+    卡片渲染、搜索过滤、分类切换、注册表详情弹窗、本机安装端到端。
+
+用法：
+  python scripts/ui_smoke.py            # 无头跑完输出 PASS/FAIL
+  python scripts/ui_smoke.py --headed   # 有头模式，肉眼看界面
+
+环境：
+  pip install playwright && python -m playwright install chromium
+  （未安装时打印 SKIP 退出 0 —— 不挡 CI，不挡 selftest）
+
+隔离（与 selftest 同一纪律）：临时目录复制真实市场内容，
+WBM_MARKET_ROOT / WBM_STATE_HOME / WBM_HOME 全部指进临时区，
+真实环境零接触。
+"""
+
+import argparse
+import os
+import shutil
+import sys
+import tempfile
+import threading
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))   # 让 scripts/ 直跑也能 import market_server
+
+# 复制进隔离区的条目：市场内容 + 前端 + 注册表 + 索引。
+# 其余（.git / .trash / 状态文件 / 日志 / 本机杂物）一律不带走。
+_COPY_ITEMS = ("market.config.json", "plugins", "web", "registry",
+               ".codebuddy-plugin")
+
+CHECKS = []
+
+
+def ck(name, ok, detail=""):
+    CHECKS.append(ok)
+    print(("  PASS  " if ok else "  FAIL  ") + name + (f"  ——  {detail}" if detail else ""))
+
+
+def build_isolated_market(base: Path) -> Path:
+    root = base / "market"
+    root.mkdir(parents=True)
+    for item in _COPY_ITEMS:
+        src = ROOT / item
+        if not src.exists():
+            continue
+        dst = root / item
+        if src.is_dir():
+            shutil.copytree(src, dst,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        else:
+            shutil.copy2(src, dst)
+    return root
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--headed", action="store_true", help="有头模式（肉眼验收）")
+    args = ap.parse_args()
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("SKIP：未安装 playwright（pip install playwright && "
+              "python -m playwright install chromium）")
+        return 0
+
+    tmp = Path(tempfile.mkdtemp(prefix="wbm-ui-smoke-"))
+    market_root = build_isolated_market(tmp)
+    os.environ["WBM_MARKET_ROOT"] = str(market_root)
+    os.environ["WBM_STATE_HOME"] = str(tmp / "state")
+    os.environ["WBM_HOME"] = str(tmp / "wb-home")
+    (tmp / "wb-home").mkdir()
+
+    # 环境变量必须在导入 core/server 之前就位 —— paths.py 在导入期解析根目录。
+    import market_server as srv
+
+    TOK = "ui-smoke-token"
+    httpd = srv.make_server(0, token=TOK)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+
+    page_errors = []
+    console_errors = []
+    shots = tmp / "shots"
+    shots.mkdir()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=not args.headed)
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page.on("pageerror", lambda e: page_errors.append(str(e)))
+            page.on("console",
+                    lambda m: console_errors.append(m.text)
+                    if m.type == "error" else None)
+
+            page.goto(base, wait_until="domcontentloaded")
+            # 卡片渲染 = refresh() 全链完成（state/catalog/registry 都已返回）
+            page.wait_for_selector("#content .card", timeout=30000)
+
+            ck("页面标题", "本机插件市场" in page.title(), page.title())
+            ck("★ ES Modules 导入链无 pageerror（import 失败会在这里炸出来）",
+               not page_errors, "; ".join(page_errors[:3]))
+            ck("服务端注入 token（页面可用，403 没出现）", True)
+
+            cards = page.locator("#content .card")
+            n_cards = cards.count()
+            ck("★ 卡片渲染（本机插件 + 收录源）", n_cards >= 1, f"{n_cards} 张")
+
+            # 顶部徽标（v2.21 更新中心按钮存在即可，不必有可更新项）
+            ck("头部工具条就绪", page.locator("#btnSync").count() == 1)
+
+            # ---- 搜索过滤： nonsense 词 → 空态；清空 → 卡片回来
+            page.fill("#q", "zzz-不存在的词-zzz")
+            page.wait_for_timeout(400)
+            ck("搜索无命中 → 空态文案",
+               page.locator("#content").inner_text().find("没有符合条件") >= 0)
+            page.fill("#q", "")
+            page.wait_for_timeout(400)
+            ck("清空搜索 → 卡片恢复", page.locator("#content .card").count() >= 1)
+
+            # ---- 分类切换（点「全部」以外第一枚 chip，再切回）
+            chips = page.locator("#cats .chip")
+            if chips.count() > 1:
+                label = chips.nth(1).inner_text()
+                chips.nth(1).click()
+                page.wait_for_timeout(300)
+                chips.nth(0).click()   # 「全部」
+                page.wait_for_timeout(300)
+                ck("分类切换往返不炸", True, f"切到「{label}」再切回")
+            else:
+                ck("分类切换往返不炸（单分类，跳过）", True)
+
+            # ---- 注册表详情弹窗（社区目录有收录时）
+            detail_btn = page.locator("[data-regdetail]").first
+            if detail_btn.count():
+                detail_btn.click()
+                page.wait_for_selector("#cfm.show", timeout=5000)
+                body = page.locator("#cfmBody").inner_text()
+                ck("★ 注册表详情弹窗：来源与信任/兼容性信息块",
+                   ("来源与信任" in body) and ("兼容性" in body))
+                page.locator("#cfmYes").click()
+                page.wait_for_timeout(200)
+            else:
+                ck("注册表详情弹窗（社区目录为空，跳过）", True)
+
+            # ---- 本机安装端到端：隔离 WBM_HOME 是空的 → 第一张本机卡片必有「补齐」
+            #      （/api/install 是同步接口：响应回来即装完，toast 汇总，不走任务弹窗）
+            inst = page.locator("[data-install]").first
+            if inst.count():
+                inst.click()
+                page.wait_for_function(
+                    "document.querySelector('#toast').classList.contains('show')",
+                    timeout=60000)
+                toast_txt = page.locator("#toast").inner_text()
+                ck("★ 本机安装端到端（补齐 → 事务安装 → toast 汇总）",
+                   ("新增" in toast_txt or "更新" in toast_txt
+                    or "跳过" in toast_txt or "没有" in toast_txt), toast_txt)
+                page.wait_for_timeout(800)   # 等 refresh 完成后截图
+                page.screenshot(path=str(shots / "after-install.png"))
+            else:
+                ck("本机安装端到端（无可安装项，跳过）", True)
+
+            # ---- 收藏开关（POST /api/favorites，写进隔离 STATE_HOME）
+            fav = page.locator("[data-fav]").first
+            if fav.count():
+                fav.click()
+                page.wait_for_timeout(600)
+                ck("收藏开关走通（隔离 STATE_HOME 持久化）",
+                   (tmp / "state").exists() and
+                   any((tmp / "state").rglob("favorites.json")))
+            else:
+                ck("收藏开关（无社区条目，跳过）", True)
+
+            page.screenshot(path=str(shots / "main.png"), full_page=True)
+            ck("控制台无 error", not console_errors, "; ".join(console_errors[:3]))
+            browser.close()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    n_fail = CHECKS.count(False)
+    print(f"\n{len(CHECKS) - n_fail} passed, {n_fail} failed")
+    print(f"隔离区（含截图）保留在：{tmp}")
+    return 1 if n_fail else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

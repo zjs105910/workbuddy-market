@@ -10,7 +10,7 @@ const jobs = {};
 let _refresh = null;
 
 export function bindRefresh(fn){ _refresh = fn; }
-function refreshNow(){ if(_refresh) _refresh(); }
+export function refreshNow(){ if(_refresh) _refresh(); }
 
 export function watchJob(jid, title){
   $("#veil").classList.add("show");
