@@ -81,6 +81,8 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/app.js"></script>
+<!-- v2.22：前端拆为 ES Modules（零构建零依赖不变）。
+     module 脚本默认 defer，时序与旧版 body 末尾脚本一致。 -->
+<script type="module" src="/static/app/main.js"></script>
 </body>
 </html>

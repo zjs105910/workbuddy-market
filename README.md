@@ -206,7 +206,12 @@ workbuddy-market/
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
 ├── plugins/                          ← 插件内容（自动生成，随你的配置而定）
 │   └── <你的插件>/{.codebuddy-plugin/plugin.json, skills/…}
-├── web/index.html                    ← 网页界面（单文件，服务端注入口令）
+├── web/                              ← 网页界面（服务端只向 index.html 注入口令）
+│   ├── index.html                    ← 页面骨架（token 注入点只有这里的 meta）
+│   ├── style.css
+│   └── app/                          ← 前端 ES Modules（v2.22 拆分，零构建零依赖：
+│                                        main.js 入口，api/state/plugins/install/
+│                                        update/details/trust/registry/… 各司其职）
 ├── .ownership.json                   ← 谁装的、装时是什么内容 + 快速指纹（卸载靠它分级）
 ├── .market-tx/                       ← 安装/卸载的事务日志（正常结束即清空；残留会被自动补账）
 ├── .market.lock                      ← 跨进程写锁（Windows msvcrt / POSIX fcntl）

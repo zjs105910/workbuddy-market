@@ -283,12 +283,22 @@ def _fresh_state(key: bool) -> dict:
 
 # ---------------------------------------------------------------- 长任务
 
-# v2.17：Web 拆文件后 index.html 引用的静态资源白名单（名字 → Content-Type）。
-# 加新文件时在这里登记 —— 不在表里的名字一律 404，不存在路径解析。
+# v2.17：Web 拆文件后 index.html 引用的静态资源白名单（URL 名 → (相对路径, Content-Type)）。
+# v2.22：前端再拆为 ES Modules（web/app/*.js），白名单跟着从「名字」升级为
+# 「相对路径」—— URL 仍必须**精确命中**字典键才映射到 WEB_DIR 下的固定相对路径，
+# 穿越写法（/../、%2e%2e、反斜杠）进不了映射表，依然不存在「路径解析」这一步。
+# 加新文件时在这里登记 —— 不在表里的名字一律 404。
+_JS_MODULES = (
+    "main", "api", "state", "utils", "trust", "favorites", "registry",
+    "update", "details", "screenshots", "plugins", "jobs", "install",
+)
 _STATIC_FILES = {
-    "app.js": "application/javascript; charset=utf-8",
-    "style.css": "text/css; charset=utf-8",
+    "style.css": ("style.css", "text/css; charset=utf-8"),
 }
+_STATIC_FILES.update({
+    f"app/{m}.js": (f"app/{m}.js", "application/javascript; charset=utf-8")
+    for m in _JS_MODULES
+})
 
 
 def _job_finished(job: dict) -> bool:
@@ -938,17 +948,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = _normalize_api_path(urlparse(self.path).path)
-        # ---- 静态资源（v2.17：Web 拆文件后 index.html 引用的 app.js / style.css）
-        # **白名单制**：名字必须精确命中，根本不存在「路径解析」这一步 ——
+        # ---- 静态资源（v2.17 白名单制；v2.22 升级为 相对路径 映射）
+        # **白名单制**：URL 必须精确命中，根本不存在「路径解析」这一步 ——
         # 穿越写法（/../、%2e%2e、反斜杠）全都进不了映射表，与
         # /api/open/path 的白名单同一纪律。静态文件不含任何机密
         # （口令只注入 index.html 的 meta），无需鉴权。
         if path.startswith("/static/"):
             name = path[len("/static/"):]
-            ctype = _STATIC_FILES.get(name)
-            if not ctype:
+            mapped = _STATIC_FILES.get(name)
+            if not mapped:
                 return self._send(404, b"not found", "text/plain; charset=utf-8")
-            f = core.WEB_DIR / name
+            rel, ctype = mapped
+            f = core.WEB_DIR / rel
             if not f.is_file():
                 return self._send(404, b"missing", "text/plain; charset=utf-8")
             try:

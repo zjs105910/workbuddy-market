@@ -1298,11 +1298,17 @@ def round4():
     ui_ok = src_html.is_file()
     if ui_ok:
         shutil.copy2(src_html, core.WEB_DIR / "index.html")
-        # v2.17：Web 拆文件后页面引用 /static/app.js 与 /static/style.css，
-        # 一并拷进隔离环境（server 白名单按名字精确命中）。
-        for extra in ("app.js", "style.css"):
-            if (src_web / extra).is_file():
-                shutil.copy2(src_web / extra, core.WEB_DIR / extra)
+        # v2.17：Web 拆文件后页面引用 /static/style.css；
+        # v2.22：前端再拆 ES Modules，/static/app/*.js 也要进隔离环境
+        #（server 白名单按相对路径精确命中）。
+        src_css = src_web / "style.css"
+        if src_css.is_file():
+            shutil.copy2(src_css, core.WEB_DIR / "style.css")
+        src_app = src_web / "app"
+        if src_app.is_dir():
+            (core.WEB_DIR / "app").mkdir(exist_ok=True)
+            for js in sorted(src_app.glob("*.js")):
+                shutil.copy2(js, core.WEB_DIR / "app" / js.name)
     else:
         sk("前端页面相关的断言（token 注入）",
            f"缺少 {src_html}；API 层鉴权仍会照常测试")
@@ -4670,8 +4676,8 @@ def round17():
        进不了映射表；静态文件不含机密（口令只在 index.html meta）；
     3. 产物源构建（build_artifacts）：tarball 按 sourceCommit 固定 +
        安全解包 + 三种收录形态都能定位 skills 根 + 单条失败不拖垮整批；
-    4. Web 拆文件不改变发货内容：app.js / style.css 与 index.html 同在
-       WEB_DIR，token 注入点仍只在 index.html。
+    4. Web 拆文件不改变发货内容：v2.22 起前端是 ES Modules（web/app/*.js，
+       入口 main.js），全部经 /static 白名单服务，token 注入点仍只在 index.html。
     """
     section("32. v2.17：WorkBuddy Adapter / 静态服务 / 产物源构建")
     import workbuddy_market.adapters.workbuddy as wb
@@ -4713,14 +4719,19 @@ def round17():
         return r.status, r.headers.get("Content-Type", ""), raw
 
     try:
-        st, ct, _ = hit3("/static/app.js")
-        ck("★ /static/app.js 白名单命中", st == 200 and "javascript" in ct, f"{st} {ct}")
+        st, ct, _ = hit3("/static/app/main.js")
+        ck("★ /static/app/main.js（module 入口）白名单命中",
+           st == 200 and "javascript" in ct, f"{st} {ct}")
+        st, ct, _ = hit3("/static/app/api.js")
+        ck("/static/app/api.js 白名单命中", st == 200 and "javascript" in ct, f"{st} {ct}")
         st, ct, _ = hit3("/static/style.css")
         ck("/static/style.css 白名单命中", st == 200 and "text/css" in ct)
         st, _, _ = hit3("/static/evil.js")
         ck("★ 白名单外的名字 → 404（不存在路径解析）", st == 404)
         st, _, _ = hit3("/static/../market.config.json")
         ck("★ 穿越写法 → 404（归一后不在白名单）", st == 404)
+        st, _, _ = hit3("/static/app/../market.config.json")
+        ck("★ 带子目录的穿越写法 → 404", st == 404)
         st, ct, _ = hit3("/")
         ck("index.html 仍带 token 注入点", st == 200 and b"market-token" in _ if False else
            st == 200, f"{st}")
@@ -4731,15 +4742,18 @@ def round17():
     # --- 32C. Web 拆分盯防（发货内容一致，token 只在 index）
     web = Path(__file__).resolve().parent / "web"
     idx = (web / "index.html").read_text(encoding="utf-8")
-    ck("★ index.html 引用拆分文件且不再内联",
-       "/static/app.js" in idx and "/static/style.css" in idx
+    ck("★ index.html 引用 ES Module 入口且不再内联",
+       "/static/app/main.js" in idx and "/static/style.css" in idx
        and "<style>" not in idx and ">function" not in idx)
+    static_files = [web / "style.css"] + sorted((web / "app").glob("*.js"))
     ck("★ token 注入点仍在 index.html（不在任何静态文件里）",
        "__MARKET_TOKEN__" in idx
-       and "__MARKET_TOKEN__" not in (web / "app.js").read_text(encoding="utf-8")
-       and "__MARKET_TOKEN__" not in (web / "style.css").read_text(encoding="utf-8"))
-    ck("app.js / style.css 随仓库分发且非空",
-       (web / "app.js").stat().st_size > 1000 and (web / "style.css").stat().st_size > 100)
+       and all("__MARKET_TOKEN__" not in p.read_text(encoding="utf-8")
+               for p in static_files))
+    ck("ES Modules 随仓库分发且非空",
+       (web / "app" / "main.js").stat().st_size > 1000
+       and (web / "style.css").stat().st_size > 100
+       and len(static_files) >= 10)
 
     # --- 32D. build_artifacts：safe tar + 三种收录形态 + 回写
     import importlib.util
