@@ -1,0 +1,23 @@
+# 隐私历史审计（v2.18，评审 10）：工作区干净 ≠ 历史干净。
+# ci.yml 里随每次 push 跑的 privacy-audit.py 只扫当前跟踪文件；
+# 这里的 --history 会扫 git log -p --all（含提交元数据），成本高，
+# 不适合每次 push —— 定为每周一 + 手动触发。
+name: Privacy history audit
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # 每周一 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # --history 要扫全部提交的 diff，浅克隆没有历史
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Privacy audit (full git history)
+        run: python scripts/privacy-audit.py --history

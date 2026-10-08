@@ -178,6 +178,19 @@ def slug_for(repo: str) -> str:
     return validate_id(slug, "包 id")
 
 
+def fallback_version(ref: str, now: datetime | None = None) -> str:
+    """注册表条目没写 version 时的市场版本回退（v2.18）。
+
+    评审 8：上游仓库大多没有插件语义版本，落 0.0.0 会让安装记录出现
+    「version=0.0.0」这种无信息值。这里改为 ``<构建日期>.<sourceCommit 前 7 位>``
+    （如 ``2026.10.08.3e2a429``）——日期给人读，短 SHA 钉死来源；
+    真正的不可变身份仍然是 sourceCommit，两者不混（评审推荐口径）。
+    格式过 config.validate_version（_VER_RE 接受字母数字点号，长度 18 ≤ 64）。
+    """
+    ts = now or datetime.now(timezone.utc)
+    return f"{ts:%Y.%m.%d}.{ref[:7]}"
+
+
 def zip_dir(pkg_dir: Path, zip_path: Path) -> None:
     """把 pack 好的包目录压成发布用的 zip（与 artifact.unpack_zip 的期望一致：
     相对路径、无符号链接成员）。"""
@@ -204,7 +217,7 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
     if not ref:
         raise ValueError(f"{repo}: 没有 sourceCommit（审核固定缺失），拒绝构建不可变产物")
     slug = slug_for(repo)
-    version = str(entry.get("version") or "0.0.0")
+    version = str(entry.get("version") or fallback_version(ref))
     validate_version(version, "包 version")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

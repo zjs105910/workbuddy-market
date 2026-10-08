@@ -62,7 +62,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.17"
+SELFTEST_VERSION = "2.18"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -2708,7 +2708,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.17.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.18.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2789,9 +2789,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.17.0"
-       and core.MARKET_VERSION == "2.17.0"
-       and SELFTEST_VERSION == "2.17", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.18.0"
+       and core.MARKET_VERSION == "2.18.0"
+       and SELFTEST_VERSION == "2.18", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -4392,10 +4392,14 @@ def round17():
                       fetch=lambda url: (tar_bytes if url == "https://codeload.github.com/owner/repo/tar.gz/" + "a" * 40
                                          else (_ for _ in ()).throw(OSError(url))),
                       work_root=lab / "w1")
+    # v2.18 起 version 回退 = 构建日期.短SHA（不再是 0.0.0）；
+    # 日期取构建时刻，断言只钉形状与 asset 名一致性（跨 UTC 午夜不脆断）
+    import re as _re17
     ck("★ build_one 端到端（假接缝）",
        r["slug"] == "owner-repo" and r["packageHash"] and r["manifestHash"]
        and (out_dir / r["asset"]).is_file()
-       and r["asset"] == "owner-repo-0.0.0.zip", str(r)[:120])
+       and _re17.fullmatch(r"\d{4}\.\d{2}\.\d{2}\.a{7}", r["version"])
+       and r["asset"] == f"owner-repo-{r['version']}.zip", str(r)[:120])
     v = pk2.verify_package(out_dir / r["asset"]) if False else None
     # zip 内容可直接被安装端校验：解包 → verify
     import zipfile as _zf

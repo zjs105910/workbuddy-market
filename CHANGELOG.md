@@ -4,6 +4,40 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.18.0 — 2026-10-08（快赢包：版本回退修复 + 文档漂移修复 + 隐私历史审计 + macOS 冒烟）
+
+外部评审（第二轮）四个快赢项，逐条探针核实后当轮落地：
+
+**artifact 版本回退修复（评审 8）**
+- `scripts/build_artifacts.py`：条目无 version 时不再回退 `0.0.0`
+  （安装记录里出现无信息值），改回退 `<构建日期>.<sourceCommit 前 7 位>`
+  （如 `2026.10.08.3e2a429`）。日期给人读、短 SHA 钉死来源；不可变身份
+  仍是 sourceCommit，两者不混（评审推荐口径）。回退值过
+  `config.validate_version` 闸。新增 `tests/unit/test_build_artifacts.py`
+  （pytest 31 → 37 项）。
+
+**FAQ 自检数漂移修复（评审 4）**
+- README 已写 647 项，`docs/FAQ.md` 两处仍是 509 项（v2.12 时代的旧数），
+  违反本项目「数量必须同步」的维护规则 —— 全部对齐 647。
+  CI 自动生成测试状态（徽章 / generated 文件）进 v3 候选。
+
+**隐私历史审计 CI（评审 10）**
+- 新增 `.github/workflows/privacy-history.yml`：每周一 03:00 UTC +
+  手动触发，`privacy-audit.py --history` 扫 `git log -p --all`
+  （含提交元数据；checkout 用 fetch-depth: 0）。「工作区干净」不等于
+  「历史干净」——push 级 CI 只扫当前跟踪文件，全历史审计放定期任务。
+  2026-10-07 本项目已全历史重写为 noreply 邮箱，此项为持续盯防。
+
+**macOS 语义冒烟槽位（评审 11）**
+- ci.yml test 矩阵加 `macos-latest`；`posix-smoke.py` 从 Linux-only
+  扩到全部非 Windows 槽位（`runner.os != 'Windows'`）。darwin 与 linux
+  同为 POSIX 但此前从未被本项目验证，先让语义冒烟说话；macOS 侧
+  selftest 全量门槛仍不在本轮范围。
+
+**其他**
+- 版本号同步：version.py / core docstring / SELFTEST_VERSION /
+  24C·25B 版本盯防用例（硬编码防漂移）。
+
 ## 2.17.0 — 2026-10-08（WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点）
 
 **WorkBuddy Adapter（评审 7，R6 半程：register 迁出）**

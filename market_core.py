@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.17）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.18）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
@@ -11,7 +11,9 @@ v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮�
 → v2.16（包接入安装链：artifact 下载/解包/verify → 两阶段事务安装，
   packageHash 进 ownership 与事务日志，trust fail-closed）
 → v2.17（WorkBuddy Adapter + register 迁出（R6 半程）+ CI 产物源 +
-  Web 拆文件 + pytest 试点 + wheel/POSIX CI，当前）。
+  Web 拆文件 + pytest 试点 + wheel/POSIX CI）
+→ v2.18（artifact 版本回退 0.0.0 → 日期.短SHA + FAQ 自检数漂移修复 +
+  隐私历史审计 CI + macOS 语义冒烟槽位，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 

@@ -422,6 +422,7 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | v2.15 | Market Package 协议冻结 + pack / verify 实现（packaging.py） | [CHANGELOG.md](CHANGELOG.md) 2.15.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) |
 | v2.16 | 包接入安装链：不可变 artifact → 哈希校验 → 事务安装（全链闭环） | [CHANGELOG.md](CHANGELOG.md) 2.16.0 条目 |
 | **v2.17** | **WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点 + wheel/POSIX CI** | [CHANGELOG.md](CHANGELOG.md) 2.17.0 条目 |
+| **v2.18** | **快赢包：artifact 版本回退修复 + FAQ 自检数漂移修复 + 隐私历史审计 CI + macOS 冒烟槽位** | [CHANGELOG.md](CHANGELOG.md) 2.18.0 条目 |
 
 ### v2.17 摘要（2026-10-08）
 
@@ -449,6 +450,30 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
   packaging+artifact 攻击面），conftest 预设 WBM_* 隔离环境；selftest
   保留为零依赖一键诊断，定位不变；
 - 自检 625 → 647 项（第 32 节 22 项）+ pytest 31 项。
+
+### v2.18 摘要（2026-10-08）
+
+外部评审（第二轮，架构收敛向）的四个快赢项，探针核实后当轮落地：
+
+- **artifact 版本回退修复**（评审 8）：注册表条目没写 version 时，
+  `build_artifacts.py` 不再落 `0.0.0`（安装记录里出现无信息值），
+  改回退 `<构建日期>.<sourceCommit 前 7 位>`（如 `2026.10.08.3e2a429`）——
+  日期给人读、短 SHA 钉死来源，真正的不可变身份仍是 sourceCommit，
+  两者不混。回退值过 `validate_version` 闸（`_VER_RE` 口径）；
+  pytest 新增 `test_build_artifacts.py` 6 项盯防；
+- **FAQ 自检数漂移修复**（评审 4）：README 已是 647 项、docs/FAQ.md
+  两处仍写 509 项 —— 违反本项目自己「数量必须同步」的维护规则，全部
+  对齐 647。（评审建议的 CI 自动生成测试状态徽章/文件，进 v3 候选。）
+- **隐私历史审计 CI**（评审 10）：ci.yml 每次 push 只扫当前跟踪文件，
+  「工作区干净」≠「历史干净」。新增
+  `.github/workflows/privacy-history.yml`：每周一 + 手动触发，
+  `privacy-audit.py --history` 扫 `git log -p --all`（fetch-depth: 0）。
+  本项目 2026-10-07 已全历史重写为 noreply 邮箱，此项为持续盯防；
+- **macOS 语义冒烟槽位**（评审 11）：test 矩阵加 `macos-latest`，
+  posix-smoke（fcntl 锁 / symlink 防线 / ensure_child / zip-slip）从
+  Linux-only 扩到全部非 Windows 槽位 —— darwin 与 linux 同为 POSIX 但
+  从未被本项目验证过，先让语义冒烟说话；
+- pytest 31 → 37 项；selftest 647 项不变（本轮无新自检节）。
 
 ---
 
