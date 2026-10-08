@@ -4,6 +4,47 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.19.0 — 2026-10-08（R6 收尾：state / application 迁包，core 收成兼容 shim）
+
+外部评审 1/2 号 P0（架构减重）的当轮落地。R4/R5 同一套迁包纪律：
+逐字搬迁、注入点调用点晚绑定 `import market_core`、selftest patch 语义随迁、全绿后推送。
+
+**state 迁包（workbuddy_market/state.py 新增）**
+- `installed_skill_names` / `installed_repos` / `build_state` 逐字迁入。
+- build_state 对 `plugin_uninstall_plan` 的调用改**经 core 晚绑定**
+  （R5 编排纪律：编排层直调的注入函数必须走 core 命名空间）——
+  patch `core.plugin_uninstall_plan` 拦截语义与迁移前一致，
+  第 33 节有专项盯防；`load_ownership` / `trash_stats` / `is_registered`
+  等叶子读直接从所属模块导入。
+
+**application 迁包（workbuddy_market/application.py 新增，组合层）**
+- `sync_packaging` / `_sync_packaging` / `build_plugin_json` /
+  `_plugin_readme` / `OPEN_TARGETS` / `resolve_open_request` /
+  `deep_check` / `selfcheck` / `main` 逐字迁入。
+- 注入点晚绑定：`_sync_packaging` 调 `core._scan`（crash 注入点 +
+  第 18 节扫描计数盯防）、`sync_packaging` 调 `core.recover_transactions`
+  （凭证早于磁盘变更的恢复入口）、`say` 与 `main` 全部子命令经 core
+  命名空间。known_health 走 adapter 模块命名空间（v2.17 patch 落点）。
+
+**market_core.py：1241 → 294 行（兼容 shim）**
+- 保留三样：全部迁出符号的 re-export、say + v2.7 运行时迁移
+  （import 自动触发）、quick_fingerprint / tree_hash*（_scan 注入点
+  纪律，故意留驻 core —— R3 既定决策）。
+- market_server / launcher / 第三方脚本**零改动**：它们都经 `core.X`
+  命名空间调用与 patch。
+- selftest 第 33 节新增「shim 防膨胀」盯防（core <400 行，超限 FAIL），
+  防止 shim 重新长胖。
+
+**selftest**
+- 24B 归属断言：build_state 从「仍定义在 core」组移到「已迁包」组；
+- 新增第 33 节 14 项：state / application 符号同一性（core 只 re-export）、
+  10 个符号的 `__module__` 归属盯防、core.plugin_uninstall_plan 拦截
+  build_state 的 patch 语义回归、shim 防膨胀。647 → 661 项。
+
+**文档同步**
+- version.py / core docstring / SELFTEST_VERSION / 24C·25B 版本盯防
+  硬编码 / README（表 + 摘要 + 自检项数 ×3）/ FAQ（×2）/ CHANGELOG。
+
 ## 2.18.0 — 2026-10-08（快赢包：版本回退修复 + 文档漂移修复 + 隐私历史审计 + macOS 冒烟）
 
 外部评审（第二轮）四个快赢项，逐条探针核实后当轮落地：

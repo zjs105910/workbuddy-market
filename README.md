@@ -176,7 +176,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 647 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 661 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -214,7 +214,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 647 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 661 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -423,6 +423,7 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | v2.16 | 包接入安装链：不可变 artifact → 哈希校验 → 事务安装（全链闭环） | [CHANGELOG.md](CHANGELOG.md) 2.16.0 条目 |
 | **v2.17** | **WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点 + wheel/POSIX CI** | [CHANGELOG.md](CHANGELOG.md) 2.17.0 条目 |
 | **v2.18** | **快赢包：artifact 版本回退修复 + FAQ 自检数漂移修复 + 隐私历史审计 CI + macOS 冒烟槽位** | [CHANGELOG.md](CHANGELOG.md) 2.18.0 条目 |
+| **v2.19** | **R6 收尾：state / application 迁包，market_core 收成 294 行兼容 shim** | [CHANGELOG.md](CHANGELOG.md) 2.19.0 条目 |
 
 ### v2.17 摘要（2026-10-08）
 
@@ -475,11 +476,36 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
   从未被本项目验证过，先让语义冒烟说话；
 - pytest 31 → 37 项；selftest 647 项不变（本轮无新自检节）。
 
+### v2.19 摘要（2026-10-08）
+
+外部评审 1/2 号 P0（架构减重）的当轮落地 —— R6 另一半迁完：
+
+- **state 迁包**：`installed_skill_names` / `installed_repos` /
+  `build_state` 逐字迁入 `workbuddy_market/state.py`。build_state 对
+  `plugin_uninstall_plan` 的调用改经 core 晚绑定（R5 编排纪律）——
+  patch `core.plugin_uninstall_plan` 拦截语义与迁移前一致；
+- **application 迁包**：`sync_packaging` / `_sync_packaging` /
+  `build_plugin_json` / `_plugin_readme` / `OPEN_TARGETS` /
+  `resolve_open_request` / `deep_check` / `selfcheck` / `main` 逐字迁入
+  `workbuddy_market/application.py`（组合层）。`_scan`（crash 注入点 +
+  第 18 节计数盯防）、`recover_transactions`（凭证早于磁盘变更）、
+  `say` 一律函数体内经 core 晚绑定；
+- **market_core.py：1241 → 294 行**，收成兼容 shim：re-export 全部迁出
+  符号 + say + v2.7 运行时迁移 + quick_fingerprint / tree_hash*
+  （_scan 注入点纪律，故意留驻）。新增第 33 节「shim 防膨胀」盯防
+  （<400 行，超了直接 FAIL）；
+- market_server / launcher / 第三方脚本零改动 —— 它们本来就走
+  `core.X` 命名空间，patch 拦截语义不变；
+- 自检 647 → 661 项（第 33 节 14 项：符号同一性 / 归属盯防 /
+  patch 语义回归 / shim 防膨胀）；pytest 37 项不变。
+
+---
+
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 647 passed, 0 failed
+python selftest.py        # 661 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

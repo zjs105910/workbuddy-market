@@ -43,6 +43,8 @@
            能力矩阵）、/static 白名单端到端、Web 拆分发货一致性、
            build_artifacts（safe tar / 三种收录形态 / build_one 端到端
            假接缝 / --patch-registry 回写）
+第 33 节   v2.19：R6 收尾 —— state / application 迁包 + core 收成兼容
+           shim（符号同一性 / 归属盯防 / patch 语义回归 / shim 防膨胀）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -62,7 +64,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.18"
+SELFTEST_VERSION = "2.19"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -557,6 +559,79 @@ def run() -> None:
 
     # ============ 32. v2.17：WorkBuddy Adapter / 静态服务 / 产物源 ============
     round17()
+
+    # ============ 33. v2.19：R6 收尾（state / application 迁包 + core shim） ============
+    round18()
+
+
+def round18():
+    """v2.19：R6 收尾 —— state / application 迁包，market_core 收成兼容 shim。
+
+    三条盯防线：
+    1. 符号同一性：core 只是 re-export，`import market_core` 旧脚本不坏；
+    2. 归属盯防（R4/R5 同款）：state / application 各符号的 __module__
+       钉死，搬错位置直接 FAIL；
+    3. patch 语义不变：core.plugin_uninstall_plan 拦到 build_state
+       （R5 编排晚绑定纪律）；core.build_state 拦 server 链路（19M 依赖，
+       server 经 core 命名空间调用）；core._scan 拦 sync 链路
+       （第 18 节端到端覆盖，此处不重复）。外加 shim 防膨胀盯防。
+    """
+    section("33. v2.19：R6 收尾（state / application 迁包 + core shim）")
+    import workbuddy_market.state as wstate
+    import workbuddy_market.application as wapp
+
+    # --- 33A. 符号同一性
+    ck("★ state 符号同一性（core 只 re-export）",
+       core.build_state is wstate.build_state
+       and core.installed_skill_names is wstate.installed_skill_names
+       and core.installed_repos is wstate.installed_repos)
+    ck("★ application 符号同一性（core 只 re-export）",
+       core.sync_packaging is wapp.sync_packaging
+       and core._sync_packaging is wapp._sync_packaging
+       and core.build_plugin_json is wapp.build_plugin_json
+       and core.resolve_open_request is wapp.resolve_open_request
+       and core.deep_check is wapp.deep_check
+       and core.selfcheck is wapp.selfcheck
+       and core.main is wapp.main)
+
+    # --- 33B. 归属盯防（R4/R5 同款循环）
+    for _name, _want in (
+            ("installed_skill_names", "workbuddy_market.state"),
+            ("installed_repos", "workbuddy_market.state"),
+            ("build_state", "workbuddy_market.state"),
+            ("sync_packaging", "workbuddy_market.application"),
+            ("_sync_packaging", "workbuddy_market.application"),
+            ("build_plugin_json", "workbuddy_market.application"),
+            ("resolve_open_request", "workbuddy_market.application"),
+            ("deep_check", "workbuddy_market.application"),
+            ("selfcheck", "workbuddy_market.application"),
+            ("main", "workbuddy_market.application")):
+        _mod = getattr(getattr(core, _name), "__module__", "?")
+        ck(f"注入点已迁包（R6）：{_name}", _mod == _want, _mod)
+
+    # --- 33C. patch 语义回归 + shim 防膨胀
+    # core.plugin_uninstall_plan 必须仍能拦到 build_state 的卸载分级
+    # （state.build_state 函数体内经 core 晚绑定调用 —— R5 编排纪律）。
+    real_plan = core.plugin_uninstall_plan
+    hits = {"n": 0}
+
+    def counting_plan(*a, **k):
+        hits["n"] += 1
+        return real_plan(*a, **k)
+
+    core.plugin_uninstall_plan = counting_plan
+    try:
+        st_p = core.build_state()
+    finally:
+        core.plugin_uninstall_plan = real_plan
+    ck("★ patch core.plugin_uninstall_plan 拦到 build_state（编排晚绑定）",
+       hits["n"] == len(st_p["plugins"]),
+       f"{hits['n']} vs 插件数 {len(st_p['plugins'])}")
+
+    # shim 防膨胀：core 收成兼容层后不许再往里塞实现（评审 1 的收敛目标）
+    _core_py = Path(__file__).resolve().parent / "market_core.py"
+    _n_lines = len(_core_py.read_text(encoding="utf-8").splitlines())
+    ck("★ core shim 防膨胀（<400 行）", _n_lines < 400, f"{_n_lines} 行")
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2662,10 +2737,11 @@ def round9():
     # --- 24B. 注入点定义模块盯防（R2 core；R3 后 _scan/_walk_tree 等已迁 scanner；
     #          R4 后 trash / ownership / transactions 已迁包，patch 落点随迁；
     #          R5 后安装/卸载编排已迁包，对 core 注入点走调用点晚绑定）
-    for _name in ("quick_fingerprint", "tree_hash", "tree_hash_from_index",
-                  "build_state"):
+    for _name in ("quick_fingerprint", "tree_hash", "tree_hash_from_index"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
         ck(f"注入点仍定义在 core：{_name}", _mod == "market_core", _mod)
+    ck("注入点仍定义在 core：build_state 已迁 state（R6）",
+       getattr(core.build_state, "__module__", "?") == "workbuddy_market.state")
     for _name, _want in (
             ("save_ownership", "workbuddy_market.ownership"),
             ("record_owner", "workbuddy_market.ownership"),
@@ -2708,7 +2784,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.18.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.19.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2789,9 +2865,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.18.0"
-       and core.MARKET_VERSION == "2.18.0"
-       and SELFTEST_VERSION == "2.18", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.19.0"
+       and core.MARKET_VERSION == "2.19.0"
+       and SELFTEST_VERSION == "2.19", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
