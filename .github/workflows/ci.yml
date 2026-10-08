@@ -25,9 +25,42 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Syntax check
         shell: bash   # Windows runner 默认 pwsh 不展开 *.py 通配符，必须显式用 bash
-        run: python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+        run: python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py scripts/*.py
       - name: Privacy audit (tracked files)
         run: python scripts/privacy-audit.py
+      - name: POSIX semantic smoke (Linux only)
+        if: runner.os == 'Linux'
+        run: python scripts/posix-smoke.py
+      - name: Unit tests (pytest, platform-neutral subset)
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pytest tests/ -q
       - name: Isolated selftest (Windows only)
         if: runner.os == 'Windows'
         run: python selftest.py
+
+  # 打包链路（评审 10）：源码跑得通 ≠ wheel 装得上。构建 wheel → 安装 →
+  # CLI smoke（doctor --help 必须退出 0），把「pip 装完就坏」挡在 CI 里。
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Install wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      - name: CLI smoke (wheel-installed, outside clone)
+        shell: bash
+        run: |
+          workbuddy-market doctor --help
+          python -c "from workbuddy_market import version, cli, adapters; print(version.MARKET_VERSION)"

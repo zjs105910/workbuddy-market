@@ -278,6 +278,14 @@ def _fresh_state(key: bool) -> dict:
 
 # ---------------------------------------------------------------- 长任务
 
+# v2.17：Web 拆文件后 index.html 引用的静态资源白名单（名字 → Content-Type）。
+# 加新文件时在这里登记 —— 不在表里的名字一律 404，不存在路径解析。
+_STATIC_FILES = {
+    "app.js": "application/javascript; charset=utf-8",
+    "style.css": "text/css; charset=utf-8",
+}
+
+
 def _job_finished(job: dict) -> bool:
     return job.get("status") == "done"
 
@@ -924,6 +932,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = _normalize_api_path(urlparse(self.path).path)
+        # ---- 静态资源（v2.17：Web 拆文件后 index.html 引用的 app.js / style.css）
+        # **白名单制**：名字必须精确命中，根本不存在「路径解析」这一步 ——
+        # 穿越写法（/../、%2e%2e、反斜杠）全都进不了映射表，与
+        # /api/open/path 的白名单同一纪律。静态文件不含任何机密
+        # （口令只注入 index.html 的 meta），无需鉴权。
+        if path.startswith("/static/"):
+            name = path[len("/static/"):]
+            ctype = _STATIC_FILES.get(name)
+            if not ctype:
+                return self._send(404, b"not found", "text/plain; charset=utf-8")
+            f = core.WEB_DIR / name
+            if not f.is_file():
+                return self._send(404, b"missing", "text/plain; charset=utf-8")
+            try:
+                data = f.read_bytes()
+            except OSError as exc:
+                return self._send(500, f"读不到 {name}：{exc}".encode("utf-8"),
+                                  "text/plain; charset=utf-8")
+            return self._send(200, data, ctype)
         if path in ("/", "/index.html"):
             f = core.WEB_DIR / "index.html"
             if not f.is_file():

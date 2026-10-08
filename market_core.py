@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.16）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.17）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
@@ -9,7 +9,9 @@ v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮�
 → v2.14（R5：installer / uninstaller 迁包）
 → v2.15（Market Package 协议冻结 + pack/verify）
 → v2.16（包接入安装链：artifact 下载/解包/verify → 两阶段事务安装，
-  packageHash 进 ownership 与事务日志，trust fail-closed，当前）。
+  packageHash 进 ownership 与事务日志，trust fail-closed）
+→ v2.17（WorkBuddy Adapter + register 迁出（R6 半程）+ CI 产物源 +
+  Web 拆文件 + pytest 试点 + wheel/POSIX CI，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -412,6 +414,12 @@ from workbuddy_market.artifact import (      # noqa: E402,F401  （v2.16 新增�
     MAX_ARTIFACT_BYTES, ARTIFACT_TIMEOUT, _artifact_open,
     download_artifact, unpack_zip, prepare_package, install_from_entry,
 )
+from workbuddy_market.adapters.workbuddy import (   # noqa: E402,F401  （v2.17 新增）
+    WORKBUDDY_ADAPTER_VERSION, read_known, _read_known, read_known_or_die,
+    _read_known_or_die, backup_known, _prune_backups, is_registered,
+    entry_for, _entry_for, commit_known, _commit_known,
+    register, unregister, capabilities, known_health,
+)
 from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新增）
     classify_skill, inspect_skill, plugin_uninstall_plan, uninstall_local_plugin,
     dropped,
@@ -420,7 +428,8 @@ from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新�
 # CLASSIFY_PURPOSES / EXACT_PURPOSES 已迁 workbuddy_market.config（v2.9 R3），
 # 此处 re-export（见上方 import 块）。INSTALL_MODES 已迁 installer（v2.14 R5）。
 # artifact 编排层（v2.16）经 core 命名空间调 install_package_skills ——
-# 注入点晚绑定纪律要求 re-export 在先。
+# 注入点晚绑定纪律要求 re-export 在先。WorkBuddy 宿主格式（v2.17）已整体
+# 迁 adapters/workbuddy.py，patch 注册链路的读请落点该模块。
 
 
 # ---------------------------------------------------------------- 小工具
@@ -782,185 +791,12 @@ def _plugin_readme(cfg: dict, spec: dict, skills: list) -> str:
 
 
 # ---------------------------------------------------------------- 注册
-
-def _read_known(strict: bool = False) -> dict:
-    """读 known_marketplaces.json。
-
-    strict=True 时，文件存在但读不出来会**抛 ConfigError**，而不是当成空表。
-    这一点很关键：如果当成空表，register() 就会拿一个只含自己一条的记录
-    去覆盖原文件 —— 用户其它几个市场（包括 WorkBuddy 自带的）会被直接抹掉。
-    宁可报错让用户去 .backups 里恢复，也不能替用户把数据删了。
-    """
-    data = read_json(KNOWN_PATH, None, strict=strict)
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        if strict:
-            raise ConfigError(f"{KNOWN_PATH.name} 的顶层必须是一个对象，实际是 {type(data).__name__}")
-        return {}
-    return data
-
-
-def _read_known_or_die() -> dict:
-    """写操作前读 —— 文件坏了就拒绝继续，绝不覆盖。"""
-    if not KNOWN_PATH.is_file():
-        return {}
-    try:
-        return _read_known(strict=True)
-    except ConfigError as exc:
-        raise RuntimeError(
-            f"拒绝覆盖：{KNOWN_PATH.name} 已损坏，读不出来。\n"
-            f"  原因：{exc}\n"
-            f"  文件：{KNOWN_PATH}\n"
-            f"  备份：{BACKUP_DIR}（挑一份改名成 known_marketplaces.json 即可恢复）\n"
-            "  修好或删掉它再重试。"
-        ) from exc
-
-
-def backup_known() -> Path | None:
-    """备份 known_marketplaces.json。
-
-    时间戳带纳秒，避免同一秒内两次备份互相覆盖
-    （v1 用秒级戳 + 「已存在就返回」会让第二次修改没有备份）。
-    """
-    if not KNOWN_PATH.is_file():
-        return None
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
-    dst = BACKUP_DIR / f"known_marketplaces.{stamp}.json"
-    shutil.copy2(KNOWN_PATH, dst)
-    log("info", "backup", f"已备份 known_marketplaces.json → {dst.name}")
-    return dst
-
-
-def _prune_backups(keep: int = BACKUP_KEEP) -> None:
-    if not BACKUP_DIR.is_dir():
-        return
-    items = sorted(BACKUP_DIR.glob("known_marketplaces.*.json"))
-    if len(items) <= keep:
-        return
-    for old in items[: len(items) - keep]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-
-
-def is_registered(cfg: dict | None = None) -> bool:
-    cfg = cfg or load_config()
-    return cfg.get("marketId") in _read_known()
-
-
-def _entry_for(cfg: dict) -> dict:
-    return {
-        "manifestName": cfg.get("marketId", "wb-local-market"),
-        "type": "directory",
-        "source": {"source": "directory", "path": str(MARKET_ROOT)},
-        "installLocation": str(MARKET_ROOT),
-        "description": cfg.get("description", ""),
-        "lastUpdated": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "autoUpdate": False,
-        "isBuiltIn": False,
-    }
-
-
-def _commit_known(mutate, *, attempts: int = 4, what: str = "修改"):
-    """对 known_marketplaces.json 做乐观合并写入。
-
-    WorkBuddy 自己也会改这个文件（autoUpdate 市场刷新 lastUpdated、zip 地址
-    换成带内容哈希的版本），而它**不抢我们这把锁**。原来的
-    「读 → 改 → 原子写 → 读回校验」只能发现「整个条目消失」，
-    发现不了「某个市场的字段在中间被别人改了、又被我们整份覆盖回去」。
-
-    改成：落笔之前再读一次，确认和我们读到的快照一模一样才写；
-    不一样就基于最新内容重新合并。这把竞争窗口从「整个读-改-写过程」
-    压到了「重读到 replace 之间的几十微秒」。
-
-    返回 (before, candidate)。mutate 返回 False 表示无需改动（提前收工）。
-    """
-    for attempt in range(attempts):
-        before = _read_known_or_die()
-        candidate = mutate(dict(before))
-        if candidate is False:
-            return before, None
-        latest = _read_known_or_die()
-        if latest != before:
-            log("warn", "register",
-                f"{what}前发现 {KNOWN_PATH.name} 已被外部改动"
-                f"（第 {attempt + 1} 次），基于最新内容重新合并")
-            continue
-        backup_known()
-        atomic_write_text(KNOWN_PATH,
-                          json.dumps(candidate, ensure_ascii=False, indent=2) + "\n",
-                          durable=True)
-        _prune_backups()
-        after = _read_known()
-        lost = set(before) - set(after)
-        if lost:
-            log("warn", "register",
-                f"检测到写回期间有市场消失：{', '.join(sorted(lost))}（WorkBuddy 可能同时在写）")
-        return before, after
-    raise RuntimeError(
-        f"{what}失败：{KNOWN_PATH.name} 被反复改写（{attempts} 次都撞车）。\n"
-        "如果 WorkBuddy 正在运行，稍后再试一次即可；文件没有被写坏。"
-    )
-
-
-def register(force: bool = False) -> bool:
-    """把本市场写进 known_marketplaces.json。幂等；返回是否发生了改动。
-
-    WorkBuddy 运行时会自己改写这个文件，所以并发保护有两层：
-      · 全程持文件锁 → 防本工具自己的多个进程互相覆盖（lost update）
-      · 乐观合并（读 → 改 → 重读 → 比对 → 写）→ 缩小与 WorkBuddy 自身写入的竞争窗口
-    """
-    with locked():
-        cfg = load_config()
-        mid = cfg.get("marketId", "wb-local-market")
-
-        if not MANIFEST_PATH.is_file():
-            _sync_packaging(quiet=True)
-
-        entry = _entry_for(cfg)
-
-        # 比较时忽略 lastUpdated，否则每次启动都会重写一遍这个文件
-        def _same(a: dict, b: dict) -> bool:
-            return ({k: v for k, v in a.items() if k != "lastUpdated"}
-                    == {k: v for k, v in b.items() if k != "lastUpdated"})
-
-        def _mutate(known: dict):
-            if not force and isinstance(known.get(mid), dict) and _same(known[mid], entry):
-                return False
-            known[mid] = entry
-            return known
-
-        before, after = _commit_known(_mutate, what="注册")
-        if after is None:
-            log("info", "register", "已注册且条目未变，跳过")
-            return False
-        if mid not in after:
-            log("warn", "register", "写回后本市场条目不见了 —— WorkBuddy 可能同时改写了该文件")
-            raise RuntimeError("写回校验失败：注册条目未生效（可能和 WorkBuddy 的自动更新撞车，重跑一次即可）")
-        log("info", "register", f"已注册市场 {mid} → {MARKET_ROOT}")
-        return True
-
-
-def unregister() -> bool:
-    with locked():
-        cfg = load_config()
-        mid = cfg.get("marketId", "wb-local-market")
-
-        def _mutate(known: dict):
-            if mid not in known:
-                return False
-            del known[mid]
-            return known
-
-        before, after = _commit_known(_mutate, what="撤销注册")
-        if after is None:
-            log("info", "unregister", "本来就没注册，跳过")
-            return False
-        log("info", "unregister", f"已撤销注册 {mid}")
-        return True
+# v2.17 起整段迁入 workbuddy_market.adapters.workbuddy（WorkBuddy Adapter，
+# R6 半程）：known_marketplaces.json 的全部读写、备份、条目构造、
+# 乐观合并、register / unregister 都只经 adapter 触碰宿主。此处 re-export
+# 保持旧名字可用；**patch 语义随迁** —— 要拦截注册链路里的读，patch
+# ``workbuddy_market.adapters.workbuddy.read_known_or_die``（与 R4 把
+# ownership / trash 的 patch 落点迁进包内同一先例）。
 
 
 # ---------------------------------------------------------------- 状态
@@ -1271,14 +1107,10 @@ def deep_check() -> tuple:
         for extra in sorted(actual - declared):
             warnings.append(f"插件 {name} 里多了未声明的 {extra}（重新打包可清掉）")
 
-    # --- WorkBuddy 侧
-    if not KNOWN_PATH.parent.is_dir():
-        errors.append(f"WorkBuddy 插件目录不存在：{KNOWN_PATH.parent}")
-    elif KNOWN_PATH.is_file():
-        try:
-            read_json(KNOWN_PATH, None, strict=True)
-        except ConfigError as exc:
-            errors.append(f"known_marketplaces.json 不可用：{exc}")
+    # --- WorkBuddy 侧（v2.17 起经 adapter 诊断宿主格式）
+    _known_err = known_health()
+    if _known_err:
+        errors.append(_known_err)
 
     # --- 所有权残留
     own = load_ownership()["skills"]

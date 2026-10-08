@@ -202,8 +202,16 @@ def render(result: dict) -> str:
 
 
 def main(argv: list | None = None) -> int:
-    argv = list(argv or [])
-    fix = "--fix" in argv
+    # argparse 一来给 --help 一个正经出口（wheel 安装后的 CLI smoke 依赖它：
+    # `workbuddy-market doctor --help` 必须退出 0），二来未知参数不再被静默忽略。
+    import argparse
+    ap = argparse.ArgumentParser(
+        prog="workbuddy-market doctor",
+        description="本机插件市场体检：在任何目录都能跑的只读诊断（--fix 只补记事务）")
+    ap.add_argument("--fix", action="store_true",
+                    help="补记上次没记完的事务（唯一有副作用的操作）")
+    args = ap.parse_args(list(argv or []))
+    fix = args.fix
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:

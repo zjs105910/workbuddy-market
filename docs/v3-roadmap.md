@@ -32,31 +32,31 @@ src/workbuddy_market/
 selftest patch 落点随迁、每轮 selftest 全绿。
 
 ### 2. 定义 Marketplace Package 协议（manifest.json）
-**v0.2 已冻结全部六项开放问题，pack / verify 已实现，安装链路已接入**
-（v2.16：`artifact.py` 下载/解包/校验 → `install_package_skills`
-两阶段事务安装，selftest 第 30/31 节全覆盖攻击面；详见
-docs/plugin-spec.md §6/§7）。剩余：CI 侧为注册表条目批量构建并发布
-artifact（客户端链路已就绪，等产物源）。
+**v0.2 已冻结全部六项开放问题；pack / verify（v2.15）、安装链路（v2.16）、
+CI 产物源（v2.17：`build_artifacts.py` + `artifacts.yml` 每日按
+sourceCommit 构建发布 + PR 回写）均已落地**。selftest 第 30/31/32 节
+全覆盖攻击面；详见 docs/plugin-spec.md §6/§7。
 
 ### 3. 可复现安装（immutable artifact）
-**v2.16 已落地客户端全链**：Registry（packageUrl + packageHash）→
-不可变产物 → sha256 校验（无放行出口）→ install → packageHash 进
-ownership 与事务日志。装到的是审核时固定的那一份字节，上游漂移在这条
-链路里天然不存在。剩余：CI 发布产物源 + UI「安装审核版本 / 安装当前
-版本」双入口（ghpm 路线仍是当前版本入口）。
+**v2.16/v2.17 已全链闭环**：Registry（packageUrl + packageHash）→
+CI Release 资产（按审核固定的 sourceCommit 构建，同日重跑哈希不变）→
+下载 → sha256 校验（无放行出口）→ install → packageHash 进 ownership
+与事务日志。剩余：UI「安装审核版本 / 安装当前版本」双入口
+（ghpm 路线仍是当前版本入口）。
 
 ### 4. 真正可安装的 CLI
-现状：`workbuddy-market` 仍需位于 clone 目录（除 v2.13 的 doctor）。
-目标：`workbuddy-market init/serve/sync/install/uninstall/registry/doctor`
-在 pipx 安装后独立可用；Windows 保留一键启动.cmd 作为新手入口。
+现状：`workbuddy-market` 仍需位于 clone 目录（除 v2.13 的 doctor）；
+**v2.17 起 CI 有 package job 把「构建 wheel → 安装 → CLI smoke」挡进
+门槛**，PyPI 发布是最后一步。目标：`workbuddy-market
+init/serve/sync/install/uninstall/registry/doctor` 在 pipx 安装后独立
+可用；Windows 保留一键启动.cmd 作为新手入口。
 分层不变：新手 → cmd；高级用户 → CLI；开发者 → `from workbuddy_market import …`。
 
 ### 5. Linux/macOS 测试真相化
-现状：CI 的 Ubuntu 槽位只做 py_compile + 隐私审计，selftest 硬门槛
-仅在 Windows（v2.13 已在 pyproject/README 如实标注）。
-目标二选一：给 523+ 项用例补平台 skip 语义后把 selftest 纳入 Linux
-矩阵；或先做独立的 POSIX 语义冒烟（fcntl 锁 / symlink / 进程组）。
-在补齐之前不扩大 POSIX 支持的宣传口径。
+**v2.17 已走「独立 POSIX 语义冒烟」路线**：`scripts/posix-smoke.py`
+（fcntl 锁 / symlink 防线 / ensure_child / zip-slip）进 Ubuntu CI 槽位，
+pytest 试点（tests/unit 平台无关用例）也在双平台跑。完整 selftest 的
+硬门槛仍仅在 Windows（在补齐平台 skip 语义之前不扩大 POSIX 宣传口径）。
 
 ---
 
@@ -64,11 +64,12 @@ ownership 与事务日志。装到的是审核时固定的那一份字节，上�
 
 | 项 | 说明 | 前置 |
 |---|---|---|
-| selftest 拆 pytest | tests/{unit,integration,security,e2e}；`python selftest.py` 保留为零依赖用户诊断入口（这个定位很好，不砍） | R5 拆分 |
+| selftest 拆 pytest | **试点已落地（v2.17）**：tests/unit 三件平台无关用例进 CI；继续把 selftest 各节按 unit / integration / security / fault 迁移，`python selftest.py` 保留为零依赖用户诊断入口 | R5 拆分 |
 | /api/v1 稳定化 | v2.13 已落地别名；后续加 schemas + 契约测试，破坏性变化走 /api/v2 | 已开始 |
 | Provider 抽象 | `Provider` Protocol：get_metadata / search / download / resolve_version / verify；先收编 catalog+registry 的 GitHub 路径，再考虑 Gitee / 本地 / HTTP | manifest 协议 |
-| WorkBuddy Adapter | 把「读 known_marketplaces / 写 skills 目录」等对 WorkBuddy 内部格式的依赖收进 adapters/workbuddy.py，抵御宿主格式变化 | — |
+| WorkBuddy Adapter | ✅ v2.17 落地：adapters/workbuddy.py 收拢宿主格式（known_marketplaces 读写 / 条目 / 备份 / 注册），register 迁出（R6 半程）；能力矩阵就位，版本探测随宿主变化逐步补 | — |
 | packageHash 全量固定 | ✅ v2.16 完成：安装产物整包哈希进所有权与事务日志（含崩溃恢复补记），补全可复现安装链 | §3 |
+| R6：state/application 迁出 | build_state / deep_check / sync 编排迁包后 market_core 收成兼容 shim（register 已迁 adapter 是第一步）；re-export 保证 `import market_core` 不坏 | adapter 已就位 |
 
 ## P2（v3.x / 生态期）
 
@@ -76,8 +77,9 @@ ownership 与事务日志。装到的是审核时固定的那一份字节，上�
   冲突与循环检测 —— 从 plugin manager 升级为 package manager。
 - **Quality Score**：来源可信度 / 维护活跃 / license / 文档 / 协议
   符合度加权评分；**必须与 trust 三级分开显示**（95 分 ≠ 官方）。
-- **Web 拆文件**：index.html 单文件拆 app.js / api.js / state.js /
-  components.js / style.css，保持零 npm / 零 bundler / 零 node。
+- **Web 拆文件**：✅ v2.17 完成第一步（index.html 84 行 + app.js +
+  style.css，/static 白名单服务，零 npm / 零 bundler / 零 node 不变）；
+  后续如需组件化再按 state/api/components 细分。
 - **隐私审计加历史保护**：push/PR 扫当前树（已有），release 加
   git history，weekly 全量历史。
 - **JSON 配置去注释**：README 里的 JSON 示例不再写 `//` 注释
@@ -86,6 +88,15 @@ ownership 与事务日志。装到的是审核时固定的那一份字节，上�
 ---
 
 ## 已落地的部分
+
+**v2.17**：
+- ✅ WorkBuddy Adapter（adapters/workbuddy.py：register 迁出 + 能力矩阵
+  + known_health），patch 落点随迁
+- ✅ CI 产物源闭环：build_artifacts.py + artifacts.yml（Release 发布 +
+  PR 回写 artifact 字段）
+- ✅ CI 提档：wheel 构建/安装/CLI smoke job、POSIX 语义冒烟、pytest
+  试点（tests/unit 31 项，双平台）
+- ✅ Web 拆文件第一步（index 84 行 + app.js/style.css + /static 白名单）
 
 **v2.16**：
 - ✅ P0-2 收官：包接入安装链全链闭环（artifact 下载/解包/校验 →

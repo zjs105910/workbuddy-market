@@ -4,6 +4,65 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.17.0 — 2026-10-08（WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点）
+
+**WorkBuddy Adapter（评审 7，R6 半程：register 迁出）**
+- 新模块 `workbuddy_market/adapters/workbuddy.py`：known_marketplaces.json
+  的全部读写（含 strict「坏了宁可报错也不覆盖」口径）、纳秒戳备份与轮转、
+  条目构造、乐观合并写入（`commit_known`）、`register` / `unregister`、
+  `capabilities()` 能力矩阵（`security_scan` / `skill_enable` 等未验证能力
+  **如实 False，不虚报**）、`known_health()`（deep_check 消费）。
+  market_core 的注册段（约 180 行）逐字迁入；core 侧全部 re-export，
+  第三方 `import market_core` 不受影响。
+- **patch 语义随迁**（R4 ownership/trash 同一先例）：要拦截注册链路里的
+  读，patch `workbuddy_market.adapters.workbuddy.read_known_or_die`；
+  patch `core._read_known_or_die` 不再拦到 adapter 内部调用。
+- `register()` 依赖的 `_sync_packaging` 注入点经 core 晚绑定（R4/R5 纪律）。
+- 以后 WorkBuddy 5.x / 6.x 换市场格式，只改 adapter 一个文件。
+
+**CI 产物源（评审 1 的后半程：artifact 有了源头）**
+- `scripts/build_artifacts.py`：按注册表条目的 **sourceCommit** 拉
+  tarball（不是默认分支）→ `safe_extract_tar`（穿越 / 链接 / 设备成员
+  拒绝；自动剥 GitHub tarball 的 `<repo>-<ref>/` 前缀）→
+  `choose_skills_root` 三种收录形态（root/skills/、子目录即 skill、
+  root 即 skill；都不是 → 诚实失败）→ `pack_package` → zip →
+  `report.json`（packageHash / manifestHash / asset / sourceCommit）。
+  单条失败记录不拖垮整批；`--patch-registry` 把哈希回写 plugins.json。
+- `.github/workflows/artifacts.yml`：每日构建 → 发布 GitHub Release 资产
+  → PR 回写 artifact 字段（不直推 main，与 registry.yml 同一约束）。
+  同日重跑得到同一份 packageHash（sourceCommit 固定 + pack 规范化），
+  Release 资产 `--clobber` 覆盖是安全的。
+- 至此 v2.16 的安装链有了产物源：Registry（packageUrl+packageHash）→
+  Release 资产 → 下载 → 校验 → 事务安装，端到端闭环。
+
+**CI 提档（评审 10 / 5）**
+- `package` job（Windows + Ubuntu）：`python -m build` → 安装 wheel →
+  CLI smoke（`workbuddy-market doctor --help` 必须退出 0）—— 把
+  「源码跑得通、pip 装完就坏」挡在 CI 里。`doctor.main` 顺手换 argparse
+  （`--help` 有正经出口，未知参数不再被静默忽略）。
+- pytest 步骤（双平台）：`tests/unit` 试点 31 项（hasher / registry 解析
+  / packaging+artifact 攻击面），conftest 在首次导入前预设 WBM_* 隔离
+  环境；pyproject 增 `dev` extra 与 `[tool.pytest.ini_options]`。
+  selftest 保留为**零依赖一键环境诊断**，定位不变（评审 9 的组合拳）。
+- `scripts/posix-smoke.py`（Ubuntu 槽位）：fcntl 锁独占与重入、symlink
+  被 `_scan` 如实报出、`os.replace` 原子换位、`ensure_child` 穿越闸门、
+  `unpack_zip` zip-slip 防线 —— POSIX 分支第一次有了**语义级**证据
+  （v3-roadmap §5 认可的冒烟路线；Windows 上运行明确 SKIP）。
+
+**Web 拆文件（评审 9，零构建不变）**
+- `web/index.html` 913 → 84 行；`app.js`（635 行）+ `style.css`
+  （192 行）随仓库分发，`<script src>` / `<link>` 引用，零 npm / 零
+  bundler / 零 node（node --check 只是开发期校验手段）。
+- 服务端 `/static` **白名单制**静态服务：`_STATIC_FILES` 名字 → Content-Type
+  精确映射，白名单外的名字（含一切穿越写法）一律 404 —— 不存在「路径
+  解析」这一步；`no-store` + `nosniff` 沿用 `_send` 统一头；静态文件
+  不含机密（口令注入点仍只在 index.html 的 meta）。
+
+**版本同步**：version 2.17.0；selftest 625 → 647 项（第 32 节 22 项：
+adapter 同一性与 patch 落点盯防、能力矩阵、/static 端到端、Web 拆分
+发货一致性、safe tar / 三形态 / build_one 端到端假接缝 / --patch-registry
+回写）；README / pyproject / roadmap 同步。
+
 ## 2.16.0 — 2026-10-08（包接入安装链：不可变 artifact → verify → 事务安装）
 
 **安装链闭环**（plugin-spec v0.2 冻结后的第一步落地，本轮 P0 主题）

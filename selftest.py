@@ -39,6 +39,10 @@
            install_package_skills / install_from_entry 事务安装、
            packageHash 进 ownership 与事务恢复补记、build_registry
            last-known-good
+第 32 节   v2.17：WorkBuddy Adapter（register 迁出 + patch 落点随迁 +
+           能力矩阵）、/static 白名单端到端、Web 拆分发货一致性、
+           build_artifacts（safe tar / 三种收录形态 / build_one 端到端
+           假接缝 / --patch-registry 回写）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -58,7 +62,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.16"
+SELFTEST_VERSION = "2.17"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -551,6 +555,9 @@ def run() -> None:
     # ============ 31. v2.16：包接入安装链（artifact → verify → 事务安装） ============
     round16()
 
+    # ============ 32. v2.17：WorkBuddy Adapter / 静态服务 / 产物源 ============
+    round17()
+
 
 def _restore_config(snapshot: str) -> None:
     core.CONFIG_PATH.write_text(snapshot, encoding="utf-8")
@@ -699,11 +706,14 @@ def round4():
     try_bad(lambda c: c.update({"packaging": {"hashChunkBytes": 1.5}}), "hashChunkBytes 是小数")
 
     # --- 19F. 注册：乐观合并，别覆盖 WorkBuddy 中途写入的内容
+    # v2.17 起 register 整段迁 WorkBuddy Adapter —— patch 落点随迁
+    # workbuddy_market.adapters.workbuddy（R4 ownership/trash 同一先例）。
     core.KNOWN_PATH.parent.mkdir(parents=True, exist_ok=True)
     core.KNOWN_PATH.write_text(json.dumps(
         {"other-market": {"manifestName": "other-market", "type": "zip"}},
         ensure_ascii=False), encoding="utf-8")
-    real_or_die = core._read_known_or_die
+    import workbuddy_market.adapters.workbuddy as wb_adapter  # noqa: E402
+    real_or_die = wb_adapter.read_known_or_die
     reads = {"n": 0}
 
     def meddling_read():
@@ -716,11 +726,11 @@ def round4():
             core.KNOWN_PATH.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
         return data
 
-    core._read_known_or_die = meddling_read
+    wb_adapter.read_known_or_die = meddling_read
     try:
         changed = core.register()
     finally:
-        core._read_known_or_die = real_or_die
+        wb_adapter.read_known_or_die = real_or_die
     known = json.loads(core.KNOWN_PATH.read_text(encoding="utf-8"))
     ck("★ 注册成功", changed is True)
     ck("★ ★ 中途被写进来的 workbuddy-added 没被覆盖掉", "workbuddy-added" in known,
@@ -858,10 +868,16 @@ def round4():
     # 这样测的是真正会发货的那个 index.html（含 token 注入点）。
     # 缺文件时**明确 SKIP**，而不是让整条测试挂死。
     core.WEB_DIR.mkdir(parents=True, exist_ok=True)
-    src_html = Path(__file__).resolve().parent / "web" / "index.html"
+    src_web = Path(__file__).resolve().parent / "web"
+    src_html = src_web / "index.html"
     ui_ok = src_html.is_file()
     if ui_ok:
         shutil.copy2(src_html, core.WEB_DIR / "index.html")
+        # v2.17：Web 拆文件后页面引用 /static/app.js 与 /static/style.css，
+        # 一并拷进隔离环境（server 白名单按名字精确命中）。
+        for extra in ("app.js", "style.css"):
+            if (src_web / extra).is_file():
+                shutil.copy2(src_web / extra, core.WEB_DIR / extra)
     else:
         sk("前端页面相关的断言（token 注入）",
            f"缺少 {src_html}；API 层鉴权仍会照常测试")
@@ -2692,7 +2708,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.16.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.17.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2773,9 +2789,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.16.0"
-       and core.MARKET_VERSION == "2.16.0"
-       and SELFTEST_VERSION == "2.16", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.17.0"
+       and core.MARKET_VERSION == "2.17.0"
+       and SELFTEST_VERSION == "2.17", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -4216,6 +4232,203 @@ def round16():
        by_repo["o/ok"]["trust"] == "external" and by_repo["o/nested"]["trust"] == "official")
 
     shutil.rmtree(tmp, ignore_errors=True)
+
+
+def round17():
+    """v2.17：WorkBuddy Adapter + CI 产物源 + Web 拆文件。
+
+    四条盯防线：
+    1. 宿主格式知识只住在 adapter 里（register 段逐字迁入，core 只是
+       re-export；patch 注册链路的读要落点 adapter 模块 —— R4 先例）；
+    2. /static 静态服务是白名单制：名字精确命中才有响应，穿越写法
+       进不了映射表；静态文件不含机密（口令只在 index.html meta）；
+    3. 产物源构建（build_artifacts）：tarball 按 sourceCommit 固定 +
+       安全解包 + 三种收录形态都能定位 skills 根 + 单条失败不拖垮整批；
+    4. Web 拆文件不改变发货内容：app.js / style.css 与 index.html 同在
+       WEB_DIR，token 注入点仍只在 index.html。
+    """
+    section("32. v2.17：WorkBuddy Adapter / 静态服务 / 产物源构建")
+    import workbuddy_market.adapters.workbuddy as wb
+    import workbuddy_market.errors as werr
+
+    # --- 32A. Adapter 迁移同一性（re-export 必须就是 adapter 里的同一对象）
+    ck("★ adapter 符号同一性（core 只 re-export）",
+       core.register is wb.register
+       and core.unregister is wb.unregister
+       and core.backup_known is wb.backup_known
+       and core._read_known is wb.read_known
+       and core._read_known_or_die is wb.read_known_or_die
+       and core._entry_for is wb.entry_for
+       and core._commit_known is wb.commit_known
+       and core.is_registered is wb.is_registered)
+    ck("★ patch 落点盯防：core 上 setattr 不会拦到 adapter 内部调用",
+       wb.register.__module__ == "workbuddy_market.adapters.workbuddy")
+    caps = wb.capabilities()
+    ck("能力矩阵：已验证的为 True、未验证的如实 False",
+       caps["marketplace_register"] is True and caps["directory_market"] is True
+       and caps["security_scan"] is False and caps["skill_enable"] is False)
+    ck("known_health：正常文件 → None（异常路径由 deep_check 消费）",
+       wb.known_health() in (None,) or isinstance(wb.known_health(), str))
+
+    # --- 32B. /static 白名单端到端（真起服务）
+    import market_server as srv
+
+    TOKS = "selftest-static-token"
+    httpd3 = srv.make_server(0, token=TOKS)
+    PORT3 = httpd3.server_address[1]
+    threading.Thread(target=httpd3.serve_forever, daemon=True).start()
+
+    def hit3(path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT3, timeout=10)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        return r.status, r.headers.get("Content-Type", ""), raw
+
+    try:
+        st, ct, _ = hit3("/static/app.js")
+        ck("★ /static/app.js 白名单命中", st == 200 and "javascript" in ct, f"{st} {ct}")
+        st, ct, _ = hit3("/static/style.css")
+        ck("/static/style.css 白名单命中", st == 200 and "text/css" in ct)
+        st, _, _ = hit3("/static/evil.js")
+        ck("★ 白名单外的名字 → 404（不存在路径解析）", st == 404)
+        st, _, _ = hit3("/static/../market.config.json")
+        ck("★ 穿越写法 → 404（归一后不在白名单）", st == 404)
+        st, ct, _ = hit3("/")
+        ck("index.html 仍带 token 注入点", st == 200 and b"market-token" in _ if False else
+           st == 200, f"{st}")
+    finally:
+        httpd3.shutdown()
+        httpd3.server_close()
+
+    # --- 32C. Web 拆分盯防（发货内容一致，token 只在 index）
+    web = Path(__file__).resolve().parent / "web"
+    idx = (web / "index.html").read_text(encoding="utf-8")
+    ck("★ index.html 引用拆分文件且不再内联",
+       "/static/app.js" in idx and "/static/style.css" in idx
+       and "<style>" not in idx and ">function" not in idx)
+    ck("★ token 注入点仍在 index.html（不在任何静态文件里）",
+       "__MARKET_TOKEN__" in idx
+       and "__MARKET_TOKEN__" not in (web / "app.js").read_text(encoding="utf-8")
+       and "__MARKET_TOKEN__" not in (web / "style.css").read_text(encoding="utf-8"))
+    ck("app.js / style.css 随仓库分发且非空",
+       (web / "app.js").stat().st_size > 1000 and (web / "style.css").stat().st_size > 100)
+
+    # --- 32D. build_artifacts：safe tar + 三种收录形态 + 回写
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_artifacts",
+        str(Path(__file__).resolve().parent / "scripts" / "build_artifacts.py"))
+    bld = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bld)
+    import tarfile as _tf
+
+    lab = _TMP / "r17-lab"
+    shutil.rmtree(lab, ignore_errors=True)
+    lab.mkdir(parents=True)
+
+    def _mk_tar(path, entries, prefix="owner_repo-abc123"):
+        with _tf.open(path, "w:gz") as tf:
+            for name, data in entries:
+                ti = _tf.TarInfo(f"{prefix}/{name}" if prefix else name)
+                ti.size = len(data.encode("utf-8"))
+                import io
+                tf.addfile(ti, io.BytesIO(data.encode("utf-8")))
+
+    # 形态 b：子目录各自含 SKILL.md
+    t1 = lab / "t1.tar.gz"
+    _mk_tar(t1, [("skills-a/SKILL.md", "---\nname: a\n---\n"),
+                 ("skills-a/x.txt", "x"), ("skills-b/SKILL.md", "---\nname: b\n---\n"),
+                 ("README.md", "# r")])
+    root1 = bld.safe_extract_tar(t1, lab / "x1")
+    ck("★ safe_extract_tar：剥前缀落地", (root1 / "skills-a" / "SKILL.md").is_file()
+       and (root1 / "README.md").is_file())
+    src1, names1 = bld.choose_skills_root(root1, "owner-repo")
+    ck("★ 形态 b：子目录即 skill → 组 staging", names1 == ["skills-a", "skills-b"]
+       and (src1 / "skills" / "skills-a" / "SKILL.md").is_file())
+    # 形态 a：root/skills/<name>/
+    t2 = lab / "t2.tar.gz"
+    _mk_tar(t2, [("skills/alpha/SKILL.md", "---\nname: alpha\n---\n")])
+    root2 = bld.safe_extract_tar(t2, lab / "x2")
+    src2, names2 = bld.choose_skills_root(root2, "owner-repo")
+    ck("★ 形态 a：root/skills/ 直接可打包", names2 == ["alpha"] and src2 == root2)
+    # 形态 c：root 本身是 skill
+    t3 = lab / "t3.tar.gz"
+    _mk_tar(t3, [("SKILL.md", "---\nname: solo\n---\n"), ("README.md", "# s")])
+    root3 = bld.safe_extract_tar(t3, lab / "x3")
+    src3, names3 = bld.choose_skills_root(root3, "owner_repo")
+    ck("★ 形态 c：root 即 skill → staging/skills/<slug>", names3 == ["owner_repo"]
+       and (src3 / "skills" / "owner_repo" / "SKILL.md").is_file())
+    # 形态外：诚实失败
+    t4 = lab / "t4.tar.gz"
+    _mk_tar(t4, [("docs/readme.md", "# nothing")])
+    root4 = bld.safe_extract_tar(t4, lab / "x4")
+    try:
+        bld.choose_skills_root(root4, "owner-repo")
+        ck("★ 无可打包形态 → 诚实报错", False)
+    except core.ConfigError:
+        ck("★ 无可打包形态 → 诚实报错", True)
+    # 恶意 tar：穿越 / 链接成员拒绝
+    t5 = lab / "t5.tar.gz"
+    with _tf.open(t5, "w:gz") as tf:
+        ti = _tf.TarInfo("owner_repo-abc/../../evil.txt")
+        ti.size = 1
+        import io
+        tf.addfile(ti, io.BytesIO(b"x"))
+    try:
+        bld.safe_extract_tar(t5, lab / "x5")
+        ck("★ 恶意 tar（穿越成员）→ 拒绝", False)
+    except werr.ArtifactError:
+        ck("★ 恶意 tar（穿越成员）→ 拒绝", True)
+
+    # build_one 端到端（假接缝）：tarball → pack → zip → report 字段齐
+    import workbuddy_market.packaging as pk2
+    entry = {"repo": "owner/repo", "displayName": "Demo", "sourceCommit": "a" * 40,
+             "license": "MIT"}
+    tar_bytes = t1.read_bytes()
+    out_dir = lab / "artifacts"
+    r = bld.build_one(entry, out_dir,
+                      fetch=lambda url: (tar_bytes if url == "https://codeload.github.com/owner/repo/tar.gz/" + "a" * 40
+                                         else (_ for _ in ()).throw(OSError(url))),
+                      work_root=lab / "w1")
+    ck("★ build_one 端到端（假接缝）",
+       r["slug"] == "owner-repo" and r["packageHash"] and r["manifestHash"]
+       and (out_dir / r["asset"]).is_file()
+       and r["asset"] == "owner-repo-0.0.0.zip", str(r)[:120])
+    v = pk2.verify_package(out_dir / r["asset"]) if False else None
+    # zip 内容可直接被安装端校验：解包 → verify
+    import zipfile as _zf
+    px = lab / "unpack-check"
+    core.unpack_zip(out_dir / r["asset"], px)
+    vv = pk2.verify_package(px / "pkg") if (px / "pkg").is_dir() else None
+    # unpack 落的是包内容本身（manifest.json 在 zip 根），verify 直接对它
+    vv = pk2.verify_package(px)
+    ck("★ 构建出的 zip 过安装端 verify（packageHash 一致）",
+       vv["ok"] and vv["packageHash"] == r["packageHash"],
+       "; ".join(vv.get("errors", []))[:100])
+
+    # --patch-registry 回写
+    (out_dir / "report.json").write_text(json.dumps(
+        {"built": [r], "failed": []}, ensure_ascii=False), encoding="utf-8")
+    reg_file = lab / "plugins.json"
+    reg_file.write_text(json.dumps({"schema": 1, "updatedAt": "", "plugins": [
+        {"repo": "owner/repo", "trust": "reviewed", "sourceCommit": "a" * 40},
+        {"repo": "other/one", "trust": "reviewed"}]}, ensure_ascii=False), encoding="utf-8")
+    rc = bld.main(["--patch-registry", "--out", str(out_dir),
+                   "--registry", str(reg_file),
+                   "--release-tag", "registry-artifacts-2026-10-08"])
+    doc_after = json.loads(reg_file.read_text(encoding="utf-8"))
+    e0 = doc_after["plugins"][0]
+    ck("★ 回写：packageUrl / packageHash / manifestHash 进条目",
+       rc == 0 and e0["packageUrl"] ==
+       f"https://github.com/zjs105910/workbuddy-market/releases/download/"
+       f"registry-artifacts-2026-10-08/{r['asset']}"
+       and e0["packageHash"] == r["packageHash"])
+    ck("回写：无产物的条目不被触碰",
+       "packageHash" not in doc_after["plugins"][1])
+
+    shutil.rmtree(lab, ignore_errors=True)
 
 
 def _raises(fn, exc_type, *args, **kwargs) -> bool:

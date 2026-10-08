@@ -165,7 +165,9 @@ workbuddy-market/
 │                                        v2.15 增 packaging（Market Package
 │                                        pack / verify，协议见 docs/plugin-spec.md），
 │                                        v2.16 增 artifact（不可变产物下载 /
-│                                        解包 / 校验 → 事务安装）
+│                                        解包 / 校验 → 事务安装），
+│                                        v2.17 增 adapters/（WorkBuddy 宿主
+│                                        适配层，register 迁出）
 ├── registry/plugins.json             ← 社区注册表（v2.11）：静态收录人工维护，
 │                                        动态字段（stars 等）由每日 CI 重建；
 │                                        v2.12 增 trust / sourceCommit / license /
@@ -174,7 +176,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 625 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 647 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -212,7 +214,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 625 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 647 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -418,44 +420,41 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | v2.13 | 跨卷回收站原子化 + API /api/v1 版本化 + doctor 体检 + v3.0 路线定稿 | [CHANGELOG.md](CHANGELOG.md) 2.13.0 条目 |
 | v2.14 | R5：installer / uninstaller 迁包（core 1755 → 1379 行）+ manifest 协议讨论稿 | [CHANGELOG.md](CHANGELOG.md) 2.14.0 条目 |
 | v2.15 | Market Package 协议冻结 + pack / verify 实现（packaging.py） | [CHANGELOG.md](CHANGELOG.md) 2.15.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) |
-| **v2.16** | **包接入安装链：不可变 artifact → 哈希校验 → 事务安装（全链闭环）** | [CHANGELOG.md](CHANGELOG.md) 2.16.0 条目 |
+| v2.16 | 包接入安装链：不可变 artifact → 哈希校验 → 事务安装（全链闭环） | [CHANGELOG.md](CHANGELOG.md) 2.16.0 条目 |
+| **v2.17** | **WorkBuddy Adapter + CI 产物源 + Web 拆文件 + pytest 试点 + wheel/POSIX CI** | [CHANGELOG.md](CHANGELOG.md) 2.17.0 条目 |
 
-### v2.16 摘要（2026-10-08）
+### v2.17 摘要（2026-10-08）
 
-- **安装链闭环**（本轮主题，也是 plugin-spec 冻结后的第一步落地）：
-  `Registry（packageUrl + packageHash）→ artifact 流式下载 → zip 安全解包
-  → verify_package → 两阶段事务安装`。装到的是**审核时固定的那一份字节**，
-  不再是仓库当前的 HEAD —— 上游漂移在这条链路里天然不存在；
-- **新模块 `workbuddy_market/artifact.py`**：`download_artifact`
-  （流式分块 + 边下边算 sha256 + 超限即断 + .part 原子落位）、
-  `unpack_zip`（zip-slip / 绝对路径 / 符号链接成员 / zip bomb 全拒绝，
-  失败清理无半截状态）、`prepare_package`（解包后按 packageHash /
-  manifestHash 与注册表固定值比对）、`install_from_entry`（编排全链）；
-- **安装循环归一**：`installer.install_package_skills` 成为本地插件目录与
-  Market Package 共用的两阶段事务链路（`install_local_plugin` 委托它）——
-  不再有「两条安装路径、两套纪律」；
-- **packageHash 全程携带**：事务日志（凭证先于磁盘变更）→ ownership
-  记录 → 崩溃恢复补记，「我安装的到底是哪一个不可变产物」全程可审计，
-  为以后按 artifact 回滚打底；
-- **信任 fail-closed**：注册表条目 trust 缺失 / 拼写错误一律 external
-  （旧口径会自动降为 reviewed，等于把「来历不明」洗成「社区已审核」；
-  现网 28 条全有显式 trust，行为不受影响）；artifact 字段必须成套
-  （packageUrl + packageHash 齐全才采纳），半套比没有更危险；
-- **服务端** `POST /api/registry/install`（与 remote/add 同一套并发闸门，
-  哈希钉死所以无需 409 漂移闸门）；网页确认框按条目能力如实切换安装路线；
-- **verify / pack 改流式哈希**：`read_bytes()` 整读改为 `sha256_file()`
-  分块（1 GB 的包不再整个进内存）；
-- **build_registry last-known-good**：全部失败不写盘、不 bump updatedAt、
-  退出码 1；零成功刷新同样不写盘 —— 「CI → registry → PR」不再产生假更新；
-- 自检 579 → 625 项（第 31 节 46 项：假接缝下载矩阵、zip 攻击面、
-  prepare 端到端、install_from_entry 全链、事务 packageHash、
-  last-known-good、registry 解析 fail-closed）。
+- **WorkBuddy Adapter**（评审 7，R6 半程）：`adapters/workbuddy.py`
+  收拢全部宿主格式知识 —— known_marketplaces.json 读写（strict 口径）、
+  纳秒戳备份、条目构造、乐观合并、register / unregister、能力矩阵
+  （未验证的能力如实 False）、known_health 体检。core 只 re-export；
+  patch 注册链路读的落点随迁 adapter 模块（R4 ownership/trash 先例）。
+  以后 WorkBuddy 换市场格式只改这一个文件；
+- **CI 产物源**（评审 1 的后半程）：`scripts/build_artifacts.py` 按
+  sourceCommit 拉上游 tarball → 安全解包（穿越/链接成员拒绝、剥前缀）
+  → 三种收录形态定位 skills 根 → pack → zip → report.json；
+  `.github/workflows/artifacts.yml` 每日构建 + 发布 Release 资产 +
+  PR 回写 packageUrl / packageHash / manifestHash。同日重跑哈希不变
+  （sourceCommit 固定 + pack 规范化），--clobber 覆盖安全；
+- **CI 提档**（评审 10/5）：`package` job（build wheel → 安装 →
+  `workbuddy-market doctor --help` CLI smoke，双平台）；pytest 步骤
+  （tests/ 试点 31 项，双平台）；`scripts/posix-smoke.py`（fcntl 锁 /
+  symlink 防线 / ensure_child / zip-slip 的 POSIX 语义证据，Ubuntu 槽位
+  不再只有语法检查）；
+- **Web 拆文件**（评审 9）：index.html 913 → 84 行，app.js（635 行）/
+  style.css（192 行）；服务端 `/static` **白名单制**静态服务（名字精确
+  命中才有响应，不存在路径解析），token 注入点仍只在 index.html；
+- **pytest 试点**（评审 9）：tests/unit 三件（hasher / registry 解析 /
+  packaging+artifact 攻击面），conftest 预设 WBM_* 隔离环境；selftest
+  保留为零依赖一键诊断，定位不变；
+- 自检 625 → 647 项（第 32 节 22 项）+ pytest 31 项。
 
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 625 passed, 0 failed
+python selftest.py        # 647 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

@@ -36,6 +36,14 @@ Changelog = "https://github.com/zjs105910/workbuddy-market/blob/main/CHANGELOG.m
 # Windows 新手入口仍是一键启动.cmd —— 两条路一个内核。
 workbuddy-market = "workbuddy_market.cli:main"
 
+[project.optional-dependencies]
+# 开发者测试框架（v3-roadmap P1：pytest 承担日常回归，selftest 保留为
+# 零依赖一键环境诊断）。`pip install -e .[dev]` 或 CI 里单装 pytest。
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.dynamic]
 version = { attr = "workbuddy_market.version.MARKET_VERSION" }
 
