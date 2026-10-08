@@ -14,29 +14,28 @@ Marketplace 框架」阶段；安全基础扎实，下一阶段拉开差距的�
 ## P0（v3.0 主线，决定项目天花板）
 
 ### 1. market_core.py 彻底降级为兼容层（R5+ 拆分）
-现状：R2~R4 已迁出 12 个模块（core 2445 → 1755 行），但
-安装 / 卸载 / 注册 / 状态仍留在 core。
+现状：R2~R5 已迁出 14 个模块（core 2445 → 1379 行）；
+**installer / uninstaller 已迁（v2.14 R5）**，register / state / api
+仍留在 core。
 
-目标布局：
+目标布局（剩余部分）：
 
 ```
 src/workbuddy_market/
-├── installer.py / uninstaller.py / register.py / state.py
+├── register.py / state.py    # R6 候选
 ├── application.py            # 组合层
 ├── providers/{base,github,local,http}.py
 └── api/{server,routes,schemas}.py
 ```
 
-纪律延续 R4：逐字搬迁、注入点调用点晚绑定 `import market_core`、
+纪律延续 R4/R5：逐字搬迁、注入点调用点晚绑定 `import market_core`、
 selftest patch 落点随迁、每轮 selftest 全绿。
 
 ### 2. 定义 Marketplace Package 协议（manifest.json）
-把 WorkBuddy Skill / Plugin / GitHub Repo 之外增加第四层
-「Market Package」：`manifest.json + skills/ + checksums.json`，
-含 schemaVersion / id / version / dependencies / source{repo,ref} /
-integrity{algorithm,manifest}。这是项目从「skill 打包器」升级为
-「插件分发协议」的最重要一步。schema 先出
-`docs/plugin-spec.md`（讨论稿），实现放 P1。
+**讨论稿已定稿：docs/plugin-spec.md（v0.1，2026-10-08）** ——
+含包布局、manifest schema、与现有安全模型的衔接、生命周期、
+6 项开放问题。下一步：冻结开放问题 → schema v1 定稿 →
+实现 `pack` / `verify`（packaging.py）。
 
 ### 3. 可复现安装（immutable artifact）
 现状的 trust 模型解决「上游变了会提醒」，但安装的仍是**当时的
@@ -84,8 +83,14 @@ UI 提供「安装审核版本 / 安装当前版本」双入口。
 
 ---
 
-## 已在本轮（v2.13）落地的部分
+## 已落地的部分
 
+**v2.14（R5）**：
+- ✅ P0-1 半程：installer / uninstaller 迁包（core 1755 → 1379 行），
+  注入点晚绑定语义经全部既有崩溃矩阵回归
+- ✅ P0-2 讨论稿：docs/plugin-spec.md v0.1（schema + 开放问题）
+
+**v2.13**：
 - ✅ 跨卷回收站搬移原子化（评审 P0 数据安全项，含重解析点拒绝跨卷、
   校验失败源不动；selftest 第 28 节盯防）
 - ✅ API /api/v1 版本化别名（鉴权前置归一化）

@@ -27,6 +27,9 @@
 第 28 节   v2.13：跨卷回收站原子化（同卷 rename / 跨卷 复制-校验-落位-删源、
            校验失败源不动、重解析点拒绝跨卷）、API v1 版本化别名
            （鉴权前置、端到端等价）、doctor 体检（结构 / 渲染 / cli 分发）
+第 29 节   v2.14/R5：installer / uninstaller 迁包——re-export 同一性、
+           core 注入点晚绑定端到端（quick_fingerprint / tx_begin 拦截
+           包内编排）、模块归属盯防（24B 已扩展）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -46,7 +49,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.13"
+SELFTEST_VERSION = "2.14"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -529,6 +532,9 @@ def run() -> None:
 
     # ============ 28. v2.13：跨卷回收站原子化 + API v1 + doctor ============
     round13()
+
+    # ============ 29. v2.14：R5 安装/卸载迁包 ============
+    round14()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2615,9 +2621,10 @@ def round9():
        and core._TX_ACTIVE is wm.transactions._TX_ACTIVE)
 
     # --- 24B. 注入点定义模块盯防（R2 core；R3 后 _scan/_walk_tree 等已迁 scanner；
-    #          R4 后 trash / ownership / transactions 已迁包，patch 落点随迁）
+    #          R4 后 trash / ownership / transactions 已迁包，patch 落点随迁；
+    #          R5 后安装/卸载编排已迁包，对 core 注入点走调用点晚绑定）
     for _name in ("quick_fingerprint", "tree_hash", "tree_hash_from_index",
-                  "_stage_skill", "_commit_staged", "build_state"):
+                  "build_state"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
         ck(f"注入点仍定义在 core：{_name}", _mod == "market_core", _mod)
     for _name, _want in (
@@ -2628,9 +2635,17 @@ def round9():
             ("tx_note_committed", "workbuddy_market.transactions"),
             ("recover_transactions", "workbuddy_market.transactions"),
             ("move_to_trash", "workbuddy_market.trash"),
-            ("prune_trash", "workbuddy_market.trash")):
+            ("prune_trash", "workbuddy_market.trash"),
+            ("_stage_skill", "workbuddy_market.installer"),
+            ("_commit_staged", "workbuddy_market.installer"),
+            ("install_local_plugin", "workbuddy_market.installer"),
+            ("_sweep_staging", "workbuddy_market.installer"),
+            ("classify_skill", "workbuddy_market.uninstaller"),
+            ("plugin_uninstall_plan", "workbuddy_market.uninstaller"),
+            ("uninstall_local_plugin", "workbuddy_market.uninstaller"),
+            ("dropped", "workbuddy_market.uninstaller")):
         _mod = getattr(getattr(core, _name), "__module__", "?")
-        ck(f"注入点已迁包（v2.12 R4）：{_name}", _mod == _want, _mod)
+        ck(f"注入点已迁包（R4/R5）：{_name}", _mod == _want, _mod)
     for _name in ("_scan", "_walk_tree", "_scan_many", "file_index",
                   "SkillScanCache", "parse_skill_meta"):
         _mod = getattr(getattr(core, _name), "__module__", "?")
@@ -2654,7 +2669,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.13.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.14.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2735,9 +2750,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.13.0"
-       and core.MARKET_VERSION == "2.13.0"
-       and SELFTEST_VERSION == "2.13", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.14.0"
+       and core.MARKET_VERSION == "2.14.0"
+       and SELFTEST_VERSION == "2.14", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -3581,6 +3596,94 @@ def round13():
     if _ISOLATED:
         os.environ["GHPM_MARKET_ROOT"] = str(_TMP / "market")
         os.environ.pop("WBM_MARKET_ROOT", None)
+
+
+def round14():
+    """v2.14 / R5：installer / uninstaller 迁包（逐字搬迁，行为零变化）。
+
+    重点盯防（与 R2~R4 同一纪律）：
+    1. re-export 同一性（is）—— core.X 必须就是包里那个对象；
+    2. core 注入点**晚绑定**端到端：安装/卸载编排已进包，但对
+       core.quick_fingerprint / core.tx_begin 等的调用必须经
+       ``market_core`` 命名空间 —— patch core.X 仍要拦得到包内编排
+       （第 21/20 节的崩溃矩阵已在真实流水线上验证，这里补直达断言）；
+    3. 模块归属盯防见 24B（本轮已扩展 installer / uninstaller 八项）。
+    """
+    section("29. v2.14/R5：installer / uninstaller 迁包")
+    import workbuddy_market.installer as wmi
+    import workbuddy_market.uninstaller as wmu
+
+    # --- 29A. re-export 同一性
+    ck("安装符号同一性（R5）",
+       core.install_local_plugin is wmi.install_local_plugin
+       and core._stage_skill is wmi._stage_skill
+       and core._commit_staged is wmi._commit_staged
+       and core._sweep_staging is wmi._sweep_staging
+       and core._stage_dir is wmi._stage_dir
+       and core.INSTALL_MODES is wmi.INSTALL_MODES)
+    ck("卸载符号同一性（R5）",
+       core.classify_skill is wmu.classify_skill
+       and core.inspect_skill is wmu.inspect_skill
+       and core.plugin_uninstall_plan is wmu.plugin_uninstall_plan
+       and core.uninstall_local_plugin is wmu.uninstall_local_plugin
+       and core.dropped is wmu.dropped)
+    ck("INSTALL_MODES 取值不变", core.INSTALL_MODES == ("missing", "update", "force"),
+       str(core.INSTALL_MODES))
+
+    # --- 29B. core 注入点晚绑定端到端：patch core.X 必须拦到包内编排
+    # （1）classify 的指纹快路径经 core.quick_fingerprint —— 注入崩溃后
+    #      ui 判定必须炸出来（证明走的是 core 命名空间，不是包内直连）
+    real_fp = core.quick_fingerprint
+
+    def _fp_boom(*a, **k):
+        raise RuntimeError("注入：quick_fingerprint 处崩溃")
+
+    core.quick_fingerprint = _fp_boom
+    intercepted = False
+    try:
+        # bundle-one/alpha 此刻归本市场（第 28 节之后环境仍在）；
+        # ui 用途 + 无缓存 → 走指纹快路径 → 命中注入
+        wmu.classify_skill("bundle-one", "alpha", core.load_config(), purpose="ui")
+    except RuntimeError as exc:
+        intercepted = "quick_fingerprint" in str(exc)
+    except Exception:
+        intercepted = False
+    finally:
+        core.quick_fingerprint = real_fp
+    ck("★ patch core.quick_fingerprint 拦得到包内 classify_skill（晚绑定）",
+       intercepted)
+
+    # （2）安装编排经 core.tx_begin —— 连日志都开不了就不许动磁盘
+    #     （与 20B 同一契约：tx_begin 失败直接抛 OSError 硬失败，磁盘零改动。
+    #      这里断言同一语义对 wm.installer 命名空间同样成立 —— 编排虽已
+    #      迁包，注入点仍走 core 晚绑定）
+    core.install_local_plugin("bundle-one", "force")      # 先归零
+    before_tx = core.tree_hash(core.SKILLS_DIR / "alpha")
+    real_begin = core.tx_begin
+    core.tx_begin = lambda *a, **k: (_ for _ in ()).throw(
+        OSError("模拟：连日志都开不了"))
+    tx_failed = False
+    try:
+        wmi.install_local_plugin("bundle-one", "missing")
+    except OSError:
+        tx_failed = True
+    finally:
+        core.tx_begin = real_begin
+    ck("★ tx_begin 注入 → 包内安装编排直接失败（不碰磁盘）", tx_failed)
+    ck("★ tx_begin 注入期间本机 alpha 未被改动",
+       core.tree_hash(core.SKILLS_DIR / "alpha") == before_tx
+       and not list(core.SKILLS_DIR.glob(".*.installing-*")))
+
+    # --- 29C. 行为不变：迁移后安装/卸载全流程仍走通（端到端一遍）
+    r_i = core.install_local_plugin("bundle-one", "force")
+    ck("★ 迁移后安装流程正常", r_i.get("ok") is True and not r_i.get("failed"),
+       str(r_i.get("failed"))[:80])
+    r_u = core.uninstall_local_plugin("bundle-one")
+    ck("★ 迁移后卸载流程正常（safe 全部移除）",
+       r_u.get("ok") is True and r_u["plan"]["counts"].get("safe", 0) >= 1,
+       str(r_u.get("plan", {}).get("counts"))[:80])
+    r_back = core.install_local_plugin("bundle-one", "missing")
+    ck("★ 装回（环境归零，后续轮次不受影响）", r_back.get("ok") is True)
 
 
 if __name__ == "__main__":

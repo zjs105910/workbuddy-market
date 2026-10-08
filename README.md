@@ -160,7 +160,8 @@ workbuddy-market/
 │                                        config / scanner / sync / version；
 │                                        v2.10 增 catalog，v2.11 增 registry，
 │                                        v2.12/R4 增 trash / ownership / transactions，
-│                                        v2.13 增 doctor（clone 外可跑的体检）
+│                                        v2.13 增 doctor（clone 外可跑的体检），
+│                                        v2.14/R5 增 installer / uninstaller
 ├── registry/plugins.json             ← 社区注册表（v2.11）：静态收录人工维护，
 │                                        动态字段（stars 等）由每日 CI 重建；
 │                                        v2.12 增 trust / sourceCommit / license /
@@ -169,7 +170,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 545 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 560 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -207,7 +208,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 545 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 560 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -410,34 +411,32 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 |---|---|---|
 | v2 → v2.11 | 七轮代码评审 + 开源重构 R1~R3 + GitHub 动态目录 + 社区注册表 | [docs/versions.md](docs/versions.md) |
 | v2.12 | 供应链信任（trust 分级 / sourceCommit 固定 / 漂移拦截）+ R4 模块化收尾 + CI 加固 | [CHANGELOG.md](CHANGELOG.md) 2.12.0 条目 |
-| **v2.13** | **跨卷回收站原子化 + API /api/v1 版本化 + doctor 体检 + v3.0 路线定稿** | [CHANGELOG.md](CHANGELOG.md) 2.13.0 条目 · [docs/v3-roadmap.md](docs/v3-roadmap.md) |
+| v2.13 | 跨卷回收站原子化 + API /api/v1 版本化 + doctor 体检 + v3.0 路线定稿 | [CHANGELOG.md](CHANGELOG.md) 2.13.0 条目 |
+| **v2.14** | **R5：installer / uninstaller 迁包（core 1755 → 1379 行）+ manifest 协议讨论稿** | [CHANGELOG.md](CHANGELOG.md) 2.14.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) |
 
-### v2.13 摘要（2026-10-08）
+### v2.14 摘要（2026-10-08）
 
-- **跨卷回收站原子化**：`WBM_HOME` 与 `WBM_STATE_HOME` 允许在不同磁盘，
-  原来 `shutil.move()` 跨卷会退化成 copy+delete（中途崩掉两边都不完整）。
-  现在同卷走 `os.rename`（原子）；跨卷走「staging 复制 → 结构校验 →
-  同卷原子 rename 落位 → 最后才删源」，任何一步失败源目录原样保留；
-  重解析点条目拒绝跨卷搬移（copytree 无法保真复制 junction）；
-- **API 版本化**：全部接口接受 `/api/v1/<路由>` 别名，归一化发生在
-  鉴权 / Origin 校验之前（版本前缀不提供绕过闸门的途径）；
-  裸 `/api/*` 即 v1 语义，前端与旧脚本零迁移成本；
-- **doctor**：`workbuddy-market doctor` 逐项体检（Python / 市场根 /
-  配置 / skills / ghpm / 所有权 / 事务日志 / 回收站索引安全 / 注册表缓存），
-  `--fix` 走与 `--recover` 同一套事务恢复；唯一不依赖 clone 布局的子命令；
-- **POSIX 支持口径诚实化**：Linux/macOS 目前是「CI 语法级验证」，
-  selftest 硬门槛仍只在 Windows（README/pyproject 如实标注）；
-- **v3.0 路线定稿**：外部评审 16 项建议整理成带优先级的路线文档
-  （Marketplace Package 协议 / Provider 抽象 / installer 拆分 /
-  pytest 拆分等），见 [docs/v3-roadmap.md](docs/v3-roadmap.md)；
-- 自检 523 → 545 项（第 28 节：跨卷搬移端到端 / 校验失败源不动 /
-  重解析点拒绝 / API v1 归一化与端到端 / doctor 结构与分发）。
+- **R5 迁包**：`classify_skill` / `plugin_uninstall_plan` /
+  `uninstall_local_plugin` 等迁 `workbuddy_market/uninstaller.py`，
+  两阶段安装全家（`_stage_skill` / `_commit_staged` /
+  `install_local_plugin` / `INSTALL_MODES`）迁
+  `workbuddy_market/installer.py` —— core 1755 → 1379 行，
+  逐字搬迁、行为零变化；
+- **注入点语义原样**：对 core 注入点（`_scan` / `tree_hash*` /
+  `quick_fingerprint` / `tx_*` / `record_owner` / `_sync_packaging`）
+  一律调用点晚绑定 `import market_core` —— 崩溃矩阵与
+  「tx_begin 失败 → OSError、磁盘零改动」契约经全部既有用例回归；
+- **manifest 协议讨论稿**：`docs/plugin-spec.md` 定义 Market Package
+  第四层抽象（manifest schema / 完整性 / 可复现安装），
+  v0.1 只定稿讨论，不含实现；开放问题 6 项待冻结；
+- 自检 545 → 560 项（第 29 节：installer/uninstaller 同一性、
+  core 注入点晚绑定端到端、迁移后全流程回归）。
 
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 545 passed, 0 failed
+python selftest.py        # 560 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

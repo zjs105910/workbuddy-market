@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.13）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.14）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
 → v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1）
 → v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表）
-→ v2.12（R4）→ v2.13（跨卷原子化 + API v1 + doctor，当前）。
+→ v2.12（R4）→ v2.13（跨卷原子化 + API v1 + doctor）
+→ v2.14（R5：installer / uninstaller 迁包，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -279,6 +280,26 @@ v2.12 → v2.13 的变化（P0 工程边界：跨卷原子化 / API 版本化 / 
     是「CI 语法级验证」，selftest 硬门槛仍只在 Windows 跑；
     v3.0 的完整路线（manifest 协议 / Provider 抽象 / 拆分计划）见
     docs/v3-roadmap.md。
+
+v2.13 → v2.14 的变化（R5：installer / uninstaller 迁包，逐字搬迁、行为零变化）：
+
+  · classify_skill / inspect_skill / plugin_uninstall_plan /
+    uninstall_local_plugin / dropped 迁 ``workbuddy_market.uninstaller``；
+    _stage_dir / _sweep_staging / _stage_skill / _commit_staged /
+    install_local_plugin / INSTALL_MODES 迁
+    ``workbuddy_market.installer``（core 1755 → 1379 行）；
+  · 对 core 注入点（_scan / quick_fingerprint / tree_hash /
+    tree_hash_from_index / tx_* / recover_transactions /
+    _sync_packaging / record_owner / classify_skill / _stage_skill /
+    _commit_staged）一律**调用点晚绑定 ``import market_core``** ——
+    selftest 崩溃矩阵（core._scan / tree_hash / quick_fingerprint /
+    tx_begin / tx_note_committed / record_owner）与 20B 的
+    「tx_begin 失败 → OSError 硬失败、磁盘零改动」契约原样保持；
+  · patch 落点随迁：classify_skill 等包内互调 → wm.uninstaller，
+    安装内部符号 → wm.installer（24B 盯防清单已扩展 8 项）；
+    quick_fingerprint / tree_hash* / build_state 仍留 core（纪律不变）；
+  · manifest 协议讨论稿见 docs/plugin-spec.md（v3.0 P0-2 的设计起点，
+    本轮只定稿 schema 讨论，不做实现）。
 """
 from __future__ import annotations
 
@@ -380,10 +401,17 @@ from workbuddy_market.transactions import (  # noqa: E402,F401  （v2.12 R4 新�
     tx_note_removed, tx_drop, tx_settled, tx_release, tx_close, tx_list,
     recover_transactions,
 )
-INSTALL_MODES = ("missing", "update", "force")
+from workbuddy_market.installer import (     # noqa: E402,F401  （v2.14 R5 新增）
+    INSTALL_MODES, _stage_dir, _sweep_staging, _stage_skill, _commit_staged,
+    install_local_plugin,
+)
+from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新增）
+    classify_skill, inspect_skill, plugin_uninstall_plan, uninstall_local_plugin,
+    dropped,
+)
 
 # CLASSIFY_PURPOSES / EXACT_PURPOSES 已迁 workbuddy_market.config（v2.9 R3），
-# 此处 re-export（见上方 import 块）。
+# 此处 re-export（见上方 import 块）。INSTALL_MODES 已迁 installer（v2.14 R5）。
 
 
 # ---------------------------------------------------------------- 小工具
@@ -736,115 +764,12 @@ def _plugin_readme(cfg: dict, spec: dict, skills: list) -> str:
 # 已迁 workbuddy_market.ownership / workbuddy_market.transactions（v2.12 R4），
 # 此处 re-export。core.tree_hash / core.quick_fingerprint / core._scan /
 # core._sweep_staging / say 的晚绑定接缝（selftest 注入点语义保持不变）
-# 见两个模块的 docstring。classify_skill / 安装 / 卸载仍留在 core。
+# 见相关模块的 docstring。
 
-
-def classify_skill(plugin_id: str, sname: str, cfg: dict, own: dict | None = None,
-                   purpose: str = "ui", always_hash: bool | None = None,
-                   scan_cache: "SkillScanCache | None" = None) -> dict:
-    """判断一个 skill 当前该归哪一档。网页界面与卸载都靠它。
-
-    返回 kind: absent / safe / modified / foreign / other_plugin
-
-    **准不准由 purpose 决定**，而不是由调用方随手传一个开关：
-
-      ui         网页状态。允许用廉价指纹，快；判错只是显示不准。
-      install    决定要不要覆盖本机文件 → 必须 READ 内容。
-      uninstall  决定要不要把用户目录搬进回收站 → 必须 READ 内容。
-
-    真正的开关是 needs_exact(purpose)：strict 模式一律精确；auto/fast 下
-    install / uninstall 精确、ui 走指纹。
-
-    v2 的 bug 是让 update 也走指纹：只要「文件数 / 总字节 / 最大 mtime_ns」
-    三者不变就判 safe —— 用户改了某个旧文件（内容变、大小不变、mtime 仍小于
-    最大值）时会被误判成「没动过」，于是 update 静默跳过覆盖。已用探针复现。
-    """
-    if purpose not in CLASSIFY_PURPOSES:
-        raise ValueError(f"未知用途 {purpose!r}（可选：{', '.join(CLASSIFY_PURPOSES)}）")
-    exact = needs_exact(purpose)
-    if always_hash:                       # 兼容旧签名：只允许「更严」，不允许更松
-        exact = True
-
-    mid = cfg.get("marketId", "wb-local-market")
-    d = SKILLS_DIR / sname
-    try:
-        ensure_child(SKILLS_DIR, d)
-    except ConfigError:
-        return {"skill": sname, "kind": "foreign", "label": "路径越界，拒绝处理"}
-
-    if not (d / "SKILL.md").is_file():
-        return {"skill": sname, "kind": "absent", "label": "未安装"}
-
-    own = own if own is not None else load_ownership()
-    rec = own["skills"].get(sname)
-    if not rec:
-        return {"skill": sname, "kind": "foreign", "label": "非本市场安装（不会动）"}
-    if rec.get("plugin") != plugin_id:
-        return {"skill": sname, "kind": "other_plugin",
-                "label": f"由插件 {rec.get('plugin')} 安装"}
-    if rec.get("owner") != mid:
-        return {"skill": sname, "kind": "foreign", "label": "非本市场安装（不会动）"}
-
-    # 快路径只服务「可以容忍误差」的用途
-    if not exact:
-        rec_fp = rec.get("fingerprint")
-        if isinstance(rec_fp, dict):
-            cur = (scan_cache.fingerprint(sname) if scan_cache is not None
-                   else quick_fingerprint(d))
-            if cur == rec_fp:
-                return {"skill": sname, "kind": "safe", "label": "可安全卸载",
-                        "checked": "fingerprint", "purpose": purpose}
-
-    try:
-        same = tree_hash(d) == rec.get("hash")
-    except ScanError as exc:
-        # 扫不全就没法证明「没被动过」。fail-closed：当作被改过 ——
-        # 卸载会保留它，更新会覆盖它（市场那份是完整的，覆盖是安全方向）。
-        return {"skill": sname, "kind": "modified",
-                "label": f"内容读取失败，保守当成被改过：{exc}",
-                "checked": "error", "purpose": purpose}
-    if not same:
-        return {"skill": sname, "kind": "modified", "label": "安装后被修改过",
-                "checked": "hash", "purpose": purpose}
-    return {"skill": sname, "kind": "safe", "label": "可安全卸载",
-            "checked": "hash", "purpose": purpose}
-
-
-# 兼容别名：语义就是「按用途判断」，旧名字保留给外部脚本
-inspect_skill = classify_skill
-
-
-def plugin_uninstall_plan(plugin_id: str, cfg: dict | None = None,
-                          purpose: str = "ui", always_hash: bool | None = None,
-                          scan_cache: "SkillScanCache | None" = None) -> dict:
-    """插件的卸载分级计划。
-
-    · 网页展示（purpose="ui"）用指纹，快
-    · 真正执行卸载（purpose="uninstall"）必须精确 —— 否则可能把
-      「其实已经被用户改过」的目录当 safe 搬进回收站
-    """
-    cfg = cfg or load_config()
-    spec = next((p for p in cfg.get("localPlugins", []) if p["name"] == plugin_id), None)
-    if not spec:
-        return {"ok": False, "error": f"市场里没有插件 {plugin_id}"}
-    own = load_ownership()          # 只读一次，别在循环里反复读文件
-    items = [classify_skill(plugin_id, s, cfg, own, purpose=purpose,
-                            always_hash=always_hash, scan_cache=scan_cache)
-             for s in spec.get("skills", [])]
-    counts = {}
-    for it in items:
-        counts[it["kind"]] = counts.get(it["kind"], 0) + 1
-    return {
-        "ok": True,
-        "plugin": plugin_id,
-        "purpose": purpose,
-        "items": items,
-        "counts": counts,
-        "removable": [i["skill"] for i in items if i["kind"] == "safe"],
-        "modified": [i["skill"] for i in items if i["kind"] == "modified"],
-        "untouched": [i["skill"] for i in items if i["kind"] in ("foreign", "other_plugin")],
-        "absent": [i["skill"] for i in items if i["kind"] == "absent"],
-    }
+# classify_skill / plugin_uninstall_plan / inspect_skill 已迁
+# workbuddy_market.uninstaller（v2.14 R5），此处 re-export（见上方 import 块）。
+# 它们对 core 注入点（quick_fingerprint / tree_hash / tx_*）的调用在包内
+# 走调用点晚绑定 —— patch core.X 依旧能拦到分类与卸载链路。
 
 
 # ---------------------------------------------------------------- 注册
@@ -1236,322 +1161,18 @@ def resolve_open_request(payload: dict) -> tuple[Path | None, str]:
 
 
 # ---------------------------------------------------------------- 安装 / 卸载
-
-
-def _stage_dir(sname: str) -> Path:
-    return SKILLS_DIR / f".{sname}.installing-{os.getpid()}"
-
-
-def _sweep_staging() -> int:
-    """清掉上次崩在中途留下的暂存目录。"""
-    n = 0
-    try:
-        for d in SKILLS_DIR.glob(".*.installing-*"):
-            if d.is_dir():
-                shutil.rmtree(d, ignore_errors=True)
-                n += 1
-    except OSError:
-        pass
-    return n
-
-
-def _stage_skill(src: Path, sname: str) -> Path:
-    """PREPARE + COPY + VERIFY：把 skill 完整复制到暂存目录并校验。
-
-    失败时清掉暂存并原样抛出 —— 此时**正式目录一点没动**。
-
-    链接防线（defense-in-depth）：打包阶段已经不跟随 symlink / junction，
-    但「正常流程不会产生」不等于「不可能发生」—— 手工往市场目录塞一个
-    重解析点就够了。而 `copytree(..., symlinks=False)` 会**跟随**链接，
-    把技能目录之外的内容复制进 ~/.workbuddy。所以这里三道：
-
-      1. 源目录里有任何重解析点 → 直接拒绝安装
-      2. copytree 用 symlinks=True（复制链接本身，绝不跟随）
-      3. 暂存副本里若出现重解析点 → 同样拒绝
-
-    和打包阶段连起来就是完整闭环：源 → 打包禁止 → 市场产物禁止 → 安装再禁一次。
-
-    返回 dict：`{"tmp", "index", "links", "bytes"}`。把暂存副本的索引一并交出去，
-    是因为落位后的内容与暂存**完全一致**（rename 不改内容也不改 mtime），
-    后续算所有权指纹 / 内容哈希可以直接用它，不必再扫一遍新版本。
-    """
-    tmp = _stage_dir(sname)
-    if tmp.exists():
-        shutil.rmtree(tmp, ignore_errors=True)
-    try:
-        si, s_links = _scan(src, on_error="raise")   # 看不见源内容就别谈"校验通过"
-        if s_links:
-            raise OSError(
-                f"源目录含 {len(s_links)} 个符号链接 / junction，拒绝安装：{s_links[:3]}"
-            )
-        shutil.copytree(src, tmp, symlinks=True)
-        if not (tmp / "SKILL.md").is_file():
-            raise OSError("暂存目录里没有 SKILL.md")
-        ti, t_links = _scan(tmp, on_error="raise")
-        if t_links:
-            raise OSError(
-                f"暂存副本里出现 {len(t_links)} 个符号链接 / junction，拒绝安装：{t_links[:3]}"
-            )
-        if set(si) != set(ti):
-            miss = sorted(set(si) - set(ti))[:3]
-            raise OSError(f"暂存内容不完整，缺少 {miss}")
-        for rel, (sz, _mt) in si.items():
-            if ti[rel][0] != sz:
-                raise OSError(f"暂存文件大小与源不符：{rel}")
-        return {"tmp": tmp, "index": ti, "links": t_links,
-                "bytes": sum(v[0] for v in ti.values())}
-    except BaseException:
-        shutil.rmtree(tmp, ignore_errors=True)
-        raise
-
-
-def _commit_staged(tmp: Path, dst: Path, sname: str,
-                   index: "TrashIndex | None" = None) -> None:
-    """COMMIT：把暂存目录原子换到正式位置；换失败就把旧版本放回去。
-
-    顺序很重要 —— **先复制好、校验过，再动旧版本**。
-    v2 是反过来的（先把旧的搬走再复制新的），所以复制一旦失败，
-    旧版本躺在回收站、新版本没写上，本机 skill 直接消失。
-    """
-    trashed = None
-    if dst.exists():
-        trashed = move_to_trash(dst, "reinstall", index=index)
-        if trashed is None:
-            raise OSError("旧目录无法移入回收站，未改动")
-    try:
-        os.replace(str(tmp), str(dst))
-    except OSError:
-        if trashed is not None:
-            try:
-                shutil.move(str(trashed), str(dst))
-                log("warn", "install", f"{sname} 落位失败，已把旧版本放回原位")
-            except OSError as exc:
-                log("error", "install",
-                    f"{sname} 落位失败且回滚也失败：{exc}；旧版本仍在 {trashed}")
-        raise
-
-
-def install_local_plugin(plugin_id: str, mode: str = "missing") -> dict:
-    """把插件的 skill 装到 ~/.workbuddy/skills/。
-
-    mode:
-      missing（默认）只补缺，已有的一律不碰
-      update      补缺 + 覆盖「本市场装的且内容已变」的
-      force       补缺 + 覆盖全部同名目录
-
-    每个 skill 都走「暂存 → 校验 → 换位」两阶段：任何一步失败，
-    本机原来的那份**原样还在**。三种模式都绝不静默覆盖非本市场安装的 skill。
-    """
-    if mode not in INSTALL_MODES:
-        return {"ok": False, "error": f"未知安装模式 {mode}（可选：{', '.join(INSTALL_MODES)}）"}
-
-    with locked():
-        op = f"install-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-        try:
-            cfg = load_config()
-        except ConfigError as exc:
-            return {"ok": False, "error": f"配置不可用：{exc}"}
-        spec = next((p for p in cfg.get("localPlugins", []) if p["name"] == plugin_id), None)
-        if not spec:
-            return {"ok": False, "error": f"市场里没有插件 {plugin_id}"}
-
-        # 先把上一次未完成的事务补上（比如上次正好卡在
-        # 「文件已落位、所有权还没写」那一步）
-        rec = recover_transactions(quiet=True)
-        recovered = rec["recovered"]
-
-        src_root = PLUGINS_DIR / plugin_id / "skills"
-        if not src_root.is_dir():
-            _sync_packaging(quiet=True)
-        if not src_root.is_dir():
-            return {"ok": False, "error": f"插件 {plugin_id} 尚未打包，请先运行同步"}
-
-        SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-
-        version = spec.get("version", "1.0.0")
-        own = load_ownership()
-        added, updated, skipped, foreign, failed, warnings = [], [], [], [], [], []
-        expected_by_skill = {}          # 换位前算好的「期望状态」，收尾直接复用
-        trash_index = TrashIndex()      # 整批只落一次回收站索引
-
-        # 事务日志**必须早于任何磁盘变更**。哪怕后面一个 skill 都不用装，
-        # 也只是一份空日志，收尾时会被删掉 —— 代价是一次原子写，
-        # 换来的是「从这里起无论死在哪一行都有凭证」。
-        tx = tx_begin("install", plugin_id, spec.get("skills", []),
-                      version=version, mode=mode)
-
-        try:
-            for sname in spec.get("skills", []):
-                src = src_root / sname
-                if not (src / "SKILL.md").is_file():
-                    continue
-                dst = SKILLS_DIR / sname
-                try:
-                    ensure_child(SKILLS_DIR, dst)
-                except ConfigError as exc:
-                    failed.append(f"{sname}: {exc}")
-                    continue
-
-                # 安装决策必须精确：指纹只服务网页显示，绝不用来决定要不要覆盖
-                kind = classify_skill(plugin_id, sname, cfg, own, purpose="install")["kind"]
-
-                if kind == "foreign" or kind == "other_plugin":
-                    foreign.append(sname)
-                    continue
-                if kind == "absent":
-                    action = "add"
-                elif mode == "missing" or (mode == "update" and kind == "safe"):
-                    skipped.append(sname)
-                    continue
-                else:
-                    action = "update"
-
-                # 两阶段：先备好新的，再动旧的
-                try:
-                    st = _stage_skill(src, sname)
-                except (OSError, shutil.Error) as exc:
-                    failed.append(f"{sname}: 暂存失败（本机版本未改动）：{exc}")
-                    continue
-
-                # 先算出「换位之后应该长什么样」，**在动正式目录之前落盘**。
-                # 中间那一步 os.replace 成功但进程随即死掉，靠的就是这份 expected。
-                expected = {
-                    "hash": tree_hash_from_index(st["tmp"], st["index"]),
-                    "fingerprint": fingerprint_from_index(st["index"], st["links"]),
-                }
-                tx_note_staged(tx, sname, expected,
-                               plugin=plugin_id, version=version)
-
-                try:
-                    _commit_staged(st["tmp"], dst, sname, index=trash_index)
-                except OSError as exc:
-                    shutil.rmtree(st["tmp"], ignore_errors=True)
-                    failed.append(f"{sname}: 落位失败：{exc}")
-                    continue
-
-                tx_note_committed(tx, sname)     # 交付确认
-                expected_by_skill[sname] = expected
-
-                (added if action == "add" else updated).append(sname)
-                log("info", "install", f"{sname} {'新增' if action == 'add' else '更新'}完成",
-                    op_id=op)
-
-            done = added + updated
-            if done:
-                try:
-                    # 这些 hash / 指纹就是上面刚算过的，不用再读一遍新版本
-                    record_owner(plugin_id, done, version,
-                                 snapshots={s: expected_by_skill[s]
-                                            for s in done if s in expected_by_skill})
-                    for s in done:
-                        tx_drop(tx, s)
-                except (OSError, ConfigError) as exc:
-                    # 文件已经装好了，只是账没记上。如实报告，但**不能**谎称成功
-                    # 之后什么都没发生 —— 日志会保留，下次启动自动补记。
-                    warnings.append(
-                        f"所有权记录写入失败：{exc}（已记入事务日志，"
-                        "下次启动/下次安装会自动补记）")
-                    log("error", "install", warnings[-1], op_id=op)
-
-            msg = (f"{plugin_id}[{mode}]: 新增 {len(added)} 更新 {len(updated)} "
-                   f"跳过 {len(skipped)} 非本市场 {len(foreign)} 失败 {len(failed)}")
-            log("warn" if (failed or warnings) else "info", "install", msg, op_id=op)
-            return {"ok": True, "mode": mode, "op": op, "added": added, "updated": updated,
-                    "skipped": skipped, "foreign": foreign, "failed": failed,
-                    "warnings": warnings, "recovered": recovered,
-                    "tx": tx["id"]}
-        finally:
-            # 账清干净了就删日志；还有没结的，就把日志交还给恢复流程 ——
-            # 必须显式释放，否则这个 id 会一直挂在 _TX_ACTIVE 里，同进程的
-            # recover_transactions() 反而看不见它。
-            if tx_settled(tx):
-                tx_close(tx)
-            else:
-                tx_release(tx)
-            trash_index.flush()         # 整批搬移只写一次索引
-
-
-def uninstall_local_plugin(plugin_id: str, force: bool = False) -> dict:
-    """卸载。**只动本市场装的**，用户自己的和别的插件的绝不碰。
-
-    分级：
-      safe      本市场装的且没被改过  → 移入回收站
-      modified  装过但被改过          → 默认保留，force=True 才移走
-      foreign   不是本市场装的        → 永不移动
-
-    和安装共用同一套事务模型：搬走之前就有日志，搬走之后立刻登记
-    pendingForget，`forget_owner()` 成功才清账。崩在中间的话，下次恢复
-    会看到「目录已不在 + 所有权还在」并把账补平 —— 而不是留下
-    「文件没了、ownership 还认着它」这种半截状态。
-    """
-    with locked():
-        try:
-            cfg = load_config()
-        except ConfigError as exc:
-            return {"ok": False, "error": f"配置不可用：{exc}"}
-        # 卸载前先把上一次没记完的账补上，否则分级会不准
-        recovered = recover_transactions(quiet=True)["recovered"]
-        # 卸载是要真的把用户目录搬走，必须用精确判定，不看指纹
-        plan = plugin_uninstall_plan(plugin_id, cfg, purpose="uninstall")
-        if not plan.get("ok"):
-            return plan
-
-        moved, kept, warnings = [], [], []
-        trash_index = TrashIndex()
-        tx = tx_begin("uninstall", plugin_id, plan.get("removable", []) + plan.get("modified", []),
-                      force=force)
-        try:
-            for item in plan["items"]:
-                sname, kind = item["skill"], item["kind"]
-                if kind in ("foreign", "other_plugin"):
-                    kept.append({"skill": sname, "why": item["label"]})
-                    continue
-                if kind == "absent":
-                    continue
-                if kind == "modified" and not force:
-                    kept.append({"skill": sname, "why": "安装后被修改过，未移除"})
-                    continue
-                d = SKILLS_DIR / sname
-                try:
-                    ensure_child(SKILLS_DIR, d)      # 删除前最后一道闸
-                except ConfigError as exc:
-                    kept.append({"skill": sname, "why": f"路径越界，拒绝处理：{exc}"})
-                    continue
-                reason = "uninstall" if kind == "safe" else "uninstall-modified"
-                if not move_to_trash(d, reason, index=trash_index):
-                    continue
-                # 搬走成功就立刻登记 —— 此刻所有权还留着，日志就是「还没清」的凭证
-                tx_note_removed(tx, sname)
-                moved.append(sname)
-
-            if moved:
-                try:
-                    # 一次把所有权全清掉（forget_owner 内部只写一次文件）
-                    forget_owner(moved)
-                    tx["pendingForget"] = []
-                except (OSError, ConfigError) as exc:
-                    warnings.append(
-                        f"所有权记录未能清除：{exc}（已记入事务日志，下次启动会自动补清）")
-                    log("error", "uninstall", warnings[-1])
-
-            log("warn" if dropped(plan, force) else "info", "uninstall",
-                f"{plugin_id}: 移除 {len(moved)}，保留 {len(kept)}"
-                + (f"（{'、'.join(moved)}）" if moved else ""))
-            return {"ok": True, "moved": moved, "kept": kept,
-                    "trash": str(TRASH_DIR), "force": force, "recovered": recovered,
-                    "warnings": warnings,
-                    "plan": {k: plan[k] for k in ("counts", "removable", "modified", "untouched")}}
-        finally:
-            if tx_settled(tx):
-                tx_close(tx)
-            else:
-                tx_release(tx)
-            trash_index.flush()         # 整批搬移只写一次索引
-
-
-def dropped(plan: dict, force: bool) -> bool:
-    """这次卸载是否真的动了东西（决定日志级别）。"""
-    return bool(plan.get("removable")) or (force and bool(plan.get("modified")))
+# 已迁 workbuddy_market.installer / workbuddy_market.uninstaller
+# （v2.14 R5），此处 re-export（见上方 import 块）。
+#
+# 注入点语义（selftest 逐项盯防，见两模块 docstring）：
+#   · 仍定义在 core：quick_fingerprint / tree_hash / tree_hash_from_index
+#     （_scan 注入点纪律，只搬不改）；
+#   · 已迁包、经 core 晚绑定调用：_scan / tx_* / recover_transactions /
+#     _sync_packaging / classify_skill / _stage_skill / _commit_staged ——
+#     patch core.X 对安装 / 卸载链路的拦截与迁移前一致；
+#   · 已迁包、patch 落点随迁：move_to_trash → wm.trash、
+#     save_ownership → wm.ownership（R4 起）、classify_skill 等包内互调 →
+#     wm.uninstaller（R5 起）。
 
 
 # ---------------------------------------------------------------- 自检

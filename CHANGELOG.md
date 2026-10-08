@@ -4,6 +4,43 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.14.0 — 2026-10-08（R5：installer / uninstaller 迁包 + manifest 协议讨论稿）
+
+**R5 模块化**（逐字搬迁，行为零变化；core 1755 → 1379 行）
+- `classify_skill` / `inspect_skill` / `plugin_uninstall_plan` /
+  `uninstall_local_plugin` / `dropped` 迁 `workbuddy_market/uninstaller.py`；
+- `_stage_dir` / `_sweep_staging` / `_stage_skill` / `_commit_staged` /
+  `install_local_plugin` / `INSTALL_MODES` 迁
+  `workbuddy_market/installer.py`；
+- 对 core 注入点（`_scan` / `quick_fingerprint` / `tree_hash` /
+  `tree_hash_from_index` / `tx_*` / `recover_transactions` /
+  `_sync_packaging` / `record_owner` / `_sync` 组合层）一律**调用点
+  晚绑定 `import market_core`** —— 与 R4 同一纪律，patch `core.X`
+  对安装/卸载链路的拦截语义与迁移前完全一致；
+- patch 落点随迁：`classify_skill` 等包内互调 → `wm.uninstaller`、
+  安装内部符号 → `wm.installer`；`quick_fingerprint` / `tree_hash*` /
+  `build_state` 仍留 core（_scan 注入点纪律不变）；
+- 24B 盯防清单扩展 8 项（installer / uninstaller 符号的模块归属）。
+- 契约回归要点：20B「tx_begin 失败 → OSError 硬失败、磁盘零改动」、
+  第 21/22 节崩溃矩阵（`core._scan` / `tree_hash` /
+  `quick_fingerprint` / `tx_note_committed` / `record_owner` 注入）
+  全部经真实流水线验证通过。
+
+**manifest 协议讨论稿**（v3-roadmap P0-2，只定稿讨论、不含实现）
+- 新增 `docs/plugin-spec.md`：Market Package 第四层抽象
+  （WorkBuddy Skill / Plugin / GitHub Repo 之外）——包布局、
+  manifest.json schema v0.1、与现有安全模型的衔接
+  （trust 与 integrity 正交、source.ref 即 sourceCommit 的包级形态、
+  跨卷结构校验可升级为逐文件哈希）、installer 视角的生命周期、
+  6 项开放问题（immutable artifact 来源、规范化 JSON、签名、
+  平台策略、ghpm 过渡、依赖解析时机）。
+
+**自检**：545 → 560 项（第 29 节 9 项 + 24B 扩展 8 项 − 2 项随迁合并：
+installer/uninstaller re-export 同一性、`core.quick_fingerprint` /
+`core.tx_begin` 注入拦到包内编排的晚绑定端到端、迁移后安装/卸载
+全流程回归；`core._stage_skill` / `_commit_staged` 的归属断言随迁
+至「已迁包」清单）。
+
 ## 2.13.0 — 2026-10-08（跨卷原子化 + API v1 + doctor + v3.0 路线定稿）
 
 **跨卷回收站搬移原子化**（评审 P0：数据安全）
