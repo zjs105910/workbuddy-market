@@ -50,6 +50,10 @@
            构建证明 attestation（build_one 对账 / patch-registry 回写 /
            registry 成套采纳 / fail-closed）、detect_host_version、
            cli verify 端到端
+第 35 节   v2.21：收藏（本机持久化 / 形状不可信 / casefold 去重）、
+           注册表结构化解析（嵌套 source/artifact/compatibility/trust/
+           quality 与平铺等价）、截图域名白名单（fail-closed）、
+           cli list / search 包级查询
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -69,7 +73,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.20"
+SELFTEST_VERSION = "2.21"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -570,6 +574,95 @@ def run() -> None:
 
     # ============ 34. v2.20：permissions / 兼容性检测 / 构建证明 ============
     round19()
+
+    # ============ 35. v2.21：收藏 / 注册表结构化 / 截图 / CLI 查询 ============
+    round20()
+
+
+def round20():
+    """v2.21：收藏 / 注册表结构化解析 / 截图域名白名单 / CLI list·search。
+
+    评审 #9/#12/#13/#22（dsh-market 对比走查）的当轮落地：
+    1. 收藏（favorites）：本机持久化、形状不可信当空、原子写、casefold 去重；
+    2. 注册表结构化：嵌套 source/artifact/compatibility/trust/quality
+       与平铺等价解析，回写平铺零迁移；
+    3. 截图：只收 https 且 GitHub 系域名（fail-closed，防外链追踪）；
+    4. CLI list / search：包级能力，不依赖 clone 布局。
+    """
+    section("35. v2.21：收藏 / 注册表结构化 / 截图 / CLI 查询")
+    import contextlib
+    import io as _io20
+    import workbuddy_market.favorites as fav
+    import workbuddy_market.registry as wr
+
+    # --- 35A. 收藏：本机持久化 + 形状不可信 + casefold 去重
+    fav_path = fav.FAVORITES_PATH
+    ck("★ 收藏落盘在 STATE_HOME（Local-first，不进 Git）",
+       ".workbuddy-market" in str(fav_path) or str(fav_path).startswith(str(_TMP)))
+    ck("★ 符号同一性：core 只 re-export favorites",
+       core.load_favorites is fav.load_favorites
+       and core.set_favorite is fav.set_favorite
+       and core.is_favorite is fav.is_favorite)
+    ck("收藏：初始为空（坏文件 / 不存在都当空）",
+       fav.load_favorites() == [])
+    r = fav.set_favorite("Anthropics/Skills", True)
+    ck("★ 收藏：加一条 → 大小写归一，重加不重复",
+       r == ["Anthropics/Skills"] and fav.is_favorite("anthropics/skills"))
+    r = fav.set_favorite("anthropics/skills", True)
+    ck("收藏：同 repo 不同大小写重复收藏 → 仍只一条",
+       len(r) == 1)
+    r = fav.set_favorite("Anthropics/Skills", False)
+    ck("★ 收藏：取消 → 列表清空", r == [] and not fav.is_favorite("anthropics/skills"))
+
+    # --- 35B. 注册表结构化：嵌套与平铺等价
+    nested = {"schema": 1, "plugins": [{
+        "repo": "owner/repo", "displayName": "Nested", "category": "工具",
+        "source": {"type": "github", "repo": "owner/repo", "commit": "abc123"},
+        "artifact": {"url": "https://x/y.zip", "sha256": "a" * 64,
+                     "size": 123, "version": "1.2.0"},
+        "compatibility": {"workbuddy": ">=5.7",
+                          "platforms": ["windows", "linux"]},
+        "trustObj": {"level": "reviewed"},
+        "quality": {"score": 93, "tests": True, "lastVerified": "2026-10-08"},
+        "screenshots": ["https://user-images.githubusercontent.com/a.png",
+                        "https://evil.com/b.png", "http://github.com/c.png"],
+    }]}
+    e = wr.parse_registry(nested)["plugins"][0]
+    ck("★ 注册表结构化：source.commit → sourceCommit",
+       e.get("sourceCommit") == "abc123")
+    ck("★ 注册表结构化：artifact.url/sha256/size/version 成套采纳",
+       e.get("packageUrl") == "https://x/y.zip" and e.get("packageHash") == "a" * 64
+       and e.get("packageSize") == 123 and e.get("version") == "1.2.0")
+    ck("★ 注册表结构化：compatibility → platforms/minWorkBuddyVersion",
+       e.get("platforms") == ["windows", "linux"]
+       and e.get("minWorkBuddyVersion") == ">=5.7")
+    ck("★ 注册表结构化：trustObj.level → trust；quality 三字段",
+       e.get("trust") == "reviewed" and e.get("qualityScore") == 93
+       and e.get("qualityTests") is True
+       and e.get("qualityLastVerified") == "2026-10-08")
+
+    # --- 35C. 截图域名白名单（fail-closed）
+    ck("★ 截图：GitHub 系 https 放行",
+       wr._github_image_url("https://user-images.githubusercontent.com/x/a.png")
+       and wr._github_image_url("https://raw.githubusercontent.com/o/r/main/a.png"))
+    ck("★ 截图：非 GitHub 域名 / http / 伪装域名全部拒绝",
+       not wr._github_image_url("https://evil.com/a.png")
+       and not wr._github_image_url("http://github.com/a.png")
+       and not wr._github_image_url("https://github.com.evil.com/a.png")
+       and not wr._github_image_url("https://github.io/a.png"))
+    ck("★ 截图：解析后只保留 GitHub 系（fail-closed 过滤）",
+       e.get("screenshots") == ["https://user-images.githubusercontent.com/a.png"])
+
+    # --- 35D. CLI list / search：包级能力，不依赖 clone 布局
+    from workbuddy_market import cli as wcli
+    with contextlib.redirect_stdout(_io20.StringIO()) as buf:
+        rc = wcli.main(["list", "--json"])
+    ck("★ cli list：退出码 0 且 JSON 可解析",
+       rc == 0 and json.loads(buf.getvalue()).get("source") is not None)
+    with contextlib.redirect_stdout(_io20.StringIO()) as buf2:
+        rc2 = wcli.main(["search", "pdf"])
+    ck("★ cli search：退出码 0 且命中输出",
+       rc2 == 0 and "pdf" in buf2.getvalue().lower())
 
 
 def round19():
@@ -3041,7 +3134,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.20.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.21.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3122,9 +3215,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.20.0"
-       and core.MARKET_VERSION == "2.20.0"
-       and SELFTEST_VERSION == "2.20", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.21.0"
+       and core.MARKET_VERSION == "2.21.0"
+       and SELFTEST_VERSION == "2.21", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")

@@ -64,6 +64,11 @@ v2.16 包安装链路：
   哈希校验（对不上整包拒绝，无放行）→ verify_package → 两阶段事务安装。
   条目没有成套 artifact 字段时任务失败并提示走 /api/remote/add。
   哈希钉死的那一份不存在上游漂移，因此无需 remote/add 的 409 闸门。
+
+v2.21 收藏（评审 #13）：
+  POST /api/favorites        {repo, on} 加 / 取消收藏（本机持久化，Local-first）；
+                             返回最新收藏列表。GET /api/registry 的响应新增
+                             favorites 字段（收藏的 repo 列表）供前端渲染。
 """
 from __future__ import annotations
 
@@ -803,6 +808,7 @@ def registry_data(force: bool = False) -> dict:
 def _registry_fresh(force: bool) -> dict:
     reg = core.get_registry(force=force)
     reg["installedRepos"] = core.installed_repos()
+    reg["favorites"] = core.load_favorites()      # 本机收藏（v2.21，评审 #13）
     reg["ttlHours"] = int(core.REGISTRY_TTL // 3600)
     reg["ok"] = True
     return reg
@@ -1117,6 +1123,18 @@ class Handler(BaseHTTPRequestHandler):
                                        f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
                                        "请等当前任务完成或取消它"}, 429)
                 return self._json({"ok": True, "jobId": jid})
+            if path == "/api/favorites":
+                # 收藏（v2.21，评审 #13）：本机持久化，Local-first。
+                # repo 合法性走内核 validate_repo（输入边界只有一处），
+                # on=true 加收藏 / on=false 取消；返回最新收藏列表供前端刷新。
+                repo, err2 = _repo_arg(body)
+                if err2:
+                    return self._json({"ok": False, "error": err2}, 400)
+                on = bool(body.get("on"))
+                favs = core.set_favorite(repo, on)
+                invalidate_registry_mem()
+                return self._json({"ok": True, "repo": repo, "on": on,
+                                   "favorites": favs})
             if path.startswith("/api/job/") and path.endswith("/cancel"):
                 jid = path[len("/api/job/"):-len("/cancel")].strip("/")
                 if not jid:

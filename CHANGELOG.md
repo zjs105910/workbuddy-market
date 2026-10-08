@@ -4,6 +4,48 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.21.0 — 2026-10-08（产品化轮：收藏 / 截图 / 更新中心 / CLI 补全 / 注册表结构化）
+
+外部评审 #2（dsh-market 对比走查）的产品差距项当轮落地。定位从
+「本机插件管理器」进一步明确为 **local-first / secure / reproducible
+marketplace**（评审第 25 节），内核不动、产品层补齐发现与管理的闭环。
+
+**收藏（评审 #13）**
+- 新增 `workbuddy_market/favorites.py`：本机持久化收藏（`STATE_HOME/
+  favorites.json`），Local-first 不上传；形状不可信当空、casefold 去重、
+  原子写（半截 JSON 绝不落盘）；收藏的是社区目录里的上游 repo，与
+  installed 解耦（收藏 ≠ 装过）；
+- Web：卡片加 ♥ 收藏按钮 + 「我的收藏」筛选 chip；`GET /api/registry`
+  响应新增 `favorites`；`POST /api/favorites {repo, on}` 加/取消收藏
+  （repo 过内核 validate_repo，输入边界只留一处）。
+
+**截图（评审 #12）**
+- 注册表条目新增可选 `screenshots`（字符串数组）；解析层 **fail-closed**
+  只收 https 且 GitHub 系域名（github.com / raw / user-images /
+  avatars / media / objects *.githubusercontent.com），防外链追踪与
+  恶意图片源；Web 卡片缩略图 + 详情画廊，点击新标签页开原图。
+
+**更新中心（评审 #15）**
+- Web 顶部「更新中心」：聚合所有「已装且上游前移」的社区条目
+  （当前 sha vs 注册表 latestSha），逐条显示 当前→目标，一键更新
+  （复用 ghpm 事务/回滚链路）。
+
+**CLI 补全（评审 #22）**
+- 新增包级子命令 `workbuddy-market list` / `search <kw>`：不开网页
+  也能逛社区目录；读注册表（三级兜底），支持 --category / --json；
+  与 doctor / verify 同层，不依赖 clone 布局。
+
+**注册表结构化（评审 #9）**
+- 解析层兼容嵌套结构 `source{type,repo,commit}` / `artifact{url,sha256,
+  size,signature}` / `compatibility{workbuddy,platforms,permissions}` /
+  `trustObj{level}` / `quality{score,tests,lastVerified}`，与平铺写法
+  等价，统一回写平铺（前端与既有 CI 零迁移）；新增 `packageSize` /
+  `qualityScore` / `qualityTests` / `qualityLastVerified` 平铺字段。
+
+- 自检 692 → 707 项（第 35 节 15 项：收藏持久化/去重、注册表嵌套与
+  平铺等价、截图域名白名单 fail-closed、CLI list/search 端到端）；
+  pytest 37 项不变。
+
 ## 2.20.0 — 2026-10-08（供应链安全轮：permissions / 兼容性检测 / 构建证明）
 
 外部评审 #2（dsh-market 对比走查）与既定 v2.20 供应链计划的交集当轮

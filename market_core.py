@@ -138,6 +138,9 @@ from workbuddy_market.application import (   # noqa: E402,F401  （v2.19 R6 收�
     sync_packaging, _sync_packaging, build_plugin_json, _plugin_readme,
     OPEN_TARGETS, resolve_open_request, deep_check, selfcheck, main,
 )
+from workbuddy_market.favorites import (     # noqa: E402,F401  （v2.21 新增）
+    load_favorites, is_favorite, set_favorite,
+)
 
 # re-export 纪律（R4 起的既定决策，v2.19 依然成立）：
 #   · 注入点晚绑定要求 re-export 在先 —— state / application 对

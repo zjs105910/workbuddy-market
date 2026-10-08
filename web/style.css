@@ -200,3 +200,31 @@
   .empty{text-align:center;color:var(--faint);padding:44px 20px;font-size:13.5px}
   footer{margin-top:34px;text-align:center;color:var(--faint);font-size:11.5px;line-height:2}
   footer code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+
+  /* 截图（v2.21，评审 #12）：卡片缩略图 + 详情画廊。只收 GitHub 系域名，
+     由注册表解析层 fail-closed 过滤，前端只负责渲染。 */
+  .shots{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 11px}
+  .shots img{
+    height:72px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel-2);object-fit:cover;cursor:zoom-in;transition:.15s;
+  }
+  .shots img:hover{transform:scale(1.04);border-color:var(--accent-line)}
+  .shots.gallery img{height:auto;max-width:100%;cursor:default;border-radius:10px}
+
+  /* 收藏按钮（v2.21，评审 #13）：本机持久化，Local-first。 */
+  button.fav{border-color:var(--line);color:var(--faint);padding:5px 10px;font-size:12.5px}
+  button.fav.on{color:var(--warn);border-color:var(--warn-line);background:var(--warn-soft)}
+
+  /* 更新中心（v2.21，评审 #15）：聚合所有可更新条目。 */
+  .update-banner{
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    background:var(--accent-soft);border:1px solid var(--accent-line);
+    border-radius:11px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:#2c4a86;
+  }
+  .update-banner .n{font-weight:700}
+  .update-row{display:flex;gap:8px;align-items:center;padding:8px 2px;
+              border-bottom:1px dashed var(--line);font-size:13px}
+  .update-row:last-child{border-bottom:none}
+  .update-row .repo{color:var(--muted);font-size:12px}
+  .update-row .arrow{color:var(--faint)}
+  .update-row code{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}

@@ -112,6 +112,75 @@ def _verify_main(argv: list) -> int:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _registry_list_main(argv: list) -> int:
+    """``workbuddy-market list`` / ``workbuddy-market search <kw>`` —— 社区目录查询。
+
+    评审 #22 的 CLI 补全：让用户不开网页也能逛市场。都是**包级能力**
+    （不依赖 clone 布局）：读注册表（在线拉取，三级兜底到本地副本），
+    输出精简表格。``list`` 按收录顺序全列，``search`` 按关键词在
+    displayName / repo / description / keywords 里模糊匹配。
+    退出码：0 = 成功；1 = 注册表不可用。
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="workbuddy-market " + ("list" if argv and argv[0] == "list" else "search"),
+        description="浏览社区目录（注册表）：list 全列 / search 关键词搜索")
+    if argv and argv[0] == "search":
+        ap.add_argument("keyword", help="搜索关键词（匹配名称 / 仓库 / 描述 / 关键词）")
+    ap.add_argument("--json", action="store_true", help="以 JSON 输出")
+    ap.add_argument("--category", help="只列某个分类")
+    args = ap.parse_args(argv[1:] if argv else [])
+
+    from .registry import get_registry          # noqa: PLC0415
+    from .favorites import load_favorites       # noqa: PLC0415
+
+    try:
+        reg = get_registry()
+    except Exception as exc:                     # noqa: BLE001 —— 三路全挂
+        print(f"社区注册表不可用：{exc}", file=sys.stderr)
+        return 1
+
+    plugins = reg.get("plugins") or []
+    favs = {r.casefold() for r in load_favorites()}
+    kw = (args.keyword or "").strip().lower() if argv and argv[0] == "search" else ""
+    cat = (args.category or "").strip()
+
+    rows = []
+    for e in plugins:
+        if cat and e.get("category") != cat:
+            continue
+        if kw:
+            hay = " ".join([e.get("displayName", ""), e.get("displayNameEn", ""),
+                            e.get("repo", ""), e.get("description", ""),
+                            " ".join(e.get("keywords") or [])]).lower()
+            if kw not in hay:
+                continue
+        rows.append(e)
+
+    if args.json:
+        import json
+        print(json.dumps({"source": reg.get("source"), "stale": reg.get("stale"),
+                          "count": len(rows), "items": rows},
+                         ensure_ascii=False, indent=2))
+        return 0
+
+    if not rows:
+        print("没有匹配的条目。")
+        return 0
+    print(f"社区目录 {len(rows)} 条（来源：{reg.get('source')}"
+          f"{'，数据非最新' if reg.get('stale') else ''}）：")
+    for e in rows:
+        star = f"★{e['stars']}" if e.get("stars") else "  ·"
+        fav = "♥" if e.get("repo", "").casefold() in favs else " "
+        trust = {"official": "官方", "reviewed": "已审", "external": "未审"}.get(e.get("trust"), "未审")
+        print(f"  [{trust}] {e.get('displayName', e.get('repo'))}  "
+              f"({e.get('repo')})  {star}  {fav}")
+        if e.get("description"):
+            print(f"      {e['description'][:80]}")
+    return 0
+
+
 def main(argv: list | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Windows 控制台默认代码页（GBK / cp1252）打不出中文 —— argparse 的
@@ -138,6 +207,11 @@ def main(argv: list | None = None) -> int:
     # 命令行入口，与 Web 端风险预览同一套纯函数。
     if argv and argv[0] == "verify":
         return _verify_main(argv[1:])
+
+    # list / search（v2.21，评审 #22）：社区目录的包级查询能力 ——
+    # 不开网页也能逛市场，与 doctor / verify 同层，不依赖 clone 布局。
+    if argv and argv[0] in ("list", "search"):
+        return _registry_list_main(argv)
 
     if root is None:
         print("workbuddy-market: 当前目录不在 workbuddy-market 的 clone 里"

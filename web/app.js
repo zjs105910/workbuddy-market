@@ -1,7 +1,7 @@
 const $ = s => document.querySelector(s);
 let STATE = null, CATALOG = null, CATALOG_STALE = false, cat = "全部", filter = "all", jobs = {};
 let GH = {q:null, items:null, state:"idle", error:""}, ghTimer = null;
-let REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}};   // 社区注册表（v2.11）
+let REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}, favorites:[]};   // 社区注册表（v2.11；v2.21 增 favorites）
 
 const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","设计":"◆","科研":"⚛","效率":"⚡","商业":"¥","安全":"🛡","未分类":"◇"};
 const iconOf = c => ICON[c] || "◇";
@@ -141,6 +141,11 @@ function render(){
 
   $("#btnTrash").textContent = "回收站" + (st.trash.count ? " ("+st.trash.count+")" : "");
 
+  // 更新中心（v2.21）：有可更新插件时才露出，点击弹出聚合视图。
+  const updCount = regUpdatable().length;
+  const bu = $("#btnUpdate");
+  if(bu){ bu.style.display = updCount ? "" : "none"; bu.textContent = "更新中心 ("+updCount+")"; }
+
   let hint = "";
   if(!st.registered){
     hint = '<div class="hint">点右上角 <b>「注册到 WorkBuddy」</b>，本市场就会出现在 WorkBuddy 自带的插件面板里，'+
@@ -162,6 +167,7 @@ function render(){
 }
 
 function pass(p){
+  if(filter === "fav") return false;   // 收藏只对社区目录有意义（v2.21）
   if(cat !== "全部" && p.category !== cat) return false;
   if(filter === "done" && !p.installed) return false;
   if(filter === "todo" && p.installed) return false;
@@ -366,6 +372,7 @@ function regPass(e){
   if(cat !== "全部" && e.category !== cat) return false;
   if(filter === "done" && !isRegInstalled(e.repo)) return false;
   if(filter === "todo" && isRegInstalled(e.repo)) return false;
+  if(filter === "fav" && !isFav(e.repo)) return false;   // 我的收藏（v2.21）
   const q = $("#q").value.trim().toLowerCase();
   if(!q) return true;
   const hay = [e.displayName,e.displayNameEn,e.repo,e.description,e.category,(e.keywords||[]).join(" ")]
@@ -377,9 +384,35 @@ function isRegInstalled(repo){
   return !!(REG.installedRepos && REG.installedRepos[repo]);
 }
 
+/* ---------------- 收藏（v2.21，评审 #13） ----------------
+   本机持久化：收藏的是「社区目录里的上游 repo」，与 installed 解耦。
+   Local-first —— 数据只在 STATE_HOME/favorites.json，不上传。 */
+function favSet(){ return new Set((REG.favorites||[]).map(r => String(r).toLowerCase())); }
+function isFav(repo){ return favSet().has(String(repo).toLowerCase()); }
+
+/* ---------------- 更新中心（v2.21，评审 #15） ----------------
+   聚合所有「已装且上游有新提交」的社区条目：当前装到的 sha 与注册表
+   latestSha 不同即视为有更新。dsh-market 是逐插件更新 + 全部更新，
+   这里先做「聚合 + 逐条检查更新」——更新动作复用既有的 /api/remote/update。 */
+function regUpdatable(){
+  const out = [];
+  for(const e of (REG.plugins||[])){
+    const inst = REG.installedRepos && REG.installedRepos[e.repo];
+    if(!inst) continue;                       // 没装过的谈不上更新
+    const cur = (inst.sha_short||"").toLowerCase();
+    const lat = String(e.latestSha||"").slice(0,7).toLowerCase();
+    if(cur && lat && cur !== lat){
+      out.push({repo:e.repo, displayName:e.displayName||e.repo,
+                current:cur, latest:lat, trust:e.trust});
+    }
+  }
+  return out;
+}
+
 function cardRegistry(e){
   const inst = isRegInstalled(e.repo);
   const info = inst ? REG.installedRepos[e.repo] : null;
+  const fav = isFav(e.repo);
   const stTxt = inst
     ? '<span class="state ok">● 已装 '+esc(info.name||"")+(info.sha_short? ' · '+esc(info.sha_short):"")+'</span>'
     : '<span class="state">○ 未安装</span>';
@@ -390,6 +423,12 @@ function cardRegistry(e){
   const title = okLink
     ? '<a href="'+attr(href)+'" target="_blank" rel="noopener" style="color:inherit">'+esc(e.displayName)+'</a>'
     : esc(e.displayName);
+  const shots = (e.screenshots||[]).slice(0,1);   // 卡片只放首图，完整画廊在详情
+  const shotsHtml = shots.length
+    ? '<div class="shots">'+shots.map(s =>
+        '<img src="'+attr(s)+'" alt="'+esc(e.displayName)+'" loading="lazy" '+
+        'referrerpolicy="no-referrer" data-shot="'+attr(s)+'">').join("")+'</div>'
+    : '';
   return '<div class="card">'+
     '<div class="card-head">'+
       '<div class="icon">'+iconOf(e.category)+'</div>'+
@@ -398,15 +437,18 @@ function cardRegistry(e){
           '<span>'+esc(e.category)+'</span>'+
           trustBadge(e.trust || "reviewed")+
           (e.license ? '<span>'+esc(e.license)+'</span>' : '')+
+          (e.qualityScore ? '<span>质 '+e.qualityScore+'</span>' : '')+
           '<code style="font-size:11px">'+esc(e.repo)+'</code>'+
           (e.stars ? '<span>★ '+fmtNum(e.stars)+'</span>' : '')+
           (e.pushedAt ? '<span>更新于 '+esc(e.pushedAt)+'</span>' : '')+
         '</div></div>'+
     '</div>'+
+    shotsHtml+
     '<p class="desc">'+esc(e.description)+'</p>'+
     '<div class="kw">'+(e.keywords||[]).map(k=>'<i>'+esc(k)+'</i>').join("")+
       '<i>社区目录</i></div>'+
     '<div class="card-foot">'+stTxt+
+      '<button class="tiny fav'+(fav?" on":"")+'" data-fav="'+attr(e.repo)+'" title="收藏">'+(fav?"♥ 已收藏":"♡ 收藏")+'</button>'+
       '<button class="tiny" data-regdetail="'+attr(e.repo)+'">详情</button>'+
       (inst
         ? '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>'
@@ -421,7 +463,13 @@ function cardRegistry(e){
 function regDetailHtml(e){
   const href = e.homepage && String(e.homepage).indexOf("https://") === 0
     ? e.homepage : "https://github.com/"+e.repo;
-  let h = '<div class="grp"><h5>来源与信任</h5><ul>'+
+  const shots = e.screenshots || [];
+  let h = (shots.length
+    ? '<div class="grp"><h5>截图（'+shots.length+'）</h5>'+
+      '<div class="shots gallery">'+shots.map(s =>
+        '<img src="'+attr(s)+'" alt="'+esc(e.displayName)+'" loading="lazy" referrerpolicy="no-referrer">').join("")+'</div></div>'
+    : '');
+  h += '<div class="grp"><h5>来源与信任</h5><ul>'+
     '<li>仓库：<a href="'+attr(href)+'" target="_blank" rel="noopener">'+esc(e.repo)+'</a></li>'+
     '<li>信任分级：'+trustBadge(e.trust || "reviewed")+'</li>'+
     (e.license ? '<li>许可证：'+esc(e.license)+'</li>' : '')+
@@ -452,8 +500,33 @@ function regDetailHtml(e){
 
 /* ---------------- 交互 ---------------- */
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh]");
+  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
   if(!t) return;
+
+  if(t.dataset.fav){
+    // 收藏 / 取消收藏（v2.21）：本机持久化，Local-first。
+    const repo = t.dataset.fav;
+    const on = !isFav(repo);
+    try{
+      const r = await api("/api/favorites", {repo, on});
+      REG.favorites = r.favorites || [];
+      toast((on?"已收藏 ":"已取消收藏 ")+repo);
+      renderCards();
+    }catch(err){ toast(err.message, true); }
+    return;
+  }
+
+  if(t.dataset.shot){
+    // 点击截图在新标签页打开原图（只收 GitHub 系域名的 https，安全）。
+    try{ window.open(t.dataset.shot, "_blank", "noopener"); }
+    catch(err){ toast("无法打开截图", true); }
+    return;
+  }
+
+  if(t.dataset.updatecenter){
+    await showUpdateCenter();
+    return;
+  }
 
   if(t.dataset.regdetail){
     const entry = (REG.plugins||[]).find(p => p.repo === t.dataset.regdetail);
@@ -533,6 +606,8 @@ document.addEventListener("click", async (e) => {
   }
 
   if(t.dataset.radd || t.dataset.rupdate){
+    // 若从「更新中心」弹窗里点更新，先关掉信息弹窗再走更新确认。
+    if($("#cfmNo").style.display === "none") $("#cfm").classList.remove("show");
     const repo = t.dataset.radd || t.dataset.rupdate;
     const isAdd = !!t.dataset.radd;
     let allowNs = false;
@@ -648,6 +723,8 @@ $("#btnReg").onclick = async (e) => {
   finally{ e.target.disabled = false; }
 };
 
+$("#btnUpdate").onclick = async () => { await showUpdateCenter(); };
+
 $("#btnTrash").onclick = async () => {
   const t = STATE.trash, pol = t.policy || {};
   const html = '<div class="grp"><h5>当前回收站</h5><ul>'+
@@ -679,6 +756,25 @@ async function loadLog(){
       '<span class="d">'+esc(ev.event||"")+(ev.detail?' · '+esc(ev.detail):'')+'</span></div>'
     ).join("") : '<div class="empty">暂无事件</div>';
   }catch(err){ toast(err.message, true); }
+}
+
+function showUpdateCenter(){
+  const upd = regUpdatable();
+  let body;
+  if(!upd.length){
+    body = '<div class="note">所有已装插件都是最新的，没有可更新项。</div>';
+  } else {
+    body = '<div class="grp"><h5>'+upd.length+' 个插件有更新</h5>'+
+      upd.map(u => '<div class="update-row">'+
+        '<b>'+esc(u.displayName)+'</b>'+
+        '<span class="repo">'+esc(u.repo)+'</span>'+
+        '<code>'+esc(u.current)+'</code><span class="arrow">→</span><code>'+esc(u.latest)+'</code>'+
+        trustBadge(u.trust || "reviewed")+
+        '<button class="tiny primary" style="margin-left:auto" data-rupdate="'+attr(u.repo)+'">更新</button>'+
+        '</div>').join("")+'</div>'+
+      '<div class="note">更新走 ghpm，自带事务与回滚；旧版本会先进回收站，可恢复。</div>';
+  }
+  return infoBox("更新中心", body);
 }
 
 function watchJob(jid, title){
@@ -721,8 +817,9 @@ async function refresh(){
     const g = await api("/api/registry");
     REG = {plugins: g.plugins || [], updatedAt: g.updatedAt || "",
            stale: !!g.stale, source: g.source || "",
-           installedRepos: g.installedRepos || {}};   // 社区目录失败也不挡主界面
-  }catch(e){ REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}}; }
+           installedRepos: g.installedRepos || {},
+           favorites: g.favorites || []};   // 社区目录失败也不挡主界面
+  }catch(e){ REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}, favorites:[]}; }
   render();
 }
 

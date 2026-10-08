@@ -85,10 +85,13 @@
     会把旧的先移进回收站再放新的（可回滚）
   - **「卸载…」** —— 先弹一个**分级预览**，告诉你哪些会移走、哪些会被保留，  
     确认后才动
+- **社区目录**卡片 —— 「详情」看截图 / 权限 / 兼容性 / 不可变产物，
+  ♥ 收藏（本机持久化）、「一键安装」（走不可变 artifact 或 ghpm）
 - **GitHub 收录源**卡片 —— 点「一键安装」调用 `ghpm` 联网下载，  
   下方有实时进度条和 ghpm 的输出，装完自动刷新
 
-顶部还有 **「回收站」** 按钮，能看到占用并可一键清空。
+顶部还有 **「更新中心」**（聚合所有有更新的插件）、**「回收站」**
+（可一键清空）、**「我的收藏」**（筛选芯片）。
 
 ---
 
@@ -197,7 +200,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 692 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 707 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -235,11 +238,14 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 692 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 707 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
 workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事务恢复
+workbuddy-market verify <zip|dir>   # 校验 Market Package + 风险预览/兼容性报告
+workbuddy-market list               # 浏览社区目录（注册表）；--category 筛选
+workbuddy-market search <kw>        # 按关键词搜索社区目录；--json 输出
 ```
 
 > **注意**：`一键启动.cmd` 在「打包」或「自检」失败时会**跳过注册**，但仍然打开网页。
@@ -446,6 +452,25 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 | **v2.18** | **快赢包：artifact 版本回退修复 + FAQ 自检数漂移修复 + 隐私历史审计 CI + macOS 冒烟槽位** | [CHANGELOG.md](CHANGELOG.md) 2.18.0 条目 |
 | **v2.19** | **R6 收尾：state / application 迁包，market_core 收成 294 行兼容 shim** | [CHANGELOG.md](CHANGELOG.md) 2.19.0 条目 |
 | **v2.20** | **供应链安全轮：manifest permissions + 风险预览 + 兼容性检测 + 构建证明 attestation + CLI verify** | [CHANGELOG.md](CHANGELOG.md) 2.20.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) v0.3 |
+| **v2.21** | **产品化轮：收藏 + 截图 + 更新中心 + CLI list/search + 注册表结构化** | [CHANGELOG.md](CHANGELOG.md) 2.21.0 条目 |
+
+### v2.21 摘要（2026-10-08）
+
+外部评审 #2（dsh-market 对比走查）的产品差距项落地 —— 内核不动，
+产品层补齐「发现 → 了解 → 安装 → 管理」的闭环：
+
+- **收藏**（评审 #13）：本机持久化（`STATE_HOME/favorites.json`），
+  Local-first 不上传；Web 卡片 ♥ 收藏按钮 + 「我的收藏」筛选；
+  `POST /api/favorites` + `GET /api/registry` 带 favorites；
+- **截图**（评审 #12）：注册表 `screenshots` 字段，解析层 fail-closed
+  只收 https 且 GitHub 系域名（防外链追踪）；卡片缩略图 + 详情画廊；
+- **更新中心**（评审 #15）：顶部聚合所有「已装且上游前移」的条目，
+  逐条显示 当前→目标，一键更新；
+- **CLI 补全**（评审 #22）：`workbuddy-market list` / `search <kw>`，
+  不开网页也能逛市场（包级，不依赖 clone 布局）；
+- **注册表结构化**（评审 #9）：嵌套 source / artifact / compatibility /
+  trust / quality 与平铺等价解析，回写平铺零迁移；
+- 自检 692 → 707 项（第 35 节 15 项）；pytest 37 项不变。
 
 ### v2.17 摘要（2026-10-08）
 
@@ -558,7 +583,7 @@ workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事�
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 692 passed, 0 failed
+python selftest.py        # 707 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

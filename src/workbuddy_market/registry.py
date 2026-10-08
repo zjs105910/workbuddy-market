@@ -109,6 +109,38 @@ def _clean_text(v, limit: int = 400) -> str:
     return v.strip()[:limit]
 
 
+# 截图域名白名单（评审 #12）：截图的威胁模型不是哈希，而是外链追踪 /
+# 恶意图片源 / 域名未来被劫持。只放行 GitHub 自己的图床与仓库域。
+_GITHUB_IMAGE_HOSTS = (
+    "github.com",
+    "raw.githubusercontent.com",
+    "user-images.githubusercontent.com",
+    "avatars.githubusercontent.com",
+    "media.githubusercontent.com",
+    "objects.githubusercontent.com",
+)
+
+
+def _github_image_url(url: str) -> bool:
+    """截图 URL 是否落在 GitHub 系域名且为 https。
+
+    fail-closed：不是 https、域名不在白名单、或域名是「xxx.github.io」
+    这类用户可控的第三方站点 —— 一律拒绝。白名单用后缀精确匹配，
+    避免 ``evil-github.com`` 或 ``github.com.evil.com`` 蒙混。
+    """
+    if not isinstance(url, str):
+        return False
+    u = url.strip()
+    if not u.lower().startswith("https://"):
+        return False
+    try:
+        from urllib.parse import urlsplit
+        host = (urlsplit(u).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in _GITHUB_IMAGE_HOSTS
+
+
 def parse_registry(data) -> dict:
     """注册表原文 → ``{"plugins": [...], "updatedAt": ...}``。
 
@@ -163,23 +195,14 @@ def parse_registry(data) -> dict:
             "homepage": _clean_text(it.get("homepage"), 300),
             "addedAt": _clean_text(it.get("addedAt"), 10),
         }
-        # 信任分级（v2.12）：official=官方收录 / reviewed=社区精选（人工审核）
-        # / external=未审核。静态字段，只许人工维护。
-        # **v2.16 fail-closed**：值不认识（拼写错误、未来的 "official-ish"）
-        # 或干脆没写 → 一律 external。旧口径是降为 reviewed —— 那等于把
-        # 「来历不明」自动洗成「社区已审核」，供应链方向反了。现网 28 条
-        # 全部有显式 trust，行为不受影响。
-        trust = _clean_text(it.get("trust"), 16)
-        entry["trust"] = trust if trust in ("official", "reviewed", "external") else "external"
         # 供应链字段（v2.12，可选增量，schema 保持 1）：审核时固定下来的来源
         # commit 与许可证。sourceCommit 是「审核时看的是哪一份」的凭证，
         # 安装端拿它和 CI 刷出来的 latestSha 比对，检测上游漂移。
+        # （trust 统一在下方「信任分级」处写入 —— 平铺 trust 与嵌套
+        # trustObj.level 两条路都在那汇合，避免两处各写一遍。）
         lic = _clean_text(it.get("license"), 64)
         if lic:
             entry["license"] = lic
-        sc = _clean_text(it.get("sourceCommit"), 64)
-        if sc:
-            entry["sourceCommit"] = sc
         # 不可变产物字段（v2.16，可选增量，schema 保持 1）：CI 发布的
         # artifact。**成套采纳**：packageUrl + packageHash 必须同时合法
         # 才进条目 —— 只给 URL 没法校验、只给哈希没处下载，半套字段
@@ -187,17 +210,41 @@ def parse_registry(data) -> dict:
         # 有则一并固定。平铺与嵌套 artifact{} 两种写法都收（嵌套是
         # plugin-spec 讨论稿的数据模型方向，平铺是当前注册表的实际形态）。
         art = it.get("artifact") if isinstance(it.get("artifact"), dict) else {}
-        pu = _clean_text(art.get("packageUrl") or it.get("packageUrl"), 500)
-        ph = normalize_sha256(art.get("packageHash") or it.get("packageHash"))
+        # 评审 #9（dsh-market 对比）：注册表条目升级为嵌套结构 ——
+        #   source{type,repo,commit} / artifact{url,sha256,size,signature} /
+        #   compatibility{workbuddy,platforms} / trust{level,reviewedAt,
+        #   reviewer} / quality{score,tests,lastVerified}。
+        # 解析层**两种写法都收**：嵌套取嵌套、平铺取平铺，最终统一回写
+        # 成平铺（向前端与既有 CI 零迁移）。嵌套字段是「生态协议」的
+        # 数据模型方向（plugin-spec §3 同构），平铺是当前注册表的落地
+        # 形态 —— 两者语义等价，绝不因写法不同而漏收。
+        src = it.get("source") if isinstance(it.get("source"), dict) else {}
+        compat = it.get("compatibility") if isinstance(it.get("compatibility"), dict) else {}
+        trust_obj = it.get("trustObj") if isinstance(it.get("trustObj"), dict) else {}
+        quality = it.get("quality") if isinstance(it.get("quality"), dict) else {}
+
+        pu = _clean_text(art.get("url") or art.get("packageUrl") or it.get("packageUrl"), 500)
+        ph = normalize_sha256(art.get("sha256") or art.get("packageHash") or it.get("packageHash"))
         if pu and ph:
             entry["packageUrl"] = pu
             entry["packageHash"] = ph
             mh = normalize_sha256(art.get("manifestHash") or it.get("manifestHash"))
             if mh:
                 entry["manifestHash"] = mh
+            # artifact.size（字节）与 artifact.signature（预留，v0.1 不做签名）
+            size = art.get("size")
+            if isinstance(size, int) and not isinstance(size, bool) and size >= 0:
+                entry["packageSize"] = size
         ver = _clean_text(art.get("version") or it.get("version"), 32)
         if ver:
             entry["version"] = ver
+        # source.commit（嵌套）→ 平铺 sourceCommit（v2.12 的供应链固定字段）
+        sc_nested = _clean_text(src.get("commit") or src.get("ref"), 64)
+        sc_flat = _clean_text(it.get("sourceCommit"), 64)
+        if sc_nested:
+            entry["sourceCommit"] = sc_nested
+        elif sc_flat:
+            entry["sourceCommit"] = sc_flat
         # 权限 / 兼容性声明与构建证明（v2.20，可选增量，schema 保持 1）：
         # 由 artifacts CI 从打包 manifest 固化回写（动态字段只许 CI 改，
         # build_registry.refresh_entry 的 dict(entry) 复制会原样保留）。
@@ -205,21 +252,47 @@ def parse_registry(data) -> dict:
         # 就是那一份包，没有包的证明没有意义；permissions 过与 packaging
         # 同一把形状尺，形状不对就当没有（不可信输入，绝不带病进前端）。
         if "packageUrl" in entry and "packageHash" in entry:
-            au = _clean_text(it.get("attestationUrl"), 500)
+            au = _clean_text(art.get("attestationUrl") or it.get("attestationUrl"), 500)
             if au.startswith("https://"):
                 entry["attestationUrl"] = au
-            perms = it.get("permissions")
+            perms = compat.get("permissions") or it.get("permissions")
             if isinstance(perms, dict) and not _perm_errors(perms):
                 entry["permissions"] = perms
-            plats = it.get("platforms")
+            plats = compat.get("platforms") or it.get("platforms")
             if isinstance(plats, list) and plats:
                 vals = [str(x) for x in plats
                         if str(x) in ("windows", "macos", "linux")]
                 if vals:
                     entry["platforms"] = vals
-            mwb = _clean_text(it.get("minWorkBuddyVersion"), 32)
+            mwb = _clean_text(compat.get("workbuddy") or it.get("minWorkBuddyVersion"), 32)
             if mwb and any(c.isdigit() for c in mwb):
                 entry["minWorkBuddyVersion"] = mwb
+        # 截图（评审 #12，可选增量，schema 保持 1）：安装前让用户看到插件
+        # 长什么样。**只收 https 且域名为 GitHub 系**（github.com /
+        # raw.githubusercontent.com / user-images.githubusercontent.com /
+        # 域名后缀 githubusercontent.com）—— 截图的威胁模型不是哈希，
+        # 而是「外链追踪 + 恶意图片源 + 未来被劫持」，收紧域名把攻击面
+        # 关到 GitHub 自己的图床。非 GitHub 域名一律丢弃（fail-closed）。
+        shots = it.get("screenshots")
+        if isinstance(shots, list):
+            ok_shots = [s for s in shots if isinstance(s, str) and _github_image_url(s)]
+            if ok_shots:
+                entry["screenshots"] = ok_shots[:6]
+        # 信任分级（评审 #9 的 trust{} 嵌套 + v2.12 的平铺 trust，两者等价）。
+        # v2.16 fail-closed：值不认识或没写 → external（来历不明不得洗白）。
+        trust_val = _clean_text(trust_obj.get("level") or it.get("trust"), 16)
+        entry["trust"] = trust_val if trust_val in ("official", "reviewed", "external") else "external"
+        # quality 评分（评审 #9，可选增量）：score 0–100 / tests 布尔 /
+        # lastVerified 时间。数字只收 0–100 的整数，越界当没有。
+        if isinstance(quality, dict):
+            q_score = quality.get("score")
+            if isinstance(q_score, int) and not isinstance(q_score, bool) and 0 <= q_score <= 100:
+                entry["qualityScore"] = q_score
+            if isinstance(quality.get("tests"), bool):
+                entry["qualityTests"] = quality["tests"]
+            lv = _clean_text(quality.get("lastVerified"), 40)
+            if lv:
+                entry["qualityLastVerified"] = lv
         rv = it.get("review")
         if isinstance(rv, dict):
             review = {k: _clean_text(rv.get(k), 40)
