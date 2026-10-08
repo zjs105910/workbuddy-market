@@ -28,6 +28,13 @@ import re
 import sys
 from pathlib import Path
 
+# Windows 控制台 / runner 管道默认 ANSI 代码页（cp1252），print 中文警告
+# 会直接 UnicodeEncodeError（CI #8 同款坑，privacy-audit 已修过一次）。
+# 强制 UTF-8 —— 本脚本在 Windows CI 上是要当门禁跑的。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = ROOT / "registry" / "plugins.json"
 SCHEMA_FILE = ROOT / "registry" / "registry-schema.json"
