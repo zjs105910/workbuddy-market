@@ -159,7 +159,8 @@ workbuddy-market/
 │                                        hasher / locking / logging；v2.9/R3 增
 │                                        config / scanner / sync / version；
 │                                        v2.10 增 catalog，v2.11 增 registry，
-│                                        v2.12/R4 增 trash / ownership / transactions
+│                                        v2.12/R4 增 trash / ownership / transactions，
+│                                        v2.13 增 doctor（clone 外可跑的体检）
 ├── registry/plugins.json             ← 社区注册表（v2.11）：静态收录人工维护，
 │                                        动态字段（stars 等）由每日 CI 重建；
 │                                        v2.12 增 trust / sourceCommit / license /
@@ -168,7 +169,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 523 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 545 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -206,8 +207,11 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 523 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 545 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
+
+python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
+workbuddy-market doctor             # pipx 安装后同样可用；--fix 做事务恢复
 ```
 
 > **注意**：`一键启动.cmd` 在「打包」或「自检」失败时会**跳过注册**，但仍然打开网页。
@@ -394,7 +398,9 @@ python selftest.py --real         # 只读检查现网状态，不写任何东�
 如果你确实想移除那些 skill，用 `ghpm remove <项目名>` 或直接删目录。
 
 **Q：怎么确认一切正常？**  
-`python launcher.py --status`（含深度自检），或网页顶部的徽章。
+`python launcher.py --status`（含深度自检），或网页顶部的徽章。  
+装好之后出问题了、或不确定环境对不对，用 `workbuddy-market doctor`
+逐项体检（在任何目录都能跑；`--fix` 会补记上次没记完的事务）。
 
 ---
 
@@ -403,30 +409,35 @@ python selftest.py --real         # 只读检查现网状态，不写任何东�
 | 轮次 | 主题 | 详解 |
 |---|---|---|
 | v2 → v2.11 | 七轮代码评审 + 开源重构 R1~R3 + GitHub 动态目录 + 社区注册表 | [docs/versions.md](docs/versions.md) |
-| **v2.12** | **供应链信任（trust 分级 / sourceCommit 固定 / 漂移拦截）+ R4 模块化收尾 + CI 加固** | [CHANGELOG.md](CHANGELOG.md) 2.12.0 条目 |
+| v2.12 | 供应链信任（trust 分级 / sourceCommit 固定 / 漂移拦截）+ R4 模块化收尾 + CI 加固 | [CHANGELOG.md](CHANGELOG.md) 2.12.0 条目 |
+| **v2.13** | **跨卷回收站原子化 + API /api/v1 版本化 + doctor 体检 + v3.0 路线定稿** | [CHANGELOG.md](CHANGELOG.md) 2.13.0 条目 · [docs/v3-roadmap.md](docs/v3-roadmap.md) |
 
-### v2.12 摘要（2026-10-08）
+### v2.13 摘要（2026-10-08）
 
-- **三级信任模型**：注册表条目新增 `trust` 字段（official / reviewed /
-  external），网页卡片显示 ✓ 官方 / ✓ 已审核 / ! 未审核 徽标——
-  搜索到 ≠ 官方认可；
-- **来源固定**：注册表新增 `sourceCommit` / `license` / `review`
-  字段；收录时人工审核固定 commit，安装时与 CI 刷出的 `latestSha`
-  比对，上游已前移 → 409 拦下，用户看清差异后 `force=true` 才放行；
-- **收紧 `--allow-non-skill`**：默认只装符合 Skill 协议的仓库；
-  兼容模式必须在确认框显式勾选（记 warn 日志）；
-- **R4 模块化收尾**：trash / ownership / transactions 迁入
-  `src/workbuddy_market/`（core 2445 → 1755 行），注入点经 core
-  晚绑定保持 selftest 语义；patch 落点随迁（`wm.trash.*` 等）；
-- **CI 加固**：第三方 action 全部 pin 到完整 SHA；registry 每日刷新
-  改走 PR（不再直推 main）；`build_registry.py` 输出上游漂移预警；
-- 注册表描述去营销化（原则：registry 是 metadata，不是广告页）。
+- **跨卷回收站原子化**：`WBM_HOME` 与 `WBM_STATE_HOME` 允许在不同磁盘，
+  原来 `shutil.move()` 跨卷会退化成 copy+delete（中途崩掉两边都不完整）。
+  现在同卷走 `os.rename`（原子）；跨卷走「staging 复制 → 结构校验 →
+  同卷原子 rename 落位 → 最后才删源」，任何一步失败源目录原样保留；
+  重解析点条目拒绝跨卷搬移（copytree 无法保真复制 junction）；
+- **API 版本化**：全部接口接受 `/api/v1/<路由>` 别名，归一化发生在
+  鉴权 / Origin 校验之前（版本前缀不提供绕过闸门的途径）；
+  裸 `/api/*` 即 v1 语义，前端与旧脚本零迁移成本；
+- **doctor**：`workbuddy-market doctor` 逐项体检（Python / 市场根 /
+  配置 / skills / ghpm / 所有权 / 事务日志 / 回收站索引安全 / 注册表缓存），
+  `--fix` 走与 `--recover` 同一套事务恢复；唯一不依赖 clone 布局的子命令；
+- **POSIX 支持口径诚实化**：Linux/macOS 目前是「CI 语法级验证」，
+  selftest 硬门槛仍只在 Windows（README/pyproject 如实标注）；
+- **v3.0 路线定稿**：外部评审 16 项建议整理成带优先级的路线文档
+  （Marketplace Package 协议 / Provider 抽象 / installer 拆分 /
+  pytest 拆分等），见 [docs/v3-roadmap.md](docs/v3-roadmap.md)；
+- 自检 523 → 545 项（第 28 节：跨卷搬移端到端 / 校验失败源不动 /
+  重解析点拒绝 / API v1 归一化与端到端 / doctor 结构与分发）。
 
 ---
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 523 passed, 0 failed
+python selftest.py        # 545 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

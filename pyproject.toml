@@ -15,6 +15,9 @@ classifiers = [
     "Environment :: Console",
     "Environment :: Web Environment",
     "Operating System :: Microsoft :: Windows",
+    # POSIX 目前是「实验性」：代码里 msvcrt/fcntl、junction/symlink、
+    # 进程树击杀都有跨平台分支，CI 在 Linux 只做语法级验证（py_compile），
+    # 完整 selftest 硬门槛暂只在 Windows 跑（见 README 第七/十节）。
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",

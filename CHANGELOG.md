@@ -4,6 +4,58 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.13.0 — 2026-10-08（跨卷原子化 + API v1 + doctor + v3.0 路线定稿）
+
+**跨卷回收站搬移原子化**（评审 P0：数据安全）
+- `move_to_trash()` 显式分两条路：同卷 `os.rename()`（原子，与原行为
+  等价）；跨卷走「staging 复制（`.trash` 内 `<名>.partial`）→ 结构校验
+  （相对路径集合 + 每文件大小）→ 同卷原子 rename 落位 → **最后才删源**」。
+  原来 `shutil.move()` 跨卷退化成 copy+delete，中途崩掉两边都不完整。
+- 任何一步失败：清掉 `.partial`、源目录原样保留、返回 None ——
+  调用方（如 `_commit_staged`）可以放心中止，不会出现半截状态。
+- 重解析点条目（symlink / junction）拒绝跨卷搬移：copytree 无法保真
+  复制 junction，宁可失败（同卷 rename 不受影响）。
+- `_same_volume()`：Windows 按 splitdrive 盘符、POSIX 按 st_dev；
+  stat 失败**保守按跨卷处理**（宁走慢的校验搬移，不赌假原子）。
+- 校验口径刻意不比内容哈希（回收站允许 2GB，代价不成比例）——
+  安全语义仍由 `needs_exact` 的 tree_hash 负责，与完整性校验分层。
+
+**API 版本化**
+- 全部接口接受 `/api/v1/<路由>` 别名（`_normalize_api_path`），
+  含 `/api/v1/job/<id>[/cancel]` 带参数路由；归一化在**鉴权 / Origin
+  校验之前**——版本前缀不提供任何绕过闸门的途径。
+- 裸 `/api/*` 即 v1 语义，前端与旧脚本零迁移；今后破坏性变化走
+  `/api/v2`（`API_VERSION = 1`）。
+
+**doctor（新模块 `workbuddy_market/doctor.py`）**
+- `workbuddy-market doctor` / `python -m workbuddy_market doctor`：
+  Python 版本 / 市场根 / 配置 / WorkBuddy 家目录 / skills / 打包索引 /
+  ghpm / 所有权 / 事务日志 / 回收站（含索引越界条目安全检查）/
+  注册表缓存 / STATE_HOME 逐项体检，每项独立捕获异常，坏了标 ✗
+  并给下一步动作，绝不让一项故障拖垮整份报告。
+- `--fix` 只做 `recover_transactions()`（与 `launcher --recover` 同一
+  入口，不新增第二种恢复语义）。
+- doctor 是唯一**不依赖 clone 布局**的子命令：cli 在 clone 内先把
+  仓库根写进 `WBM_MARKET_ROOT` 再导入包（必须在首次导入 paths 前），
+  pipx 安装后在 clone 目录里运行也能体检正确的市场；clone 外运行时
+  「市场根」一项如实标 ✗。
+
+**POSIX 支持口径诚实化**
+- pyproject/README 明确：Linux/macOS 目前是「CI 语法级验证」
+  （py_compile + 隐私审计），完整 selftest 硬门槛暂只在 Windows；
+  不让开源用户误以为 README 声称的 POSIX 支持已被完整测试。
+
+**v3.0 路线定稿**
+- 外部评审的 16 项建议整理成带优先级的路线文档 `docs/v3-roadmap.md`
+  （Marketplace Package / manifest 协议、Provider 抽象、installer /
+  uninstaller 拆分、pytest 拆分、依赖系统、Quality Score 等）——
+  本轮只定稿路线，不动协议实现。
+
+**自检**：523 → 545 项（第 28 节 22 项：跨卷搬移端到端 / 校验失败源
+不动 / 重解析点拒绝 / API v1 归一化语义与端到端等价 / doctor 结构、
+渲染与 cli 分发；跨卷路径用 `wm.trash._same_volume` 假接缝强制触发，
+磁盘动作真实）。
+
 ## 2.12.0 — 2026-10-08（供应链信任 + R4 模块化收尾 + CI 加固）
 
 **三级信任模型**

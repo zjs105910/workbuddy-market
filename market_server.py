@@ -51,6 +51,12 @@ v2.11 社区注册表 + 端口修复：
   · _find_port 的探测 socket 在 Windows 改用 SO_EXCLUSIVEADDRUSE：
     原来的 SO_REUSEADDR 允许绑定「别的进程正监听着」的端口，同机多个
     市场进程同时绑 8777、请求随机打到旧进程（2026-10-07 实测复现）。
+
+v2.13 API 版本化：
+  所有接口都接受 `/api/v1/<路由>` 别名（`/api/v1/state` ≡ `/api/state`，
+  含 /api/job/<id>[/cancel] 这类带参数的路由），实现见 `_normalize_api_path()`。
+  别名在**鉴权 / Origin 校验之前**归一化 —— 版本前缀不提供任何绕过闸门的
+  途径。今后接口行为变化走 /api/v2，/api/v1 与裸 /api 共存。
 """
 from __future__ import annotations
 
@@ -737,6 +743,23 @@ def _registry_fresh(force: bool) -> dict:
 
 # ---------------------------------------------------------------- HTTP
 
+API_V1_PREFIX = "/api/v1/"
+API_VERSION = 1                    # 与 /api/v1 前缀对应；接口破坏性变化时 +1
+
+
+def _normalize_api_path(path: str) -> str:
+    """/api/v1/<路由> → /api/<路由>（v2.13 API 版本化别名）。
+
+    · 在**鉴权 / Origin 校验之前**调用 —— 版本前缀不提供任何绕过闸门的途径；
+    · 带参数的路由同样适用（/api/v1/job/<id>/cancel → /api/job/<id>/cancel）；
+    · 裸 /api/* 保持不变（v1 即现行语义，前端与旧脚本零迁移成本）。
+    """
+    if path.startswith(API_V1_PREFIX):
+        rest = path[len(API_V1_PREFIX):]
+        return "/api/" + rest if rest else "/api/"
+    return path
+
+
 def _repo_arg(body: dict) -> tuple:
     """repo 参数统一走内核的 `validate_repo()`。
 
@@ -841,7 +864,7 @@ class Handler(BaseHTTPRequestHandler):
     # ---- 路由
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        path = _normalize_api_path(urlparse(self.path).path)
         if path in ("/", "/index.html"):
             f = core.WEB_DIR / "index.html"
             if not f.is_file():
@@ -905,7 +928,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "not found", "path": path}, 404)
 
     def do_POST(self):
-        path = urlparse(self.path).path
+        path = _normalize_api_path(urlparse(self.path).path)
         if not path.startswith("/api/"):
             return self._json({"error": "not found", "path": path}, 404)
         if not self._guard():

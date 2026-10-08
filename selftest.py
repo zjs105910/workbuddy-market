@@ -24,6 +24,9 @@
 第 27 节   v2.11：社区注册表——registry 模块（解析 / 三路兜底 / TTL 缓存 /
            source 如实标注）、build_registry 的 refresh_entry、
            GET /api/registry 端到端、Windows 假空闲端口修复盯防
+第 28 节   v2.13：跨卷回收站原子化（同卷 rename / 跨卷 复制-校验-落位-删源、
+           校验失败源不动、重解析点拒绝跨卷）、API v1 版本化别名
+           （鉴权前置、端到端等价）、doctor 体检（结构 / 渲染 / cli 分发）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -43,7 +46,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.12"
+SELFTEST_VERSION = "2.13"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -523,6 +526,9 @@ def run() -> None:
 
     # ============ 27. v2.11：社区注册表（registry + CI 重建 + 端口修复） ============
     round12()
+
+    # ============ 28. v2.13：跨卷回收站原子化 + API v1 + doctor ============
+    round13()
 
 
 def _restore_config(snapshot: str) -> None:
@@ -2648,7 +2654,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.12.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.13.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -2729,9 +2735,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.12.0"
-       and core.MARKET_VERSION == "2.12.0"
-       and SELFTEST_VERSION == "2.12", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.13.0"
+       and core.MARKET_VERSION == "2.13.0"
+       and SELFTEST_VERSION == "2.13", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -3396,6 +3402,186 @@ def round12():
 
     core.REGISTRY_PATH.unlink(missing_ok=True)      # 收尾：留干净环境
     ck("收尾：注册表缓存已清理", not core.REGISTRY_PATH.exists())
+
+
+def round13():
+    """v2.13：跨卷回收站原子化 + API v1 版本化 + doctor 体检。
+
+    背景（评审 P0）：WBM_HOME 与 WBM_STATE_HOME 允许在不同磁盘 ——
+    shutil.move() 跨卷退化成 copy+delete，中途崩掉两边都不完整，
+    不再是文档声称的「近似原子搬移」。本轮显式分两条路：
+    同卷 os.rename（原子）；跨卷「staging 复制 → 结构校验 → 同卷原子
+    rename 落位 → 最后才删源」，任何一步失败源目录原样保留。
+
+    测试策略：真造跨卷（不同盘符）不可移植也不可控，所以同 selftest
+    的惯例用**假接缝** —— monkeypatch ``wm.trash._same_volume`` 强制
+    走跨卷路径，磁盘动作仍然是真实的（copy / 校验 / rename / 删源）。
+    """
+    section("28. v2.13：跨卷回收站原子化 / API v1 版本化 / doctor")
+    trash = wm.trash
+
+    # --- 28A. _same_volume 语义
+    ck("同卷判定：.trash 与自身恒为同卷",
+       trash._same_volume(trash.TRASH_DIR, trash.TRASH_DIR) is True)
+    if os.name == "nt":
+        drive = os.path.splitdrive(str(trash.TRASH_DIR))[0].casefold()
+        other = "Z:" if drive != "z:" else "Y:"
+        ck("跨卷判定：不同盘符必判 False（Windows splitdrive）",
+           trash._same_volume(trash.TRASH_DIR,
+                              Path(other + "\\wbm-selftest-nowhere")) is False)
+    else:
+        r = trash._same_volume(trash.TRASH_DIR, Path(tempfile.gettempdir()))
+        ck("同卷判定（POSIX st_dev）：返回 bool 且不抛异常", isinstance(r, bool))
+
+    # --- 28B. 跨卷搬移端到端（假接缝强制走跨卷路径，磁盘动作真实）
+    src = core.SKILLS_DIR / "cx-vol-skill"
+    write_fake_skill(core.SKILLS_DIR, "cx-vol-skill", "1.0.0", "跨卷",
+                     {"a.txt": "A" * 100, "sub/b.txt": "B" * 50})
+    real_same = trash._same_volume
+    trash._same_volume = lambda a, b: False
+    dst = None
+    try:
+        dst = trash.move_to_trash(src, "selftest-cross")
+        ck("★ 跨卷搬移：目标落位且内容完整（含子目录）",
+           dst is not None and (dst / "SKILL.md").is_file()
+           and (dst / "a.txt").read_text(encoding="utf-8") == "A" * 100
+           and (dst / "sub" / "b.txt").read_text(encoding="utf-8") == "B" * 50,
+           str(dst))
+        ck("★ 跨卷搬移：源已删除", not src.exists())
+        ck("★ 跨卷搬移：无 .partial 残留",
+           dst is not None
+           and not dst.with_name(dst.name + ".partial").exists())
+        ck("★ 跨卷搬移：已如实登记进回收站索引",
+           dst is not None and dst.name in trash._load_trash_index()["items"])
+    finally:
+        trash._same_volume = real_same
+        if dst is not None:                          # 收尾：不留垃圾
+            shutil.rmtree(dst, ignore_errors=True)
+            idx = trash._load_trash_index()
+            idx["items"].pop(dst.name, None)
+            trash._save_trash_index(idx)
+
+    # --- 28C. 跨卷校验失败 → 源不动、无残留、如实返回 None
+    write_fake_skill(core.SKILLS_DIR, "cx-vol-skill", "1.0.0", "跨卷",
+                     {"a.txt": "A" * 100})
+    real_verify = trash._verify_tree_copy
+
+    def _verify_boom(a, b):
+        raise OSError("selftest 注入：结构校验失败")
+
+    trash._same_volume = lambda a, b: False
+    trash._verify_tree_copy = _verify_boom
+    try:
+        dst2 = trash.move_to_trash(src, "selftest-xfail")
+        ck("★ 跨卷校验失败 → 返回 None（调用方知道没搬成）", dst2 is None)
+        ck("★ 源目录原样保留", (src / "SKILL.md").is_file()
+           and (src / "a.txt").read_text(encoding="utf-8") == "A" * 100)
+        ck("★ .partial 暂存已清理",
+           not any(p.name.endswith(".partial") for p in trash.TRASH_DIR.iterdir()))
+    finally:
+        trash._verify_tree_copy = real_verify
+        trash._same_volume = real_same
+        shutil.rmtree(src, ignore_errors=True)       # 收尾
+
+    # --- 28D. 重解析点拒绝跨卷搬移（copytree 无法保真复制 junction）
+    if _make_link(core.SKILLS_DIR / "alpha", core.SKILLS_DIR / "cx-vol-link"):
+        trash._same_volume = lambda a, b: False
+        try:
+            dst3 = trash.move_to_trash(core.SKILLS_DIR / "cx-vol-link", "selftest-link")
+            ck("★ 重解析点条目跨卷搬移被拒绝（源保留）",
+               dst3 is None and (core.SKILLS_DIR / "cx-vol-link").exists())
+        finally:
+            trash._same_volume = real_same
+            _drop_link(core.SKILLS_DIR / "cx-vol-link")
+    else:
+        sk("重解析点条目跨卷搬移被拒绝",
+           "本环境建不出 junction / symlink（无管理员或宿主拦截）")
+
+    # --- 28E. API v1 版本化：归一化语义 + 端到端等价
+    import market_server as srv                      # noqa: E402
+
+    ck("归一化：/api/v1/state → /api/state",
+       srv._normalize_api_path("/api/v1/state") == "/api/state")
+    ck("归一化：带参数路由 /api/v1/job/<id>/cancel",
+       srv._normalize_api_path("/api/v1/job/j1/cancel") == "/api/job/j1/cancel")
+    ck("归一化：裸 /api/* 不受影响",
+       srv._normalize_api_path("/api/state") == "/api/state"
+       and srv._normalize_api_path("/api/v1") == "/api/v1")
+    ck("归一化：不误伤相似前缀（/apiv1）",
+       srv._normalize_api_path("/apiv1/state") == "/apiv1/state")
+
+    TOK6 = "selftest-v1-token"
+    httpd6 = srv.make_server(0, token=TOK6)
+    PORT6 = httpd6.server_address[1]
+    threading.Thread(target=httpd6.serve_forever, daemon=True).start()
+
+    def hit6(path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT6, timeout=10)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        try:
+            return r.status, json.loads(raw)
+        except Exception:
+            return r.status, raw.decode("utf-8", "replace")
+
+    AUTH6 = {"X-Local-Market-Token": TOK6}
+    try:
+        st, _ = hit6("/api/v1/state")
+        ck("★ /api/v1/state 无口令 → 403（版本前缀不绕过鉴权闸门）", st == 403, str(st))
+        st, _ = hit6("/api/v1/state", {"X-Local-Market-Token": TOK6,
+                                       "Origin": "http://evil.example"})
+        ck("★ /api/v1/state 跨源 → 403（Origin 校验同样生效）", st == 403, str(st))
+        st1, js1 = hit6("/api/v1/state", AUTH6)
+        st2, js2 = hit6("/api/state", AUTH6)
+        ck("★ /api/v1/state 与 /api/state 返回等价数据",
+           st1 == 200 and st2 == 200
+           and js1.get("marketId") == js2.get("marketId")
+           and js1.get("marketVersion") == js2.get("marketVersion")
+           and list(js1) == list(js2), f"{st1}/{st2}")
+        st, _ = hit6("/api/v1/definitely-not-a-route", AUTH6)
+        ck("/api/v1 未知路由 → 404", st == 404, str(st))
+    finally:
+        httpd6.shutdown()
+        httpd6.server_close()
+
+    # --- 28F. doctor：结构 / 渲染 / cli 分发
+    import contextlib                                # noqa: E402
+    import io                                        # noqa: E402
+    import workbuddy_market.doctor as doc            # noqa: E402
+    import workbuddy_market.cli as wmcli             # noqa: E402
+
+    # 隔离环境里 GHPM_PY 不存在（round7 的 fake ghpm 已还原），doctor 按
+    # 实情报 ✗ 本没有错 —— 但本节测的是 doctor 的结构与分发，不是环境，
+    # 所以按假接缝惯例补一个真实存在的 ghpm.py，只影响 doctor 自己的绑定。
+    fake_ghpm = _TMP / "wb" / "skills" / "github-project-manager" / "scripts" / "ghpm.py"
+    fake_ghpm.parent.mkdir(parents=True, exist_ok=True)
+    fake_ghpm.write_text("# selftest fake ghpm\n", encoding="utf-8")
+    real_doc_ghpm = doc.GHPM_PY
+    doc.GHPM_PY = fake_ghpm
+    try:
+        r = doc.run_doctor()
+        ck("doctor：逐项字段齐全（name/ok/detail）",
+           isinstance(r.get("checks"), list) and r["checks"]
+           and all({"name", "ok", "detail"} <= set(c) for c in r["checks"]))
+        ck("doctor：隔离环境健康时 ok=True", r["ok"] is True,
+           "; ".join(f"{c['name']}: {c['detail'][:40]}"
+                     for c in r["checks"] if not c["ok"])[:200])
+        text = doc.render(r)
+        ck("doctor：渲染含标题与逐项标记",
+           "WorkBuddy Market Doctor" in text and "✓" in text)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = wmcli.main(["doctor"])
+        ck("doctor：cli 分发可用且健康时退出码 0", rc == 0, buf.getvalue()[-120:])
+    finally:
+        doc.GHPM_PY = real_doc_ghpm
+    # cli 分发会按 repo 根写 WBM_MARKET_ROOT —— 恢复隔离环境变量，防影响后续用例
+    if _ISOLATED:
+        os.environ["GHPM_MARKET_ROOT"] = str(_TMP / "market")
+        os.environ.pop("WBM_MARKET_ROOT", None)
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

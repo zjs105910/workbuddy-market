@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""market_core —— WorkBuddy 本机插件市场的内核（v2.12）。
+"""market_core —— WorkBuddy 本机插件市场的内核（v2.13）。
 
 版本号只有一个来源：MARKET_VERSION。每一轮代码评审对应一个次版本号：
 v1（初版）→ v2（第一轮）→ v2.1（第二轮）→ v2.2（第三轮）→ v2.3（第四轮）
 → v2.4（第五轮）→ v2.5（第六轮）→ v2.6（第七轮）→ v2.7（开源重构 R1）
-→ v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表，
-当前）。
+→ v2.8（R2）→ v2.9（R3）→ v2.10（GitHub 动态目录）→ v2.11（社区注册表）
+→ v2.12（R4）→ v2.13（跨卷原子化 + API v1 + doctor，当前）。
 
 v1 → v2 的变化（第一轮评审）：
 
@@ -255,6 +255,30 @@ v2.10 → v2.11 的变化（社区注册表：DSH 市场那层「registry 仓库
   · **前端**：新增「社区目录」区块（与收录源大小写去重后展示），社区
     条目可直接一键安装（确认框如实标注来自社区目录）；搜索兜底同时
     看社区目录与 GitHub 全网。
+
+v2.12 → v2.13 的变化（P0 工程边界：跨卷原子化 / API 版本化 / doctor）：
+
+  · **跨卷回收站搬移原子化（trash.py）**：WBM_HOME 与 WBM_STATE_HOME
+    允许在不同磁盘，原来的 shutil.move() 跨卷退化成 copy+delete ——
+    中途崩掉两边都不完整。现在同卷走 os.rename（原子）；
+    跨卷走「staging 复制（.trash 内 .partial）→ 结构校验（相对路径
+    集合 + 每文件大小）→ 同卷原子 rename 落位 → 最后才删源」，
+    任何一步失败源目录原样保留。重解析点条目拒绝跨卷搬移
+    （copytree 无法保真复制 junction）。_same_volume()：Windows 按
+    盘符、POSIX 按 st_dev，stat 失败保守按跨卷处理。
+  · **API 版本化（market_server.py）**：全部接口接受 /api/v1/<路由>
+    别名（_normalize_api_path 在鉴权/Origin 校验之前归一化，版本前缀
+    不提供绕过闸门的途径）；裸 /api/* 即 v1 语义，前端与旧脚本零迁移。
+  · **doctor（workbuddy_market/doctor.py 新模块）**：Python 版本 /
+    市场根 / 配置 / skills / ghpm / 所有权 / 事务日志 / 回收站（含
+    索引安全）/ 注册表缓存 逐项体检，每项独立捕获异常；--fix 只做
+    recover_transactions()（与 launcher --recover 同一入口）。
+    doctor 是唯一不依赖 clone 布局的子命令：cli 在 clone 内先把仓库根
+    写进 WBM_MARKET_ROOT 再导入包，pipx 安装后也能体检正确的市场。
+  · **POSIX 支持口径诚实化**：pyproject/README 明确 Linux/macOS 目前
+    是「CI 语法级验证」，selftest 硬门槛仍只在 Windows 跑；
+    v3.0 的完整路线（manifest 协议 / Provider 抽象 / 拆分计划）见
+    docs/v3-roadmap.md。
 """
 from __future__ import annotations
 

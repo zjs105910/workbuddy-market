@@ -9,10 +9,20 @@
   · `move_to_trash()` 的 rename 成功即事实，索引写失败只降级告警（约定 4）；
   · `prune_trash` 的统计只算真删成功的（约定 5）。
 
+v2.13（跨卷原子化）：`WBM_HOME` 与 `WBM_STATE_HOME` 允许配置到**不同磁盘**，
+`shutil.move()` 跨卷会退化成 copy + delete —— 中途崩掉两边都不完整，
+不再是文档声称的「近似原子搬移」。现在显式分两条路：
+
+  · 同卷 → `os.rename()`（原子，与原行为等价）；
+  · 跨卷 → staging 复制（.trash 内 `.partial`）→ 结构校验（相对路径集合 +
+    每文件大小）→ 同卷原子 rename 落位 → **最后才删源**。
+    任何一步失败：清掉 .partial、源目录原样保留、返回 None。
+
 注入点接缝（v2.12 R4）：
-  · `_measure()` 用的 `_scan` 仍在 core（selftest 崩溃注入点，第 24B 节盯防），
-    因此在调用点晚绑定 ``import market_core`` —— patch ``core._scan`` 对
-    回收站侧的调用依然有效，与 v2.11 前「core 侧直接调用」的语义一致；
+  · `_measure()` / 跨卷校验用的 `_scan` 仍在 core（selftest 崩溃注入点，
+    第 24B 节盯防），因此在调用点晚绑定 ``import market_core`` ——
+    patch ``core._scan`` 对回收站侧的调用依然有效，与 v2.11 前
+    「core 侧直接调用」的语义一致；
   · `prune_trash()` 的 `say()` 同理（core 的 CLI 输出小工具）。
   包内互调（TrashIndex→_save_trash_index 等）走本模块命名空间，
   patch 这些名字请 patch ``workbuddy_market.trash``（selftest 已按此调整）。
@@ -138,14 +148,119 @@ class TrashIndex:
         return True
 
 
+def _same_volume(a: Path, b: Path) -> bool:
+    """两个路径是否在同一文件系统卷上。
+
+    Windows 按盘符比（splitdrive；UNC 路径取 \\server\\share 整段），
+    POSIX 按 st_dev 比。stat 失败时**保守按跨卷处理** —— 宁可走慢的
+    校验搬移，也不赌一次静默退化成 copy+delete 的「假原子」。
+    """
+    if os.name == "nt":
+        da = os.path.splitdrive(str(a))[0].casefold()
+        db = os.path.splitdrive(str(b))[0].casefold()
+        return bool(da) and da == db
+    try:
+        return os.stat(str(a)).st_dev == os.stat(str(b)).st_dev
+    except OSError:
+        return False
+
+
+def _is_dir_entry(path: Path) -> bool:
+    """目录判定看 lstat，不看 is_dir()（约定 18：is_dir() 会跟随链接）。"""
+    try:
+        stt = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISDIR(stt.st_mode) and not path.is_symlink() and not _is_reparse(stt)
+
+
+def _verify_tree_copy(src: Path, staging: Path) -> None:
+    """跨卷搬移的校验：相对路径集合一致 + 每个文件大小一致。
+
+    刻意**不比内容哈希**：回收站允许到 2GB，全量哈希的代价与「搬个家」
+    不成比例；而且 staging → dst 是同卷原子 rename，校验通过后内容
+    不会再变。安全语义（能不能覆盖 / 卸载）依旧由 needs_exact 的
+    tree_hash 负责，跟这里的完整性校验是两回事。
+    抛 OSError 即校验不过（staging 会被调用方清掉，源不受影响）。
+    """
+    import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
+    si, _ = _core._scan(src, on_error="raise")
+    ti, _ = _core._scan(staging, on_error="raise")
+    if set(si) != set(ti):
+        miss = sorted(set(si) - set(ti))[:3]
+        raise OSError(f"跨卷搬移校验失败：目标缺少 {miss}")
+    for rel, (sz, _mt) in si.items():
+        if ti[rel][0] != sz:
+            raise OSError(f"跨卷搬移校验失败：大小不一致 {rel}")
+
+
+def _move_cross_volume(path: Path, dst: Path) -> None:
+    """跨卷搬移：shutil.move 会退化成 copy + delete —— 中途崩掉两边都不完整。
+
+    显式走「staging 复制 → 结构校验 → 同卷原子 rename → 删源」：
+
+      1. 复制到 .trash 内的 `<目标名>.partial`（与 dst 同卷，rename 是原子的）；
+      2. 目录：copytree(symlinks=True) + 结构校验；文件：copy2 + 大小校验；
+      3. rename(.partial → dst) 原子落位；
+      4. **最后才删源** —— 前面任何一步失败，源目录原样保留。
+
+    边界：目录树里或条目本身含重解析点（symlink / junction）时拒绝跨卷
+    搬移 —— copytree 无法保真复制 junction，宁可让调用方拿到失败
+    （同卷 rename 路径不受影响）。删源失败同样按失败上报：此刻旧内容
+    已完整躺在回收站里，调用方中止操作不会丢任何东西。
+    """
+    staging = dst.with_name(dst.name + ".partial")
+    is_dir = _is_dir_entry(path)
+    if path.is_symlink() or _is_reparse(path.lstat()):
+        raise OSError("条目是符号链接 / junction，跨卷搬移无法保真复制，拒绝")
+    try:
+        shutil.rmtree(staging, ignore_errors=True)   # 上次中断的残留
+        if is_dir:
+            _files, links = _core_scan_links(path)   # 事前拦截树内重解析点
+            if links:
+                raise OSError(
+                    f"目录含 {len(links)} 个符号链接 / junction，"
+                    f"跨卷搬移无法保真复制，拒绝：{links[:3]}")
+            shutil.copytree(str(path), str(staging), symlinks=True)
+            _verify_tree_copy(path, staging)
+        else:
+            shutil.copy2(str(path), str(staging))
+            if staging.stat().st_size != path.stat().st_size:
+                raise OSError("跨卷搬移校验失败：文件大小不一致")
+        try:
+            os.rename(str(staging), str(dst))        # 同卷，原子
+        except OSError:
+            shutil.move(str(staging), str(dst))      # 兜底（理论上不该触发）
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    # 内容已确认完整落在 dst，最后才删源
+    try:
+        if is_dir:
+            shutil.rmtree(str(path))
+        else:
+            path.unlink()
+    except OSError as exc:
+        raise OSError(f"跨卷搬移已落位但删源失败（旧内容在 {dst.name}）：{exc}") from exc
+
+
+def _core_scan_links(path: Path):
+    import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
+    return _core._scan(path, on_error="raise")
+
+
 def move_to_trash(path: Path, reason: str = "", index: "TrashIndex | None" = None) -> Path | None:
-    """统一入口：把一个目录/文件整个 rename 进回收站，并记账。
+    """统一入口：把一个目录/文件整个搬进回收站，并记账。
+
+    同卷走 `os.rename()`（原子）；跨卷走 `_move_cross_volume()` 的
+    「复制 → 校验 → 原子落位 → 删源」（v2.13）。两条路的失败都如实
+    返回 None —— 此时**源目录原样未动**，调用方可以放心中止。
 
     刻意用 rename 而不是 rmtree：O(1)、不遍历几百个文件，
     也不会触发宿主/沙箱的「批量删除」保护。
     体积在搬之前就算好写进索引 —— 否则每次刷新状态都要重新 rglob 整个回收站。
 
-    **事务语义**：rename 成功之后，磁盘状态就已经变了。索引只是缓存，
+    **事务语义**：搬移成功之后，磁盘状态就已经变了。索引只是缓存，
     写索引失败**不能**让整个调用方判成失败 —— 否则会出现「旧版本已经被搬进
     回收站，调用方却以为操作没发生」。所以这里降级为记一条 warn 并照常返回，
     索引由 trash_stats() 的「未登记项自动补录」自愈。
@@ -170,7 +285,10 @@ def move_to_trash(path: Path, reason: str = "", index: "TrashIndex | None" = Non
         dst = TRASH_DIR / f"{tag}.{n}"
         n += 1
     try:
-        shutil.move(str(path), str(dst))
+        if _same_volume(path, TRASH_DIR):
+            os.rename(str(path), str(dst))           # 同卷：原子搬移
+        else:
+            _move_cross_volume(path, dst)            # 跨卷：复制-校验-落位-删源
     except OSError as exc:
         log("error", "trash", f"回收 {path} 失败：{exc}")
         return None
