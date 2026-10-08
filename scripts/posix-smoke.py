@@ -54,23 +54,31 @@ def main() -> int:
     import workbuddy_market.artifact as ar
     import workbuddy_market.errors as werr
 
-    # --- 1. fcntl 文件锁：独占 + 跨实例重入计数
-    lock_a = core.FileLock(core.LOCK_PATH)
-    lock_b = core.FileLock(core.LOCK_PATH)
-    with lock_a:
-        try:
-            with lock_b.acquire(timeout=0.2):
-                ck("fcntl 锁独占语义（另一实例 0.2s 内拿不到）", False)
-        except core.FileLockTimeout:
-            ck("fcntl 锁独占语义（另一实例 0.2s 内拿不到）", True)
-        # 同一线程嵌套取锁走 _HELD 重入计数，不该自锁死
+    # --- 1. fcntl 文件锁：**跨进程**独占 + 同线程重入
+    # 关键口径：POSIX flock 按**进程**持有锁 —— 同进程的第二个 fd 不会
+    # 阻塞（这正是 locking.locked() 需要线程级重入计数器的原因）。
+    # 所以「独占」只能在**子进程**里验，同进程两个实例必然都成功。
+    child = (
+        "import sys;"
+        "sys.path.insert(0, r'%s');"
+        "import market_core as c;"
+        "try:"
+        "    with c.FileLock(c.LOCK_PATH, timeout=0.3):"
+        "        sys.exit(1)"          # 拿到了 → 独占失效
+        "except c.FileLockTimeout:"
+        "    sys.exit(0)"              # 等锁超时 → 独占成立
+    ) % str(Path(__file__).resolve().parents[1])
+    with core.FileLock(core.LOCK_PATH, timeout=5):
+        import subprocess
+        p = subprocess.run([sys.executable, "-c", child], env=dict(os.environ),
+                           capture_output=True, timeout=30)
+        ck("★ 锁跨进程独占（子进程 0.3s 拿不到）",
+           p.returncode == 0, f"rc={p.returncode} {p.stderr.decode()[-120:]}")
+        # 同线程嵌套取锁走 _HELD 重入计数，不该自锁死
         with core.locked():
             ck("锁重入计数（同线程嵌套不死锁）", True)
-    try:
-        with lock_b.acquire(timeout=0.5):
-            ck("锁释放后另一实例可得", True)
-    except core.FileLockTimeout:
-        ck("锁释放后另一实例可得", False)
+    with core.FileLock(core.LOCK_PATH, timeout=5):
+        ck("锁释放后可重新获取", True)
 
     # --- 2. symlink 防线：_scan 如实报出重解析点
     skill = root / "wb" / "skills" / "smoke"

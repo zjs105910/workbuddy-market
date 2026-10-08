@@ -31,6 +31,14 @@ def _find_repo_root(start: Path | None = None) -> Path | None:
 
 def main(argv: list | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # Windows 控制台默认代码页（GBK / cp1252）打不出中文 —— argparse 的
+    # --help 会直接 UnicodeEncodeError（CI 的 package job 实测）。
+    # 必须在**任何打印之前**（含 argparse 自身的 --help 输出）重配。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     root = _find_repo_root()
 
     # doctor 先于 launcher 分发：它是包级能力，不依赖 clone 布局。
