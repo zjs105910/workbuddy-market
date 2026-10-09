@@ -208,7 +208,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 758 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 771 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -251,7 +251,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 758 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 771 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -468,6 +468,30 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | **v2.21** | **产品化轮：收藏 + 截图 + 更新中心 + CLI list/search + 注册表结构化** | [CHANGELOG.md](CHANGELOG.md) 2.21.0 条目 |
 | **v2.22** | **首次启动向导：配置缺失自动初始化 + 环境预检 + 纯浏览/注册选择** | [CHANGELOG.md](CHANGELOG.md) 2.22.0 条目 |
 | **v2.23** | **界面重排：三入口 + 顶部指标条 + 安装前「四问」+ 信任 fail-closed** | [CHANGELOG.md](CHANGELOG.md) 2.23.0 条目 |
+| **v2.24** | **结构化错误 + doctor 网页体检 + UI 回归扩展（a11y / 响应式 / 界面状态）** | [CHANGELOG.md](CHANGELOG.md) 2.24.0 条目 |
+
+### v2.24 摘要（2026-10-09）
+
+外部产品评审 P1（「把报错变成可以执行的修复建议」「UI 测试扩展到用户
+能否顺利操作」）当轮落地：
+
+- **结构化错误**（`_api_error_payload`）：错误码 / 失败阶段 / 原因类别 /
+  是否可重试 / 脱敏人话 / 已完成与未完成（拿不到就如实写「无法确认」，
+  绝不谎称「数据未受影响」）；原始异常只进本地日志，绝不直接进响应；
+  **修复 do_GET 无兜底的存量缺陷**（配置损坏时 /api/state 直接炸连接，
+  浏览器表现为 Failed to fetch）；
+- **前端四段式错误弹窗**：发生了什么 → 可能原因 → 已完成/未完成 →
+  下一步，附 重试 / 查看详细日志 / 复制诊断 三个真实可用的按钮；
+  Escape 可关闭弹窗；
+- **doctor 网页体检**：顶栏「体检」按钮 → `GET /api/doctor`（只读，
+  浏览器永远触发不了 --fix；新接口同样过 _guard）；路径统一脱敏
+  （用户主目录 → ~）；「导出诊断报告」仅在用户主动点击时生成；
+- **launcher --status** 配置缺失/损坏 → 人话 + 下一步指引，不再裸抛
+  traceback；
+- **ui_smoke 17 → 26 项**：卸载旅程（确认 → 回收站 → 磁盘落账）、
+  Escape 关弹窗、360/768/1280 三档无横向溢出（含窄屏 CSS 修复）、
+  空市场 / 配置损坏 / 配置缺失三种界面状态、doctor 体检弹窗；
+- 自检 758 → 771 项（第 38 节 13 项）；pytest 37 项不变。
 
 ### v2.23 摘要（2026-10-09）
 
@@ -637,7 +661,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 758 passed, 0 failed
+python selftest.py        # 771 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

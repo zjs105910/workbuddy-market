@@ -17,6 +17,7 @@
   GET  /api/state             市场全量状态（插件 / GitHub 源 / 已装情况）
                               ?exact=1 用精确判定重算卸载分级
   GET  /api/log               最近事件（ndjson 尾部）
+  GET  /api/doctor            v2.24：doctor 体检（只读，路径脱敏；不提供 fix）
   GET  /api/job/<id>          长任务进度（安装/更新走这里）
   POST /api/sync              重新打包本机 skill
   POST /api/register          注册进 WorkBuddy 原生插件面板
@@ -303,6 +304,96 @@ _STATIC_FILES.update({
 
 def _job_finished(job: dict) -> bool:
     return job.get("status") == "done"
+
+
+# ---------------------------------------------------------------- 错误映射（v2.24）
+
+_STAGE_NAMES = {
+    "/api/sync": "重新打包", "/api/register": "注册到 WorkBuddy",
+    "/api/unregister": "撤销注册", "/api/install": "本机安装",
+    "/api/uninstall": "卸载", "/api/trash/purge": "清空回收站",
+    "/api/remote/add": "GitHub 安装", "/api/remote/update": "GitHub 更新",
+    "/api/registry/install": "固定产物安装", "/api/catalog/refresh": "刷新目录",
+    "/api/favorites": "收藏", "/api/open/path": "打开目录",
+}
+
+# 网络 / 上游类报错的关键词（大小写不敏感）。匹配上就归为「网络」类，
+# 给可重试的结论 —— 这类失败本地数据不受影响，重试是安全的。
+_NET_MARKS = ("timeout", "timed out", "connection", "getaddrinfo", "ssl",
+              "网络", "限流", "rate limit", "403", "429", "proxy", "代理")
+
+
+def _sanitize_text(text: str) -> str:
+    """路径脱敏：用户主目录 → ~（诊断信息要能分享，但不能带用户名）。"""
+    try:
+        home = str(Path.home())
+    except Exception:
+        return text
+    if home and home not in ("/", "\\"):
+        text = text.replace(home, "~")
+    return text
+
+
+def _api_error_payload(path: str, exc: Exception) -> tuple:
+    """把内部异常映射成「结构化 + 人话」的错误载荷（v2.24）。
+
+    纪律：
+      · 原始异常文本绝不直接给网页用户（可能带路径 / 环境细节）——
+        原文只进本地事件流（调用方 core.log）；
+      · 「已完成什么 / 未完成什么」宁可含糊不可撒谎 —— 内部错误一律
+        如实写「无法确认已完成的部分」，绝不自动声称「数据未受影响」；
+      · category / retryable 给前端做按钮与文案分派。
+    返回 (payload, http_status)。
+    """
+    from workbuddy_market.errors import ConfigError, ScanError, FileLockTimeout
+    stage = _STAGE_NAMES.get(path, path or "操作")
+    base = {"ok": False, "stage": stage}
+    if isinstance(exc, FileLockTimeout):
+        base.update({
+            "code": "MARKET_BUSY", "category": "concurrency", "retryable": True,
+            "error": f"{stage}：另一个市场操作正在进行，这一次没有执行。",
+            "advice": "等几秒再点「重试」；反复出现就重启市场服务。",
+            "done": "没有开始执行（在拿文件锁时就被挡下），磁盘没有变化。",
+        })
+        return base, 503
+    if isinstance(exc, ConfigError):
+        base.update({
+            "code": "CONFIG_INVALID", "category": "config", "retryable": False,
+            "error": f"{stage}：配置文件有问题，操作没有执行。",
+            "advice": "检查 market.config.json（首次使用直接重跑 "
+                      "python launcher.py，会自动初始化）；或运行 "
+                      "python launcher.py --status 看具体位置。",
+            "done": "在读取配置阶段就停了，磁盘没有变化。",
+        })
+        return base, 400
+    if isinstance(exc, ScanError):
+        base.update({
+            "code": "SCAN_FAILED", "category": "integrity", "retryable": True,
+            "error": f"{stage}：文件扫描不完整。为防误删，操作已中止。",
+            "advice": "先关掉可能占用文件的程序（编辑器 / 同步盘），再重试；"
+                      "反复失败运行 python launcher.py --status 排查。",
+            "done": "fail-closed：扫描不完整就绝不动磁盘，内容保持原样。",
+        })
+        return base, 500
+    low = str(exc).lower()
+    if any(m in low for m in _NET_MARKS):
+        base.update({
+            "code": "NETWORK", "category": "network", "retryable": True,
+            "error": f"{stage}：联网失败（网络不可达或上游限流）。",
+            "advice": "检查网络 / 代理后点「重试」；GitHub 匿名限额紧张时"
+                      "过几分钟再试。",
+            "done": "下载 / 拉取没有完成；本地已有内容不受影响。",
+        })
+        return base, 504
+    base.update({
+        "code": "INTERNAL", "category": "internal", "retryable": False,
+        "error": f"{stage}：内部错误，操作没有正常完成。",
+        "advice": "点「查看详细日志」看事件流里的原始记录；确认磁盘状态后"
+                  "再决定是否重试。",
+        "done": "无法确认已完成的部分 —— 请以事件流与「本机技能」页的实际"
+                "状态为准（fail-closed 设计下，未走完事务的安装不会生效）。",
+    })
+    return base, 500
 
 
 def _enforce_cap_locked() -> int:
@@ -947,6 +1038,22 @@ class Handler(BaseHTTPRequestHandler):
     # ---- 路由
 
     def do_GET(self):
+        # v2.24：GET 的 API 分发此前没有兜底 try —— /api/state 在配置损坏时
+        # 抛 ConfigError 会直接炸掉连接（浏览器表现为 Failed to fetch）。
+        # 统一包一层：任何未捕获异常都走 _api_error_payload 的结构化映射，
+        # 绝不让连接裸断（若响应已部分写出，静默放弃补写）。
+        try:
+            self._do_get_impl()
+        except Exception as exc:
+            core.log("error", "api", f"GET {self.path} 未捕获异常：{exc!r}")
+            try:
+                payload, code = _api_error_payload(
+                    _normalize_api_path(urlparse(self.path).path), exc)
+                self._json(payload, code)
+            except Exception:
+                pass
+
+    def _do_get_impl(self):
         path = _normalize_api_path(urlparse(self.path).path)
         # ---- 静态资源（v2.17 白名单制；v2.22 升级为 相对路径 映射）
         # **白名单制**：URL 必须精确命中，根本不存在「路径解析」这一步 ——
@@ -988,6 +1095,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(get_state(exact))
             if path == "/api/log":
                 return self._json({"items": core.tail_log(80)})
+            if path == "/api/doctor":
+                # v2.24：doctor 体检的网页端入口。**只读** —— 浏览器永远
+                # 触发不了 --fix（那是 CLI 里的显式动作，复用同一套恢复
+                # 入口，不新增第二种恢复语义）。路径统一脱敏后再出门。
+                from workbuddy_market.doctor import run_doctor
+                result = run_doctor(fix=False)
+                for c in result.get("checks", []):
+                    c["detail"] = _sanitize_text(str(c.get("detail", "")))
+                    c["name"] = _sanitize_text(str(c.get("name", "")))
+                return self._json({"ok": True, "doctor": result})
             if path == "/api/catalog":
                 cat = core.load_catalog()
                 return self._json({"ok": True, "stale": core.is_stale(cat),
@@ -1166,8 +1283,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "error": f"打不开：{exc}"}, 500)
                 return self._json({"ok": True, "opened": str(target)})
         except Exception as exc:  # 任何异常都回成 JSON，别让界面白屏
-            core.log("error", "api", f"{path} 出错：{exc}")
-            return self._json({"ok": False, "error": str(exc)}, 500)
+            core.log("error", "api", f"{path} 出错：{exc!r}")
+            payload, code = _api_error_payload(path, exc)
+            return self._json(payload, code)
         return self._json({"error": "not found", "path": path}, 404)
 
 
