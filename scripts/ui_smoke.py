@@ -28,6 +28,7 @@ WBM_MARKET_ROOT / WBM_STATE_HOME / WBM_HOME 全部指进临时区，
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -68,6 +69,35 @@ def build_isolated_market(base: Path) -> Path:
     return root
 
 
+def _ensure_config(root: Path) -> None:
+    """fresh clone 没有 market.config.json（私有配置不入库）—— CI 首跑
+    实锤（run #3：ConfigError → 零卡片 → 超时）。从 example + plugins/
+    目录合成一份确定性配置：单个 localPlugin 扫全量 SKILL.md，让本机
+    安装端到端在 --ci 门禁下必然有可交互项。已有配置绝不覆盖。"""
+    cfg_path = root / "market.config.json"
+    if cfg_path.exists():
+        return
+    example = json.loads(
+        (ROOT / "market.config.example.json").read_text(encoding="utf-8"))
+    skills = sorted(
+        d.name for d in (root / "plugins").glob("*/skills/*")
+        if d.is_dir() and (d / "SKILL.md").is_file())
+    if not skills:
+        raise SystemExit("FAIL：plugins/ 扫不到任何带 SKILL.md 的 skill")
+    example["localPlugins"] = [{
+        "name": "ci-smoke-suite",
+        "version": "1.0.0",
+        "displayName": "CI smoke suite",
+        "category": "验收",
+        "description": "CI fresh clone 场景下由 ui_smoke 合成的临时配置",
+        "keywords": [],
+        "skills": skills,
+    }]
+    cfg_path.write_text(
+        json.dumps(example, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true", help="有头模式（肉眼验收）")
@@ -89,6 +119,7 @@ def main():
 
     tmp = Path(tempfile.mkdtemp(prefix="wbm-ui-smoke-"))
     market_root = build_isolated_market(tmp)
+    _ensure_config(market_root)
     os.environ["WBM_MARKET_ROOT"] = str(market_root)
     os.environ["WBM_STATE_HOME"] = str(tmp / "state")
     os.environ["WBM_HOME"] = str(tmp / "wb-home")
