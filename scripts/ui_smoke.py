@@ -70,10 +70,12 @@ def build_isolated_market(base: Path) -> Path:
 
 
 def _ensure_config(root: Path) -> None:
-    """fresh clone 没有 market.config.json（私有配置不入库）—— CI 首跑
-    实锤（run #3：ConfigError → 零卡片 → 超时）。从 example + plugins/
-    目录合成一份确定性配置：单个 localPlugin 扫全量 SKILL.md，让本机
-    安装端到端在 --ci 门禁下必然有可交互项。已有配置绝不覆盖。"""
+    """fresh clone 没有 market.config.json 也没有 plugins/（两者都不入库）
+    —— run #3 / run #4 双实锤。合成一份确定性配置：
+      · plugins/ 里扫得到 SKILL.md → 全量收编为单个 localPlugin；
+      · 扫不到（CI）→ 现场生成一个最小 dummy skill，保证 --ci 门禁的
+        「本机安装端到端」必然有可交互项。
+    已有配置绝不覆盖（幂等）。"""
     cfg_path = root / "market.config.json"
     if cfg_path.exists():
         return
@@ -83,7 +85,16 @@ def _ensure_config(root: Path) -> None:
         d.name for d in (root / "plugins").glob("*/skills/*")
         if d.is_dir() and (d / "SKILL.md").is_file())
     if not skills:
-        raise SystemExit("FAIL：plugins/ 扫不到任何带 SKILL.md 的 skill")
+        dummy = root / "plugins" / "ci-smoke-suite" / "skills" / "ci-smoke-dummy"
+        dummy.mkdir(parents=True, exist_ok=True)
+        (dummy / "SKILL.md").write_text(
+            "---\nname: ci-smoke-dummy\n"
+            "description: ui-smoke --ci 门禁用的确定性最小 skill（运行时生成，非真实内容）\n---\n\n"
+            "# CI Smoke Dummy\n\n"
+            "本 skill 由 scripts/ui_smoke.py 在隔离区现场生成，用于验收\n"
+            "「补齐 → 事务安装 → toast」端到端链路，不代表任何真实插件。\n",
+            encoding="utf-8")
+        skills = ["ci-smoke-dummy"]
     example["localPlugins"] = [{
         "name": "ci-smoke-suite",
         "version": "1.0.0",
