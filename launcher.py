@@ -151,7 +151,19 @@ def run_action(args) -> int | None:
 
     what = chosen[0]
     if what == "status":
-        p = _status_payload()
+        # v2.24：配置缺失/损坏不再裸抛 traceback —— 给人话 + 下一步指引。
+        try:
+            p = _status_payload()
+        except core.ConfigError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)},
+                                 ensure_ascii=False, indent=2))
+            else:
+                _line("状态读取失败：配置文件有问题 ——")
+                _line("  " + str(exc).replace("\n", "\n  "))
+                _line("  首次使用：直接重跑 python launcher.py（会从模板自动初始化配置，")
+                _line("  绝不覆盖已有文件）；损坏文件会被原样保留，按提示修复即可。")
+            return 1
         human = (f"市场：{p['marketId']} v{p['marketVersion']}｜"
                  f"{'已注册' if p['registered'] else '未注册'}｜"
                  f"插件 {p['localPlugins']} / 源 {p['remoteSources']}｜"

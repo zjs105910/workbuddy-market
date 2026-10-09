@@ -8,7 +8,7 @@
     --radius:14px; --shadow:0 1px 2px rgba(21,34,56,.05), 0 6px 20px -8px rgba(21,34,56,.13);
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
+  html,body{margin:0;padding:0;overflow-x:hidden}   /* 事件流抽屉停泊在屏外（fixed+transform），横向滚动一律不开放 */
   body{
     background:var(--bg); color:var(--text);
     font:14px/1.6 "Microsoft YaHei UI","Microsoft YaHei",-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
@@ -95,6 +95,7 @@
   }
   .hint.warn{background:var(--warn-soft);border-color:var(--warn-line);color:#7d5410}
   .hint b{color:inherit}
+  .hint code{overflow-wrap:anywhere}   /* 长文件名在 360px 档不允许把页面撑宽 */
 
   .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
   .search{flex:1 1 240px;position:relative;min-width:200px}
@@ -160,6 +161,14 @@
   .sk .tag.ok{background:var(--ok-soft);color:var(--ok)}
   .sk .tag.warn{background:var(--warn-soft);color:var(--warn)}
   .sk .tag.grey{color:var(--faint);border:1px solid var(--line)}
+
+  /* ---- v2.24：doctor 体检报告行 ---- */
+  .doctor .row{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .doctor .row:last-child{border-bottom:none}
+  .doctor .tag{font-size:12px;border-radius:6px;padding:2px 8px;flex:0 0 auto;white-space:nowrap}
+  .doctor .tag.ok{background:var(--ok-soft);color:var(--ok)}
+  .doctor .tag.warn{background:var(--warn-soft);color:var(--warn)}
+  .doctor .tag.bad{background:var(--bad-soft);color:var(--bad)}
   .toggle{font:inherit;font-size:11.5px;color:var(--accent);cursor:pointer;user-select:none;background:none;border:none;padding:0}
 
   .veil{
@@ -228,6 +237,15 @@
   .toast.bad{background:#a83228}
 
   .empty{text-align:center;color:var(--faint);padding:44px 20px;font-size:13.5px}
+
+  /* ---- v2.24：窄屏（360px 档）不横向溢出 ---- */
+  @media (max-width:460px){
+    .grid{grid-template-columns:1fr}
+    .wrap{padding:16px 12px 60px}
+    .meta code,.kw i{overflow-wrap:anywhere}
+    .adv-body code{overflow-wrap:anywhere}
+    .card-foot{flex-wrap:wrap}
+  }
   footer{margin-top:34px;text-align:center;color:var(--faint);font-size:11.5px;line-height:2}
   footer code{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 

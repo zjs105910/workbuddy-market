@@ -4,7 +4,7 @@
 
 import { STATE, REG, cat, tab, setState, setCatalog, setReg, setCat, setTab, setFilter } from "./state.js";
 import { api } from "./api.js";
-import { $, esc, attr, mb, toast, confirmBox, infoBox } from "./utils.js";
+import { $, esc, attr, mb, toast, confirmBox, infoBox, errorBox } from "./utils.js";
 import { renderCards } from "./plugins.js";
 import { regUpdatable, showUpdateCenter } from "./update.js";
 import { regDetailHtml } from "./details.js";
@@ -190,7 +190,11 @@ $("#btnSync").onclick = async (e) => {
     }
     toast(msg);
     await refresh();
-  }catch(err){ toast(err.message, true); }
+  }catch(err){
+    // v2.24：结构化错误弹窗（四段式 + 重试），替换裸 toast
+    const act = await errorBox("重新打包失败", err, () => $("#btnSync").click());
+    if(act === "log") await loadLog();
+  }
   finally{ e.target.disabled = false; }
 };
 
@@ -209,7 +213,11 @@ $("#btnReg").onclick = async (e) => {
       toast(r.changed ? "注册完成 —— 打开 WorkBuddy 的插件面板就能看到本市场" : "已是注册状态");
     }
     await refresh();
-  }catch(err){ toast(err.message, true); }
+  }catch(err){
+    const act = await errorBox(STATE.registered ? "撤销注册失败" : "注册失败", err,
+                               () => $("#btnReg").click());
+    if(act === "log") await loadLog();
+  }
   finally{ e.target.disabled = false; }
 };
 
@@ -235,6 +243,42 @@ $("#btnTrash").onclick = async () => {
 
 $("#btnLog").onclick = async () => { $("#drawer").classList.add("show"); await loadLog(); };
 $("#btnLogClose").onclick = () => $("#drawer").classList.remove("show");
+
+/* ---- v2.24：doctor 体检（只读；导出仅在用户主动点击时生成，路径已脱敏） ---- */
+async function loadDoctor(){
+  let r;
+  try{ r = await api("/api/doctor"); }
+  catch(err){ await errorBox("体检失败", err); return; }
+  const d = r.doctor || {};
+  const rows = '<div class="doctor">' + (d.checks || []).map(c => {
+    const mark = c.ok && !c.warn ? "✓" : (c.ok ? "!" : "✗");
+    const cls = c.ok ? (c.warn ? "warn" : "ok") : "bad";
+    return '<div class="row"><span class="tag '+cls+'">'+mark+' '+esc(c.name)+'</span>'+
+           '<span style="color:var(--muted);font-size:12px">'+esc(c.detail||"")+'</span></div>';
+  }).join("") + '</div>';
+  const summary = (d.ok ? '<div class="note">体检通过（无错误项）。' : '<div class="note" style="color:var(--bad)">存在错误项。') +
+    '导出的报告已把用户主目录脱敏成 ~，可以安全分享。</div>';
+  const ok2 = await confirmBox("市场体检（只读）", rows + summary, "导出诊断报告");
+  if(!ok2) return;
+  const now = new Date().toISOString();
+  const text = "WorkBuddy Market 诊断报告\n生成时间：" + now + "\n" +
+    (d.checks || []).map(c => (c.ok ? (c.warn ? "[警告] " : "[通过] ") : "[错误] ") + c.name +
+      (c.detail ? " — " + c.detail : "")).join("\n") +
+    "\n（用户主目录已脱敏为 ~；本报告不含口令与令牌）\n";
+  try{
+    await navigator.clipboard.writeText(text);
+    toast("诊断报告已复制到剪贴板（已脱敏）");
+  }catch(e){
+    const blob = new Blob([text], {type: "text/plain;charset=utf-8"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "wbm-doctor-report.txt";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("已下载 wbm-doctor-report.txt（已脱敏）");
+  }
+}
+$("#btnDoctor").onclick = loadDoctor;
 
 /* ---------------- 启动 ---------------- */
 bindRefresh(refresh);

@@ -62,6 +62,10 @@
            回归 + 前端 fail-open 源码盯防）、四问结构、审核范围
            「未提供」不推断、三入口 tab 与高级信息折叠发货盯防、
            分类筛选控件原生 button
+第 38 节   v2.24：结构化错误 / doctor Web 入口 —— 错误分类与
+           retryable、内部错误不泄原文、不谎称「未受影响」、
+           路径脱敏、/api/doctor 只读端到端 + 403 门禁、
+           --status 配置缺失人话出口
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -81,7 +85,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.23"
+SELFTEST_VERSION = "2.24"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -596,6 +600,9 @@ def run() -> None:
     # ============ 37. v2.23：信息架构 / 安装四问 / 信任 fail-closed ============
     round22()
 
+    # ============ 38. v2.24：结构化错误 / doctor Web 入口 / 路径脱敏 ============
+    round23()
+
 
 def round20():
     """v2.21：收藏 / 注册表结构化解析 / 截图域名白名单 / CLI list·search。
@@ -1041,6 +1048,108 @@ def round22():
        and "<details" in idx and "高级信息" in idx)
     ck("★ 分类/筛选控件全部是原生 button（div.chip 已清零）",
        '<div class="chip"' not in idx and '<button class="chip' in idx)
+
+
+def round23():
+    """v2.24：结构化错误 / doctor Web 入口 / 路径脱敏（第 38 节）。
+
+    评审 P1（「把报错变成可以执行的修复建议」）的当轮落地，盯防四件事：
+    1. _api_error_payload 分类正确：config / concurrency / integrity /
+       network / internal 各归各位，retryable 语义如实；
+    2. **绝不泄密**：内部错误的原始异常文本不进响应载荷（只进本地日志）；
+    3. **绝不撒谎**：拿不到「已完成什么」时如实写「无法确认」，
+       不自动声称「数据未受影响」；
+    4. /api/doctor 只读 + 路径脱敏（用户主目录 → ~）；launcher --status
+       在配置缺失时给人话与下一步指引，不再裸抛 traceback。
+    """
+    section("38. v2.24：结构化错误 / doctor Web 入口 / 路径脱敏")
+    import market_server as srv2
+    from workbuddy_market.errors import ConfigError, FileLockTimeout
+
+    # --- 38A. 错误映射分类
+    p, code = srv2._api_error_payload("/api/install", ConfigError("bad id"))
+    ck("★ ConfigError → config 类、不可重试、400",
+       p["category"] == "config" and p["retryable"] is False and code == 400
+       and p["code"] == "CONFIG_INVALID")
+    p, code = srv2._api_error_payload("/api/install", FileLockTimeout("locked"))
+    ck("★ FileLockTimeout → concurrency 类、可重试、503",
+       p["category"] == "concurrency" and p["retryable"] is True and code == 503)
+    p, _ = srv2._api_error_payload("/api/remote/add",
+                                   OSError("connection timed out"))
+    ck("★ 网络类关键词 → network、可重试",
+       p["category"] == "network" and p["retryable"] is True)
+    p, _ = srv2._api_error_payload("/api/install", RuntimeError("boom-xyz"))
+    ck("★ 未知异常 → internal、不可重试", p["category"] == "internal"
+       and p["retryable"] is False)
+
+    # --- 38B. 绝不泄密 / 绝不撒谎
+    p, _ = srv2._api_error_payload("/api/install", RuntimeError("boom-xyz"))
+    ck("★ 内部错误：原始异常文本不进响应（只进本地日志）",
+       "boom-xyz" not in json.dumps(p, ensure_ascii=False))
+    ck("★ 内部错误：不谎称「数据未受影响」，如实写「无法确认」",
+       "无法确认" in p.get("done", ""))
+    ck("★ 每个载荷都带人话 error 与下一步 advice",
+       all(p.get(k) for k in ("error", "advice", "stage")))
+
+    # --- 38C. 路径脱敏
+    home = str(Path.home())
+    fake = home + "\\somewhere\\secret-name"
+    ck("★ _sanitize_text：用户主目录 → ~（用户名不进诊断报告）",
+       srv2._sanitize_text(fake).startswith("~")
+       and Path.home().name not in srv2._sanitize_text(fake))
+
+    # --- 38D. /api/doctor 端到端（真起服务，只读）
+    TOKD = "selftest-doctor-token"
+    httpd4 = srv2.make_server(0, token=TOKD)
+    PORT4 = httpd4.server_address[1]
+    threading.Thread(target=httpd4.serve_forever, daemon=True).start()
+
+    def hit4(path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", PORT4, timeout=10)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        raw = r.read()
+        c.close()
+        try:
+            return r.status, json.loads(raw)
+        except Exception:
+            return r.status, raw.decode("utf-8", "replace")
+
+    try:
+        st, js = hit4("/api/doctor", {"X-Local-Market-Token": TOKD})
+        ck("★ GET /api/doctor：200 + checks 列表", st == 200 and js.get("ok")
+           and isinstance(js.get("doctor", {}).get("checks"), list)
+           and len(js["doctor"]["checks"]) > 0, str(st))
+        ck("★ /api/doctor 无口令 → 403（新接口同样过 _guard）",
+           hit4("/api/doctor")[0] == 403)
+        doc_txt = json.dumps(js, ensure_ascii=False)
+        ck("★ /api/doctor 响应不含真实用户主目录（已脱敏为 ~）",
+           home not in doc_txt and "~" in doc_txt)
+    finally:
+        httpd4.shutdown()
+        httpd4.server_close()
+
+    # --- 38E. launcher --status：配置缺失 → 人话 + 下一步（不再裸 traceback）
+    repo_root = Path(__file__).resolve().parent
+    iso = _TMP / "status-iso"
+    shutil.rmtree(iso, ignore_errors=True)
+    mkc = iso / "market"
+    (mkc / "web").mkdir(parents=True)
+    shutil.copy2(repo_root / "market.config.example.json",
+                 mkc / "market.config.example.json")
+    env2 = dict(os.environ)
+    env2.update({"WBM_MARKET_ROOT": str(mkc), "WBM_STATE_HOME": str(iso / "state"),
+                 "WBM_HOME": str(iso / "wb")})
+    env2.pop("PYTHONPATH", None)
+    r = subprocess.run(
+        [sys.executable, str(repo_root / "launcher.py"), "--status", "--json"],
+        env=env2, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=120, cwd=str(repo_root))
+    ck("★ --status 配置缺失 → 退出码 1 且 JSON 报错（人话）",
+       r.returncode == 1 and json.loads(r.stdout or "{}").get("ok") is False
+       and "market.config.json" in (json.loads(r.stdout or "{}").get("error") or ""))
+    ck("★ --status 配置缺失 → stderr 无 Python traceback",
+       "Traceback" not in (r.stderr or ""))
 
 
 def round19():
@@ -3518,7 +3627,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.23.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.24.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3599,9 +3708,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.23.0"
-       and core.MARKET_VERSION == "2.23.0"
-       and SELFTEST_VERSION == "2.23", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.24.0"
+       and core.MARKET_VERSION == "2.24.0"
+       and SELFTEST_VERSION == "2.24", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")

@@ -291,7 +291,140 @@ def main():
                 CI_GATE["skipped_core"].append("收藏开关")
                 ck("收藏开关（无社区条目，跳过）", True)
 
+            # ==== v2.24 扩展：卸载旅程 / Escape / 响应式 ====
+            # 等安装 toast 收起（3.4s 自动隐藏），避免把安装的 toast 误读成卸载结果
+            page.wait_for_function(
+                "!!document.querySelector('#toast') && "+
+                "!document.querySelector('#toast').classList.contains('show')",
+                timeout=10000)
+            # 卸载 → 回收站（安装端到端之后，第一张本机卡片必有「卸载…」）
+            uns = page.locator("[data-uninstall]").first
+            if uns.count():
+                uns.click()
+                page.wait_for_selector("#cfm.show", timeout=5000)
+                page.locator("#cfmYes").click()          # 确认「卸载」
+                page.wait_for_function(
+                    "document.querySelector('#toast').classList.contains('show')",
+                    timeout=30000)
+                toast_txt = page.locator("#toast").inner_text()
+                ck("★ 卸载旅程（确认 → 移入回收站 → toast）",
+                   ("回收站" in toast_txt) or ("移除" in toast_txt), toast_txt)
+                ck("★ 卸载后磁盘落账：隔离区回收站非空",
+                   any((tmp / "state" / "trash").rglob("*")) if (tmp / "state" / "trash").exists()
+                   else False)
+            else:
+                ck("卸载旅程（无可卸载项，跳过）", True)
+
+            # Escape 关弹窗（可访问性）
+            page.click("#tab-curated")
+            page.wait_for_timeout(300)
+            d2 = page.locator("[data-regdetail]").first
+            if d2.count():
+                d2.click()
+                page.wait_for_selector("#cfm.show", timeout=5000)
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+                ck("★ Escape 关闭弹窗",
+                   "show" not in (page.locator("#cfm").get_attribute("class") or ""))
+            else:
+                ck("Escape 关闭弹窗（无详情入口，跳过）", True)
+            page.click("#tab-local")
+            page.wait_for_timeout(300)
+
+            # 响应式三档：核心入口可见 + 无意外横向溢出
+            overflow_ok, tabs_ok = True, True
+            for w in (360, 768, 1280):
+                page.set_viewport_size({"width": w, "height": 900})
+                page.wait_for_timeout(250)
+                sw = page.evaluate(
+                    "document.documentElement.scrollWidth")
+                cw = page.evaluate(
+                    "document.documentElement.clientWidth")
+                if sw > cw + 2:
+                    overflow_ok = False
+                if not page.locator("#tabs").is_visible():
+                    tabs_ok = False
+            ck("★ 响应式 360/768/1280：无横向溢出", overflow_ok)
+            ck("★ 响应式 360/768/1280：三入口 tab 始终可见", tabs_ok)
+            page.set_viewport_size({"width": 1280, "height": 900})
+            page.wait_for_timeout(250)
+
             page.screenshot(path=str(shots / "main.png"), full_page=True)
+
+            # ==== v2.24 扩展：配置损坏 / 缺失 / 空市场的界面状态 ====
+            # 同一隔离区、同一服务进程：config 是每请求从磁盘读的，
+            # 改磁盘即改状态（确定性，无注入魔法）。
+            cfg_path = market_root / "market.config.json"
+            cfg_backup = cfg_path.read_bytes()
+
+            # --- 空市场：合法但没有任何插件与收录源
+            empty_cfg = json.loads(cfg_backup.decode("utf-8"))
+            empty_cfg["localPlugins"] = []
+            empty_cfg["remoteSources"] = []
+            cfg_path.write_text(json.dumps(empty_cfg, ensure_ascii=False),
+                                encoding="utf-8")
+            pg2 = browser.new_page()
+            errs2, toasts2 = [], []
+            pg2.on("pageerror", lambda e: errs2.append(str(e)))
+            pg2.goto(base, wait_until="domcontentloaded")
+            try:
+                pg2.wait_for_selector("#tab-local", timeout=10000)
+                pg2.wait_for_timeout(1200)
+                ck("★ 空市场状态：界面骨架正常（tab 就位、无 pageerror）",
+                   not errs2 and pg2.locator("#tab-curated").count() == 1,
+                   "; ".join(errs2[:2]))
+            finally:
+                pg2.close()
+
+            # --- 配置损坏：结构化错误 + 界面不白屏
+            cfg_path.write_bytes(b"{broken,,,")
+            pg3 = browser.new_page()
+            errs3 = []
+            pg3.on("pageerror", lambda e: errs3.append(str(e)))
+            pg3.goto(base, wait_until="domcontentloaded")
+            try:
+                pg3.wait_for_function(
+                    "document.querySelector('#toast').classList.contains('show')",
+                    timeout=15000)
+                t3 = pg3.locator("#toast").inner_text()
+                ck("★ 配置损坏状态：结构化人话报错（无裸异常、无 pageerror）",
+                   not errs3 and ("配置" in t3) and ("Traceback" not in t3), t3[:80])
+            finally:
+                pg3.close()
+
+            # --- 配置缺失：同样结构化、不白屏
+            cfg_path.unlink()
+            pg4 = browser.new_page()
+            errs4 = []
+            pg4.on("pageerror", lambda e: errs4.append(str(e)))
+            pg4.goto(base, wait_until="domcontentloaded")
+            try:
+                pg4.wait_for_function(
+                    "document.querySelector('#toast').classList.contains('show')",
+                    timeout=15000)
+                t4 = pg4.locator("#toast").inner_text()
+                ck("★ 配置缺失状态：结构化人话报错（界面照常可打开）",
+                   not errs4 and ("配置" in t4), t4[:80])
+            finally:
+                pg4.close()
+            cfg_path.write_bytes(cfg_backup)   # 还原，别污染后续
+
+            # --- doctor 体检入口（v2.24，只读）
+            pg5 = browser.new_page()
+            errs5 = []
+            pg5.on("pageerror", lambda e: errs5.append(str(e)))
+            pg5.goto(base, wait_until="domcontentloaded")
+            try:
+                pg5.wait_for_selector("#tab-local", timeout=10000)
+                pg5.click("#btnDoctor")
+                pg5.wait_for_selector("#cfm.show", timeout=10000)
+                body5 = pg5.locator("#cfmBody").inner_text()
+                ck("★ doctor 体检弹窗（检查项 + 脱敏说明）",
+                   not errs5 and ("体检" in body5 or "✓" in body5 or "✗" in body5)
+                   and "脱敏" in body5, body5[:60])
+            finally:
+                pg5.close()
+
             # JS 异常才是硬错误；纯资源加载失败（远程截图等）是环境噪音，
             # 同源 API 的失败已由 bad_same_origin 单独盯防，不放跑。
             js_errors = [e for e in console_errors

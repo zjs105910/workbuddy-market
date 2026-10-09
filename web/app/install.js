@@ -4,7 +4,7 @@
 
 import { STATE, REG } from "./state.js";
 import { api } from "./api.js";
-import { $, esc, toast, confirmBox } from "./utils.js";
+import { $, esc, toast, confirmBox, errorBox } from "./utils.js";
 import { permBlock } from "./trust.js";
 import { watchJob, refreshNow } from "./jobs.js";
 
@@ -30,7 +30,11 @@ export async function handleDataAction(t){
       if(r.failed.length) parts.push("失败 "+r.failed.length+" 个");
       toast(parts.length ? parts.join("，") : "没有需要处理的 skill", r.failed.length > 0);
       refreshNow();
-    }catch(err){ toast(err.message, true); t.disabled = false; }
+    }catch(err){
+      // v2.24：结构化错误弹窗（重试按钮原样再点一次同一动作）
+      const act = await errorBox("安装「"+id+"」失败", err, () => t.click());
+      if(act === "retry"){ t.disabled = true; }
+    }
     return true;
   }
 
@@ -64,7 +68,10 @@ export async function handleDataAction(t){
       const r = await api("/api/uninstall", {id});
       toast(r.moved.length ? ("已移入回收站："+r.moved.join("、")) : "没有需要移除的 skill");
       refreshNow();
-    }catch(err){ toast(err.message, true); t.disabled = false; }
+    }catch(err){
+      const act = await errorBox("卸载「"+id+"」失败", err, () => t.click());
+      if(act === "retry"){ t.disabled = true; }
+    }
     return true;
   }
 
@@ -131,7 +138,10 @@ export async function handleDataAction(t){
           const r2 = await api("/api/remote/add", {repo, allowNonSkill: allowNs, force: true});
           watchJob(r2.jobId, "安装 " + repo);
         }catch(e2){ toast(e2.message, true); }
-      } else { toast(err.message, true); }
+      } else {
+        // v2.24：非 409 的失败走结构化错误弹窗
+        await errorBox((isAdd?"安装 ":"更新 ")+repo+" 失败", err);
+      }
     }
     return true;
   }
