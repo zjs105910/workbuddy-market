@@ -54,6 +54,10 @@
            注册表结构化解析（嵌套 source/artifact/compatibility/trust/
            quality 与平铺等价）、截图域名白名单（fail-closed）、
            cli list / search 包级查询
+第 36 节   v2.22：onboard 首次启动向导 —— 配置缺失自动初始化
+           （独占创建 / 防覆盖 / 异常清理）、损坏配置字节级保留、
+           模板缺失诚实报错、并发初始化、非交互不等待、
+           回车=只浏览、注册闸门语义、全新克隆真子进程启动端到端
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -73,7 +77,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.21"
+SELFTEST_VERSION = "2.22"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -582,6 +586,9 @@ def run() -> None:
     # ============ 35. v2.21：收藏 / 注册表结构化 / 截图 / CLI 查询 ============
     round20()
 
+    # ============ 36. v2.22：onboard 首次启动向导 / 配置安全初始化 ============
+    round21()
+
 
 def round20():
     """v2.21：收藏 / 注册表结构化解析 / 截图域名白名单 / CLI list·search。
@@ -730,6 +737,251 @@ def round20():
     ck("★ 缺 license / 缺兼容性只警告不拦（早期收录不阻塞）",
        not errs_p and any("license" in w for w in warns_p)
        and any("兼容性" in w for w in warns_p))
+
+
+def round21():
+    """v2.22：onboard 首次启动向导 / 配置安全初始化（第 36 节）。
+
+    八条盯防线（评审 P0「让普通用户一次用成功」的当轮落地）：
+    1. 配置缺失 + 模板存在 → 初始化成功、产物合法、发现的 skills 绝不
+       被自动收录（localPlugins 保持空，加入市场内容由用户决定）；
+    2. 配置已存在（合法）→ 一字节不动（sha256 前后一致）；
+    3. 配置损坏 → 原样保留 + 明确错误位置与恢复建议，绝不覆盖；
+    4. 模板缺失 / 模板损坏 → 诚实报错，不生成猜测配置；
+    5. 并发初始化（真并发线程）→ 恰好一个 created、其余 exists，
+       产物完整；写入中途失败 → 半成品被清理，不留半截 JSON；
+    6. 非交互环境 → 不等待输入，直接纯浏览并说明原因；
+    7. 交互首次启动 → 回车 = 只浏览（默认安全）；显式选 2 = 注册意图，
+       但向导本身绝不写 known_marketplaces.json；
+    8. 全新克隆启动端到端（真子进程 + 真 HTTP）：源目录没有
+       market.config.json、不靠任何预合成配置 —— 启动后配置被自动
+       初始化、页面可达、纯浏览模式下 known_marketplaces.json 不存在。
+    """
+    section("36. v2.22：onboard 首次启动向导 / 配置安全初始化")
+    import workbuddy_market.onboard as ob
+
+    # --- 环境准备：隔离区市场根里补上 web/ 与模板（全新克隆的形状）
+    web_min = core.MARKET_ROOT / "web"
+    web_min.mkdir(exist_ok=True)
+    (web_min / "index.html").write_text("<html><body>min</body></html>", encoding="utf-8")
+    tpl = core.MARKET_ROOT / "market.config.example.json"
+    tpl.write_text(json.dumps({
+        "schemaVersion": 2, "marketId": "wb-local-market",
+        "name": "本机插件市场", "owner": {"name": "WorkBuddy Local Market"},
+        "localPlugins": [], "remoteSources": [],
+        "packaging": {"verify": "auto", "hashAlgorithm": "sha256"},
+        "trash": {"maxAgeDays": 30, "maxSizeBytes": 2147483648},
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    cfg_backup = core.CONFIG_PATH.read_bytes()   # 收尾恢复用
+    # 前序轮次（第 13 节注册测试等）可能已经动过注册文件 —— 这里快照做「不被改动」断言
+    known_before = (core.KNOWN_PATH.read_bytes()
+                    if core.KNOWN_PATH.exists() else None)
+    try:
+        # --- 36A. 缺失 + 模板存在 → 初始化成功且能继续启动
+        core.CONFIG_PATH.unlink()
+        r = ob.init_config()
+        ck("★ 配置缺失 + 模板存在 → 初始化成功", r["action"] == "created")
+        created = json.loads(core.CONFIG_PATH.read_text(encoding="utf-8"))
+        ck("★ 初始化产物是合法配置且可被 load_config 继续",
+           created["marketId"] == "wb-local-market"
+           and core.load_config()["marketId"] == "wb-local-market")
+        ck("★ 发现的 skills 不被自动收录（localPlugins 保持空）",
+           created["localPlugins"] == [] and created["remoteSources"] == []
+           and len(ob.discover_skills()) >= 3)   # 前序轮次可能造了更多 skill，只增不减
+
+        # --- 36B. 已存在且合法 → 一字节不动
+        before = hashlib.sha256(core.CONFIG_PATH.read_bytes()).hexdigest()
+        r = ob.init_config()
+        ck("★ 配置已存在 → exists 且 sha256 前后一致",
+           r["action"] == "exists"
+           and hashlib.sha256(core.CONFIG_PATH.read_bytes()).hexdigest() == before)
+
+        # --- 36C. 损坏 → 原样保留 + 恢复建议
+        bad = b'{"marketId": "x",,,,'
+        core.CONFIG_PATH.write_bytes(bad)
+        st, detail = ob.classify_config()
+        ck("★ 损坏配置 → 如实标 corrupt 且给恢复建议",
+           st == "corrupt" and "原样保留" in detail)
+        r = ob.init_config()
+        ck("★ 损坏配置 → 绝不覆盖（字节级一致）",
+           r["action"] == "exists" and core.CONFIG_PATH.read_bytes() == bad)
+
+        # --- 36D. 模板缺失 / 模板坏 → 诚实报错
+        core.CONFIG_PATH.unlink()
+        r = ob.init_config(template_path=core.MARKET_ROOT / "no-such-tpl.json")
+        ck("★ 模板缺失 → 诚实报错、不生成猜测配置",
+           r["action"] == "error" and "模板" in r["detail"]
+           and not core.CONFIG_PATH.exists())
+        badtpl = core.MARKET_ROOT / "bad-tpl.json"
+        badtpl.write_text("{oops", encoding="utf-8")
+        r = ob.init_config(template_path=badtpl)
+        ck("★ 模板损坏 → 诚实报错",
+           r["action"] == "error" and "JSON" in r["detail"]
+           and not core.CONFIG_PATH.exists())
+        badtpl.unlink()
+
+        # --- 36E. 并发初始化：真并发 + 注入半途失败
+        res = {}
+
+        def _worker(i):
+            res[i] = ob.init_config()
+
+        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        actions = sorted(v["action"] for v in res.values())
+        ck("★ 4 线程并发初始化 → 恰好一个 created，其余沿用（绝不互相覆盖）",
+           actions.count("created") == 1 and actions.count("exists") == 3,
+           str(actions))
+        ck("★ 并发产物是完整合法 JSON（没有半截文件）",
+           isinstance(json.loads(core.CONFIG_PATH.read_text(encoding="utf-8")), dict))
+        core.CONFIG_PATH.unlink()
+        real_write = ob._os_write
+
+        def _boom(fd, view):
+            real_write(fd, memoryview(b"{"))
+            raise OSError("注入：写到一半进程崩了")
+
+        ob._os_write = _boom
+        try:
+            try:
+                ob.init_config()
+            except OSError:
+                pass
+            ck("★ 写入中途失败 → 半成品被清理（磁盘上没有半截 JSON）",
+               not core.CONFIG_PATH.exists())
+        finally:
+            ob._os_write = real_write
+
+        # --- 36F. 非交互环境：不等待输入
+        def _poison(prompt=""):
+            raise AssertionError("非交互环境不应等待输入")
+
+        rep = ob.run_wizard(interactive=False, input_func=_poison)
+        ck("★ 非交互环境 → 不等待输入，直接纯浏览并说明原因",
+           rep["choice"] == "browse" and "非交互" in rep["choiceReason"])
+
+        # --- 36G. 交互首次启动：回车 = 只浏览；显式 2 = 注册意图（仍不写注册文件）
+        core.CONFIG_PATH.unlink()
+        prompts = []
+        rep = ob.run_wizard(interactive=True,
+                            input_func=lambda p: (prompts.append(p), "")[1])
+        ck("★ 首次启动交互：回车 = 只浏览（默认安全，其他输入也算只浏览）",
+           rep["choice"] == "browse" and len(prompts) == 1)
+        ck("★ 只浏览 → known_marketplaces.json 原样不动（零副作用）",
+           (core.KNOWN_PATH.read_bytes() if core.KNOWN_PATH.exists() else None)
+           == known_before)
+        core.CONFIG_PATH.unlink()
+        rep2 = ob.run_wizard(interactive=True, input_func=lambda p: "2")
+        ck("★ 显式选 2 → 注册意图（实际注册仍要过 should_register 闸门）",
+           rep2["choice"] == "register")
+        ck("★ 注册意图 ≠ 注册行为：向导本身不写 known_marketplaces.json",
+           (core.KNOWN_PATH.read_bytes() if core.KNOWN_PATH.exists() else None)
+           == known_before)
+
+        # --- 36H. 注册前置闸门（launcher 语义不变）
+        import launcher as _L
+        ck("★ should_register：打包失败 → 不允许注册",
+           _L.should_register(False, True) == (False, "打包没有成功"))
+        ck("★ should_register：自检失败 → 不允许注册",
+           _L.should_register(True, False)[0] is False)
+        ck("★ should_register：全部通过 → 允许注册",
+           _L.should_register(True, True) == (True, ""))
+
+        # --- 36I. 全新克隆启动端到端（真子进程 + 真 HTTP，无预合成配置）
+        repo_root = Path(__file__).resolve().parent
+        fresh = _TMP / "fresh-clone"
+        shutil.rmtree(fresh, ignore_errors=True)
+        mk = fresh / "market"
+        (mk / "web").mkdir(parents=True)
+        shutil.copytree(repo_root / "web" / "app", mk / "web" / "app")
+        shutil.copy2(repo_root / "web" / "index.html", mk / "web" / "index.html")
+        shutil.copy2(repo_root / "web" / "style.css", mk / "web" / "style.css")
+        shutil.copy2(repo_root / "market.config.example.json",
+                     mk / "market.config.example.json")
+        # 注意：不放 market.config.json —— 这就是全新克隆的形状
+        wbhome = fresh / "wb"
+        (wbhome / "skills").mkdir(parents=True)
+        import socket as _s
+        import urllib.request as _ur
+        with _s.socket() as _sk:
+            _sk.bind(("127.0.0.1", 0))
+            eport = _sk.getsockname()[1]
+        env = dict(os.environ)
+        env.update({"WBM_MARKET_ROOT": str(mk), "WBM_STATE_HOME": str(fresh / "state"),
+                    "WBM_HOME": str(wbhome), "WBM_CATALOG_OFF": "1"})
+        env.pop("PYTHONPATH", None)          # 干净导入路径（跨平台写法）
+        out_path = _TMP / "fresh-clone-stdout.txt"
+        proc = None
+        ok200 = False
+        try:
+            with open(out_path, "w", encoding="utf-8") as out_f:
+                proc = subprocess.Popen(
+                    [sys.executable, str(repo_root / "launcher.py"),
+                     "--no-open", "--port", str(eport)],
+                    stdout=out_f, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, env=env, cwd=str(repo_root))
+                deadline = time.time() + 60
+                while time.time() < deadline:
+                    if proc.poll() is not None:
+                        break
+                    try:
+                        with _ur.urlopen(f"http://127.0.0.1:{eport}/", timeout=3) as resp:
+                            if resp.status == 200:
+                                ok200 = True
+                                break
+                    except Exception:
+                        time.sleep(0.3)
+            ck("★ 全新克隆启动：HTTP 页面可达（真子进程）", ok200)
+            cfg_new = mk / "market.config.json"
+            ck("★ 全新克隆启动：配置被向导自动初始化（零手工步骤）",
+               cfg_new.is_file()
+               and json.loads(cfg_new.read_text(encoding="utf-8"))["marketId"]
+               == "wb-local-market")
+            ck("★ 全新克隆启动：纯浏览模式 → known_marketplaces.json 不存在",
+               not (wbhome / "plugins" / "known_marketplaces.json").exists())
+            out_text = out_path.read_text(encoding="utf-8", errors="replace")
+            ck("★ 全新克隆启动：向导输出了三态检查（成功/警告/失败可见）",
+               "首次启动检查" in out_text and "已从模板初始化" in out_text)
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+        # --- 36J. 预检覆盖与端口探测
+        core.CONFIG_PATH.unlink()
+        checks = ob.precheck(port_probe=lambda p: p, port=8777)
+        names = [c["name"] for c in checks]
+        ck("★ 预检覆盖：Python / 仓库布局 / 配置 / skills / WorkBuddy / 端口",
+           all(n in names for n in ("Python 版本", "市场目录（仓库布局）",
+                                    "配置文件", "本机 skills", "WorkBuddy 家目录",
+                                    "服务端口")))
+        cfgc = [c for c in checks if c["name"] == "配置文件"][0]
+        ck("★ 预检：配置缺失 = 警告不挡路", cfgc["ok"] and cfgc["warn"])
+        pc = [c for c in checks if c["name"] == "服务端口"][0]
+        ck("★ 预检：端口空闲 → 成功", pc["ok"] and not pc["warn"])
+        checks2 = ob.precheck(port_probe=lambda p: p + 3, port=8777)
+        pc2 = [c for c in checks2 if c["name"] == "服务端口"][0]
+        ck("★ 预检：端口被占 → 警告并给出替换端口",
+           pc2["ok"] and pc2["warn"] and "8780" in pc2["detail"])
+
+        # --- 老用户回归：已有配置 → 不询问、行为与 v2.21 一致
+        core.CONFIG_PATH.write_bytes(cfg_backup)
+        rep3 = ob.run_wizard(interactive=False, input_func=_poison)
+        ck("★ 老用户（已有合法配置）→ 不询问、不创建、行为与 v2.21 一致",
+           rep3["configAction"] == "none" and rep3["choice"] is None
+           and not rep3["created"])
+    finally:
+        if core.CONFIG_PATH.exists() and core.CONFIG_PATH.read_bytes() != cfg_backup:
+            core.CONFIG_PATH.write_bytes(cfg_backup)   # 保险恢复（幂等）
+        shutil.rmtree(web_min, ignore_errors=True)
+        tpl.unlink(missing_ok=True)
 
 
 def round19():
@@ -3207,7 +3459,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.21.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.22.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3288,9 +3540,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.21.0"
-       and core.MARKET_VERSION == "2.21.0"
-       and SELFTEST_VERSION == "2.21", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.22.0"
+       and core.MARKET_VERSION == "2.22.0"
+       and SELFTEST_VERSION == "2.22", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -3562,7 +3814,9 @@ def round11():
                and js.get("jobId"), f"{st} {str(js)[:60]}")
             jid = js["jobId"]
             done, view = 0, {}
-            while done < 200:
+            # 预算 30s：基线实测过「任务线程被宿主机负载饿到 >10s 才被调度」
+            # 的偶发（刷新本身成功，只是轮询放弃了）——预算放宽到 600 轮。
+            while done < 600:
                 _, view = hit2(f"/api/job/{jid}", headers=AUTHC)
                 if view.get("status") == "done":
                     break

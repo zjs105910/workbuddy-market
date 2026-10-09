@@ -5,12 +5,20 @@
 
     python launcher.py
 
-默认按顺序做四件事：
+默认按顺序做五件事：
 
+    0. 向导    首次启动检查：环境预检；配置缺失时从模板自动初始化
+               （绝不覆盖已有配置，损坏的原样保留并给出修复建议）
     1. 打包    把 ~/.workbuddy/skills 里配置好的 skill 打包成标准插件
     2. 自检    校验市场索引、source 目录、WorkBuddy 目录是否就位
     3. 注册    写进 WorkBuddy 的 known_marketplaces.json（自动备份、幂等）
     4. 开界面  起本地服务并打开浏览器
+
+**第 0 步**是 v2.22 新增：全新 clone 不再需要手工复制配置文件。
+首次创建配置时，交互式终端会问一次「只浏览市场（默认，回车）/ 注册到
+WorkBuddy」—— 回车永远是只浏览；非交互环境不等待输入，直接纯浏览模式。
+无论怎么选，真正的注册都仍要过 should_register() 的原有前置检查。
+不想跑向导（比如脚本里要输出干净）加 `--no-wizard`。
 
 **第 1 步或第 2 步没过，第 3 步会被跳过**（但界面照常打开）。
 注册会写 WorkBuddy 的配置文件，属于有外部副作用的动作 —— 前置检查没过就不该
@@ -61,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     act.add_argument("--purge-trash", action="store_true", help="清空回收站")
 
     opt = p.add_argument_group("选项")
+    opt.add_argument("--no-wizard", action="store_true",
+                     help="跳过 v2.22 首次启动检查（配置缺失也不再自动初始化）")
     opt.add_argument("--serve", action="store_true", help="只起本地网页服务")
     opt.add_argument("--port", type=int, default=DEFAULT_PORT, metavar="N",
                      help=f"网页服务端口（默认 {DEFAULT_PORT}；被占用会自动往后找 20 个）")
@@ -225,6 +235,36 @@ def main(argv=None) -> int:
     if not QUIET:
         print(BANNER)
 
+    # ---- [0/4] 首次启动检查（v2.22）：环境预检 + 配置缺失自动初始化。
+    #      向导零副作用（唯一可能的写是「配置缺失时的模板初始化」），
+    #      注册只产生「意图」，真正注册仍在 [3/4] 过 should_register 闸门。
+    wizard_browse = False
+    if not args.json and not args.no_wizard:
+        _line("[0/4] 首次启动检查")
+        try:
+            import workbuddy_market.onboard as onboard
+        except Exception as exc:
+            onboard = None
+            _line(f"      向导模块不可用，跳过（主流程不受影响）：{exc}")
+        if onboard is not None:
+            probe = None
+            try:
+                import market_server as _ms
+                probe = _ms._find_port        # 复用同一套端口探测（含 Windows 修复）
+            except Exception:
+                probe = None
+            try:
+                rep = onboard.run_wizard(port_probe=probe, port=args.port,
+                                         interactive=False if QUIET else None)
+                for ln in onboard.render(rep):
+                    _line("      " + ln)
+                if rep.get("created") and rep.get("choice") == "browse":
+                    wizard_browse = True
+            except Exception as exc:
+                _line(f"      首次启动检查本身出错（不阻断后续步骤）：{exc}")
+                core.log("warn", "onboard", f"向导异常：{exc}")
+
+    _line()
     _line("[1/4] 打包本机 skill → 插件（增量同步）")
     sync_ok = False
     try:
@@ -289,6 +329,11 @@ def main(argv=None) -> int:
     if args.no_register:
         _line("[3/4] 跳过注册（--no-register，纯网页模式）")
         register_skipped = "no-register"
+    elif wizard_browse:
+        _line("[3/4] 跳过注册（首次启动选择了「只浏览市场」，纯网页模式）")
+        register_skipped = "wizard-browse"
+        _line("      想注册随时可以：python launcher.py --register，"
+              "或打开网页点「注册到 WorkBuddy」。")
     else:
         allow, why = should_register(sync_ok, check_ok, args.force_register)
         _line("[3/4] 注册到 WorkBuddy 插件面板")

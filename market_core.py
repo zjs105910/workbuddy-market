@@ -141,6 +141,9 @@ from workbuddy_market.application import (   # noqa: E402,F401  （v2.19 R6 收�
 from workbuddy_market.favorites import (     # noqa: E402,F401  （v2.21 新增）
     load_favorites, is_favorite, set_favorite,
 )
+from workbuddy_market.onboard import (       # noqa: E402,F401  （v2.22 新增）
+    classify_config, discover_skills, init_config, precheck, run_wizard, render,
+)
 
 # re-export 纪律（R4 起的既定决策，v2.19 依然成立）：
 #   · 注入点晚绑定要求 re-export 在先 —— state / application 对
