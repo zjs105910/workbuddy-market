@@ -10,10 +10,17 @@
 用法：
   python scripts/ui_smoke.py            # 无头跑完输出 PASS/FAIL
   python scripts/ui_smoke.py --headed   # 有头模式，肉眼看界面
+  python scripts/ui_smoke.py --ci       # CI 门禁模式（见下）
 
 环境：
   pip install playwright && python -m playwright install chromium
-  （未安装时打印 SKIP 退出 0 —— 不挡 CI，不挡 selftest）
+  （未安装时打印 SKIP 退出 0 —— 不挡本地开发，不挡 selftest）
+
+--ci 门禁模式（v2.21 评审 P1：核心检查不允许静默跳过后仍报成功）：
+  · playwright 未安装 → 直接 FAIL（退出 1），SKIP 不存在；
+  · 本机安装端到端 / 注册表详情弹窗 / 收藏开关这三项是「数据确定性」
+    检查（隔离区自带 plugins + registry，必然有可交互项）——任何一项
+    落进「跳过」分支即 FAIL，因为那说明渲染链路坏了而不是数据缺失。
 
 隔离（与 selftest 同一纪律）：临时目录复制真实市场内容，
 WBM_MARKET_ROOT / WBM_STATE_HOME / WBM_HOME 全部指进临时区，
@@ -37,6 +44,7 @@ _COPY_ITEMS = ("market.config.json", "plugins", "web", "registry",
                ".codebuddy-plugin")
 
 CHECKS = []
+CI_GATE = {"active": False, "skipped_core": []}   # --ci：核心检查跳过即失败
 
 
 def ck(name, ok, detail=""):
@@ -63,11 +71,18 @@ def build_isolated_market(base: Path) -> Path:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true", help="有头模式（肉眼验收）")
+    ap.add_argument("--ci", action="store_true",
+                    help="CI 门禁：playwright 缺失或核心检查被跳过 → 硬失败")
     args = ap.parse_args()
+    CI_GATE["active"] = args.ci
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
+        if args.ci:
+            print("FAIL：--ci 模式要求 playwright 已安装"
+                  "（pip install playwright && python -m playwright install chromium）")
+            return 1
         print("SKIP：未安装 playwright（pip install playwright && "
               "python -m playwright install chromium）")
         return 0
@@ -90,6 +105,28 @@ def main():
 
     page_errors = []
     console_errors = []
+    # 远程资源（v2.21 screenshots 的 <img> 直拉插件仓库图片）会因本机
+    # 代理 / 网络抖动 502，污染控制台 —— 那是环境噪音，UI 本来就优雅降级。
+    # 真正要盯的是：JS error + 同源（本地服务）4xx/5xx / 请求失败。
+    bad_same_origin = []
+    # /api/gh/* 是服务端代理 GitHub 的上游调用（代理抖动 / 匿名配额 403），
+    # 失败时 UI 优雅降级为空态 —— 上游噪音不算本地 API 故障，豁免。
+
+    def _on_response(resp):
+        try:
+            if (resp.url.startswith(base) and resp.status >= 400
+                    and "/api/gh/" not in resp.url):
+                bad_same_origin.append(f"{resp.status} {resp.url}")
+        except Exception:
+            pass
+
+    def _on_reqfailed(req):
+        try:
+            if req.url.startswith(base) and "/api/gh/" not in req.url:
+                bad_same_origin.append(f"REQFAIL {req.url}")
+        except Exception:
+            pass
+
     shots = tmp / "shots"
     shots.mkdir()
     try:
@@ -100,6 +137,8 @@ def main():
             page.on("console",
                     lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
+            page.on("response", _on_response)
+            page.on("requestfailed", _on_reqfailed)
 
             page.goto(base, wait_until="domcontentloaded")
             # 卡片渲染 = refresh() 全链完成（state/catalog/registry 都已返回）
@@ -149,6 +188,7 @@ def main():
                 page.locator("#cfmYes").click()
                 page.wait_for_timeout(200)
             else:
+                CI_GATE["skipped_core"].append("注册表详情弹窗")
                 ck("注册表详情弹窗（社区目录为空，跳过）", True)
 
             # ---- 本机安装端到端：隔离 WBM_HOME 是空的 → 第一张本机卡片必有「补齐」
@@ -166,6 +206,7 @@ def main():
                 page.wait_for_timeout(800)   # 等 refresh 完成后截图
                 page.screenshot(path=str(shots / "after-install.png"))
             else:
+                CI_GATE["skipped_core"].append("本机安装端到端")
                 ck("本机安装端到端（无可安装项，跳过）", True)
 
             # ---- 收藏开关（POST /api/favorites，写进隔离 STATE_HOME）
@@ -177,16 +218,27 @@ def main():
                    (tmp / "state").exists() and
                    any((tmp / "state").rglob("favorites.json")))
             else:
+                CI_GATE["skipped_core"].append("收藏开关")
                 ck("收藏开关（无社区条目，跳过）", True)
 
             page.screenshot(path=str(shots / "main.png"), full_page=True)
-            ck("控制台无 error", not console_errors, "; ".join(console_errors[:3]))
+            # JS 异常才是硬错误；纯资源加载失败（远程截图等）是环境噪音，
+            # 同源 API 的失败已由 bad_same_origin 单独盯防，不放跑。
+            js_errors = [e for e in console_errors
+                         if not e.startswith("Failed to load resource")]
+            ck("★ 控制台无 JS error", not js_errors, "; ".join(js_errors[:3]))
+            ck("同源请求全通过（本地 API 无 4xx/5xx / 无失败请求）",
+               not bad_same_origin, "; ".join(bad_same_origin[:3]))
             browser.close()
     finally:
         httpd.shutdown()
         httpd.server_close()
 
     n_fail = CHECKS.count(False)
+    if CI_GATE["active"] and CI_GATE["skipped_core"]:
+        print(f"\nFAIL（--ci）：核心检查被静默跳过：{CI_GATE['skipped_core']} —— "
+              f"隔离区数据是确定性的，跳过说明渲染链路坏了，不是数据缺失")
+        return 1
     print(f"\n{len(CHECKS) - n_fail} passed, {n_fail} failed")
     print(f"隔离区（含截图）保留在：{tmp}")
     return 1 if n_fail else 0
