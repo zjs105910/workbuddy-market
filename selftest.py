@@ -83,8 +83,9 @@ _TMP = None
 
 if _ISOLATED:
     # .resolve() 必须加：GitHub Windows runner 的 TEMP 是 8.3 短路径
-    # （C:\Users\RUNNER~1\...），而路径常量在 import 期经 Path.resolve()
-    # 展开成长路径，后续用 str(_TMP) 做前缀比较会对不上（v2.21 CI 唯一 FAIL）。
+    # （RUNNER~1 形态，见 GitHub runner 镜像文档），而路径常量在 import 期
+    # 经 Path.resolve() 展开成长路径，后续用 str(_TMP) 做前缀比较会对不上
+    # （v2.21 CI 唯一 FAIL；本机 TEMP 已是长路径，从未暴露）。
     _TMP = Path(tempfile.mkdtemp(prefix="wbm-selftest-")).resolve()
     os.environ["GHPM_MARKET_ROOT"] = str(_TMP / "market")
     os.environ["GHPM_HOME"] = str(_TMP / "wb")
