@@ -81,4 +81,11 @@ jobs:
           gh pr create --base main --head "$BR" \
             --title "registry: artifact fields $(date -u +%F)" \
             --body "回写每日构建的不可变产物字段（packageUrl / packageHash / manifestHash）。安装端会按 packageHash 逐包校验；合并前等 CI 通过。" \
-            || echo "该分支的 PR 已存在，跳过创建"
+            || {
+              if gh pr view "$BR" --json number >/dev/null 2>&1; then
+                echo "该分支的 PR 已存在，跳过创建"
+              else
+                echo "!! gh pr create 失败且 PR 不存在 —— 常见原因：仓库未开启『Allow GitHub Actions to create and approve pull requests』（run #2 实锤过这种静默吞错）"
+                exit 1
+              fi
+            }
