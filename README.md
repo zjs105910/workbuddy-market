@@ -33,8 +33,10 @@
 
 > **本仓库不含 `plugins/`（打包产物），也不含任何人的市场配置**：市场内容是你本机 skill 的副本，属于个人数据，  
 > 不随仓库分发；`market.config.json`（含你自己的 skill 组合）同样不入库，仓库只提供模板  
-> `market.config.example.json`。运行状态、日志、所有权记录、回收站同样只留在本机。想要自己的市场内容，见[第四节](#四怎么改市场里的内容)：  
-> `cp market.config.example.json market.config.json`，再把 `localPlugins` 指向你本机 `~/.workbuddy/skills/` 里的 skill；打包阶段会把「本机不存在的 skill」跳过，网页、收录源、自检一切照常。
+> `market.config.example.json`。运行状态、日志、所有权记录、回收站同样只留在本机。  
+> **v2.22 起不需要手工复制配置**：首次启动检测到配置缺失会从模板自动初始化
+> （绝不覆盖已有配置，损坏的原样保留并给出修复建议）；想把哪些 skill 收进市场，
+> 编辑 `market.config.json` 的 `localPlugins` 后点「重新打包」即可，见[第四节](#四怎么改市场里的内容)。
 
 ---
 
@@ -46,14 +48,20 @@
 | 只想看网页界面，不想动 WorkBuddy 的配置 | `安全模式-只开网页.cmd`          |
 | 不想要这个市场了，从 WorkBuddy 里摘掉  | `撤销注册.cmd`               |
 
-`一键启动.cmd` 会依次做四件事，屏幕上都有中文提示：
+`一键启动.cmd` 会依次做五件事，屏幕上都有中文提示：
 
 ```
+[0/4] 首次启动检查（v2.22：配置缺失自动从模板初始化，绝不覆盖已有配置）
 [1/4] 打包本机 skill → 插件（增量同步）
 [2/4] 自检
 [3/4] 注册到 WorkBuddy 插件面板
 [4/4] 打开市场界面
 ```
+
+首次启动（配置刚被初始化）时，交互式终端会问一次启动方式：
+**回车 = 只浏览市场**（默认，不改动 WorkBuddy 配置）；输入 2 = 注册。
+非交互环境不等待输入，直接纯浏览模式。无论怎么选，真正的注册都仍要过
+打包 / 自检前置检查。不想跑向导加 `--no-wizard`。
 
 跑完会自动用浏览器打开一个本地网页（地址形如 `http://127.0.0.1:8777/`），  
 **这个命令行窗口不能关**，关了网页服务就停了。按 `Ctrl+C` 或直接关窗口即可停止。
@@ -200,7 +208,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 707 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 748 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -243,7 +251,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 707 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 748 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -458,6 +466,24 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | **v2.19** | **R6 收尾：state / application 迁包，market_core 收成 294 行兼容 shim** | [CHANGELOG.md](CHANGELOG.md) 2.19.0 条目 |
 | **v2.20** | **供应链安全轮：manifest permissions + 风险预览 + 兼容性检测 + 构建证明 attestation + CLI verify** | [CHANGELOG.md](CHANGELOG.md) 2.20.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) v0.3 |
 | **v2.21** | **产品化轮：收藏 + 截图 + 更新中心 + CLI list/search + 注册表结构化** | [CHANGELOG.md](CHANGELOG.md) 2.21.0 条目 |
+| **v2.22** | **首次启动向导：配置缺失自动初始化 + 环境预检 + 纯浏览/注册选择** | [CHANGELOG.md](CHANGELOG.md) 2.22.0 条目 |
+
+### v2.22 摘要（2026-10-09）
+
+外部产品评审 P0（「让普通用户一次用成功」）当轮落地 —— 全新克隆不再需要
+手工复制配置文件：
+
+- **首次启动向导**（`src/workbuddy_market/onboard.py`）：环境预检
+  （Python / 仓库布局 / 配置 / skills / WorkBuddy 目录 / 端口，三态输出）；
+  配置缺失时从模板**独占创建**（并发不覆盖、失败清理、无半截 JSON）；
+  已有配置一字节不动（含损坏的，只给修复建议）；模板缺失诚实报错；
+- **不自动收录**：发现的 skills 只做摘要，`localPlugins` 保持空 ——
+  加入市场内容必须由用户明确决定；
+- **只浏览（回车）/ 注册（显式选 2）**：非交互环境不等待输入直接纯浏览；
+  向导零注册副作用，真正注册仍过 `should_register()` 原有闸门；
+  `--no-wizard` 可关闭；老用户行为与 v2.21 完全一致；
+- 自检 720 → 748 项（第 36 节 28 项，含全新克隆真子进程启动端到端）；
+  pytest 37 项不变。
 
 ### v2.21 摘要（2026-10-08）
 
@@ -588,7 +614,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 707 passed, 0 failed
+python selftest.py        # 748 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

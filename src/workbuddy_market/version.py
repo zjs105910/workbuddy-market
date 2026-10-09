@@ -7,4 +7,4 @@
 OWNERSHIP_SCHEMA = 1
 TX_SCHEMA = 1
 STATE_VERSION = 2
-MARKET_VERSION = "2.21.0"            # 全项目唯一的版本号来源
+MARKET_VERSION = "2.22.0"            # 全项目唯一的版本号来源
