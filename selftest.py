@@ -82,7 +82,10 @@ _ISOLATED = "--real" not in sys.argv
 _TMP = None
 
 if _ISOLATED:
-    _TMP = Path(tempfile.mkdtemp(prefix="wbm-selftest-"))
+    # .resolve() 必须加：GitHub Windows runner 的 TEMP 是 8.3 短路径
+    # （C:\Users\RUNNER~1\...），而路径常量在 import 期经 Path.resolve()
+    # 展开成长路径，后续用 str(_TMP) 做前缀比较会对不上（v2.21 CI 唯一 FAIL）。
+    _TMP = Path(tempfile.mkdtemp(prefix="wbm-selftest-")).resolve()
     os.environ["GHPM_MARKET_ROOT"] = str(_TMP / "market")
     os.environ["GHPM_HOME"] = str(_TMP / "wb")
     (_TMP / "market").mkdir(parents=True, exist_ok=True)
