@@ -56,8 +56,11 @@ jobs:
 
       - name: Patch registry with artifact fields
         if: env.RELEASE_TAG != ''
-        run: python scripts/build_artifacts.py --patch-registry --out artifacts/ \
-               --registry registry/plugins.json --release-tag "$RELEASE_TAG"
+        # 块标量（|）逐行保留：纯标量折叠会把行尾 \ 变成转义空格，
+        # 与 --registry 粘成带前导空格的词，argparse 报 unrecognized
+        # arguments（run #1 实锤）。块内不用续行符，bash 天然多行执行。
+        run: |
+          python scripts/build_artifacts.py --patch-registry --out artifacts/ --registry registry/plugins.json --release-tag "$RELEASE_TAG"
 
       - name: Create PR if changed
         if: env.RELEASE_TAG != ''
