@@ -208,7 +208,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 748 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 758 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -251,7 +251,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 748 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 758 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -467,6 +467,29 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | **v2.20** | **供应链安全轮：manifest permissions + 风险预览 + 兼容性检测 + 构建证明 attestation + CLI verify** | [CHANGELOG.md](CHANGELOG.md) 2.20.0 条目 · [docs/plugin-spec.md](docs/plugin-spec.md) v0.3 |
 | **v2.21** | **产品化轮：收藏 + 截图 + 更新中心 + CLI list/search + 注册表结构化** | [CHANGELOG.md](CHANGELOG.md) 2.21.0 条目 |
 | **v2.22** | **首次启动向导：配置缺失自动初始化 + 环境预检 + 纯浏览/注册选择** | [CHANGELOG.md](CHANGELOG.md) 2.22.0 条目 |
+| **v2.23** | **界面重排：三入口 + 顶部指标条 + 安装前「四问」+ 信任 fail-closed** | [CHANGELOG.md](CHANGELOG.md) 2.23.0 条目 |
+
+### v2.23 摘要（2026-10-09）
+
+外部产品评审 P1（「让普通人看懂」）当轮落地 —— 不引框架、零构建不变，
+只对现有原生前端做最小必要修改：
+
+- **首页三入口**：本机技能 / 精选市场 / 探索 GitHub（tab 切换）；
+  顶部只留四个数：本机插件数、已装 skill、可更新数、服务状态；
+  marketId、校验档位、内部路径、ghpm/索引状态收进「高级信息」折叠区；
+  注册 / 撤销注册、更新中心、回收站、事件流全部保留；
+- **安装前「四问」详情**：① 来自哪里（仓库 + 固定 sourceCommit）；
+  ② 是否可信（信任分级 + 真实审核范围，没有就写「审核范围未提供」）；
+  ③ 能做什么（权限声明 + 明示「声明 ≠ 运行时沙箱、审核 ≠ 绝对安全」）；
+  ④ 能否安装（版本 / 平台 / 宿主版本 / 校验字段，缺失一律「未声明」）；
+- **信任 fail-closed 修复**：前端 `e.trust || "reviewed"` 的 fail-open
+  默认值清零（缺失/未知一律按「未审核」渲染）；安装确认弹窗的信任说明
+  以条目真实 trust 为准，不再用「在注册表里」反推「已人工审核」；
+  成套产物条目主按钮改为「安装固定产物」（有真实审核记录才可称「审核版」）；
+- **可访问性**：分类 / 筛选 / 展开控件 div → 原生 button（键盘可用 +
+  focus-visible + aria-pressed / aria-selected）；
+- 自检 748 → 758 项（第 37 节 10 项）；ui_smoke 13 → 17 项
+  （tab 切换 / 键盘激活 chip / 四问详情弹窗）。
 
 ### v2.22 摘要（2026-10-09）
 
@@ -614,7 +637,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 748 passed, 0 failed
+python selftest.py        # 758 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```

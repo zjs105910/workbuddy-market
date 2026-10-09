@@ -58,6 +58,10 @@
            （独占创建 / 防覆盖 / 异常清理）、损坏配置字节级保留、
            模板缺失诚实报错、并发初始化、非交互不等待、
            回车=只浏览、注册闸门语义、全新克隆真子进程启动端到端
+第 37 节   v2.23：信息架构 / 安装四问 —— trust fail-closed（后端
+           回归 + 前端 fail-open 源码盯防）、四问结构、审核范围
+           「未提供」不推断、三入口 tab 与高级信息折叠发货盯防、
+           分类筛选控件原生 button
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -77,7 +81,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.22"
+SELFTEST_VERSION = "2.23"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -589,6 +593,9 @@ def run() -> None:
     # ============ 36. v2.22：onboard 首次启动向导 / 配置安全初始化 ============
     round21()
 
+    # ============ 37. v2.23：信息架构 / 安装四问 / 信任 fail-closed ============
+    round22()
+
 
 def round20():
     """v2.21：收藏 / 注册表结构化解析 / 截图域名白名单 / CLI list·search。
@@ -982,6 +989,58 @@ def round21():
             core.CONFIG_PATH.write_bytes(cfg_backup)   # 保险恢复（幂等）
         shutil.rmtree(web_min, ignore_errors=True)
         tpl.unlink(missing_ok=True)
+
+
+def round22():
+    """v2.23：网页信息架构 + 安装前「四问」+ 信任 fail-closed（第 37 节）。
+
+    评审 P1（界面可理解 / 安全信息人话化）的当轮落地，盯防三件事：
+    1. 信任分级 fail-closed 不许退化：后端解析层缺失/未知 trust → external
+       （v2.16 语义不变）；前端源码不许再出现 `e.trust || "reviewed"` 这种
+       fail-open 默认值（v2.21 的真实漏洞，本轮修掉）；
+    2. 详情四问结构存在：来自哪里 / 是否可信 / 能做什么 / 能否安装，
+       审核范围缺失必须写「未提供」而不是推断；
+    3. 三入口 tab（本机技能 / 精选市场 / 探索 GitHub）与「高级信息」折叠
+       进入发货的 index.html；筛选/分类控件必须是原生 button（键盘可用）。
+    """
+    section("37. v2.23：信息架构 / 安装四问 / 信任 fail-closed")
+    import workbuddy_market.registry as wr
+
+    # --- 37A. 后端 trust fail-closed（语义不变，回归盯防）
+    mk_e = lambda **kw: {"repo": "o/r", "displayName": "X", **kw}  # noqa: E731
+    e = wr.parse_registry({"schema": 1, "plugins": [mk_e()]})["plugins"][0]
+    ck("★ trust 缺失 → external（绝不默认已审核）", e.get("trust") == "external")
+    e = wr.parse_registry({"schema": 1, "plugins": [mk_e(trust="guru")]})["plugins"][0]
+    ck("★ trust 越枚举 → external", e.get("trust") == "external")
+    e = wr.parse_registry({"schema": 1, "plugins": [
+        mk_e(trustObj={"level": "official"})]})["plugins"][0]
+    ck("★ trustObj.level=official → official（合法路径不受影响）",
+       e.get("trust") == "official")
+
+    # --- 37B. 前端 fail-closed 源码盯防（v2.21 的 fail-open 默认值必须消失）
+    web_dir = Path(__file__).resolve().parent / "web"
+    plugins_js = (web_dir / "app" / "plugins.js").read_text(encoding="utf-8")
+    registry_js = (web_dir / "app" / "registry.js").read_text(encoding="utf-8")
+    ck("★ plugins.js 不再出现 `e.trust || \"reviewed\"`（fail-open 已修）",
+       'e.trust || "reviewed"' not in plugins_js)
+    ck("★ registry.js 不再出现 `(e.trust || \"reviewed\")` 兜底（fail-open 已修）",
+       'e.trust || "reviewed"' not in registry_js)
+
+    # --- 37C. 四问详情 + 三入口 tab 发货盯防
+    details_js = (web_dir / "app" / "details.js").read_text(encoding="utf-8")
+    ck("★ 详情四问结构（来自哪里/是否可信/能做什么/能否安装）",
+       all(k in details_js for k in ("来自哪里", "是否可信", "能做什么", "能否安装")))
+    ck("★ 审核范围缺失 → 明确写「未提供」（不推断）",
+       "审核范围未提供" in details_js)
+    ck("★ 权限声明 ≠ 运行时限制 / 审核 ≠ 绝对安全 的免责文案在场",
+       "运行时沙箱" in details_js and "不等于绝对安全" in details_js)
+    idx = (web_dir / "index.html").read_text(encoding="utf-8")
+    ck("★ index.html 发货三入口 tab（role=tablist）+ 高级信息折叠",
+       'role="tablist"' in idx and 'data-tab="local"' in idx
+       and 'data-tab="curated"' in idx and 'data-tab="explore"' in idx
+       and "<details" in idx and "高级信息" in idx)
+    ck("★ 分类/筛选控件全部是原生 button（div.chip 已清零）",
+       '<div class="chip"' not in idx and '<button class="chip' in idx)
 
 
 def round19():
@@ -3459,7 +3518,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.22.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.23.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3540,9 +3599,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.22.0"
-       and core.MARKET_VERSION == "2.22.0"
-       and SELFTEST_VERSION == "2.22", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.23.0"
+       and core.MARKET_VERSION == "2.23.0"
+       and SELFTEST_VERSION == "2.23", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")

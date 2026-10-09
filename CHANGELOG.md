@@ -4,6 +4,47 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.23.0 — 2026-10-09（界面重排：三入口 / 顶部指标 / 安装前四问 / 信任 fail-closed）
+
+外部产品评审 P1（「把功能齐全的界面改成容易理解的界面」「让安装前的安全
+信息能被普通人看懂」）当轮落地。零构建纪律不变：原生 HTML/CSS/ES Modules，
+不引任何框架，只对现有模块做最小必要修改。
+
+**首页信息架构（v2.23）**
+- 主界面改三个入口（tab）：**本机技能**（管理自己的 Skills）/ **精选市场**
+  （收录审核过的社区插件）/ **探索 GitHub**（收录源 + 全网搜索，未审核来源
+  明确标注）；顶部只留用户最关心的四个数：本机插件数、已装 skill、可更新数、
+  服务状态（注册态）；marketId、校验档位、内部路径、ghpm/索引诊断收进
+  「高级信息」折叠区。注册 / 撤销注册、更新中心、回收站、事件流、收藏、
+  任务进度全部保留；
+- 分类 / 筛选 / 「看全部 skill 状态」展开控件从可点击 div/span 改为
+  **原生 button**（键盘可激活，补 aria-pressed / aria-selected /
+  role=tablist / focus-visible）。
+
+**安装前「四问」详情（details.js 重构）**
+- ① **来自哪里**：上游仓库 + 收录时固定 sourceCommit（有才展示）；
+- ② **是否可信**：信任分级 + **真实审核范围**（review.status/method/
+  reviewedAt；没有审核数据就写「审核范围未提供」，绝不推断）；
+- ③ **能做什么**：权限声明清单（未声明也如实写明「未声明 ≠ 不需要」），
+  并明示 **权限声明不是运行时沙箱、审核不等于绝对安全**；
+- ④ **能否安装**：产物版本 / 平台 / WorkBuddy 最低版本 / packageHash /
+  manifestHash / attestationUrl，缺失一律显示「未声明」；无固定产物时
+  如实说明走 ghpm 源码链路（无法逐包哈希对账）。
+
+**信任 fail-closed（安全修复）**
+- 前端 `cardRegistry` 的 `e.trust || "reviewed"` 与 `regTrustOf` 的
+  `|| "reviewed"` 兜底清零 —— 缺失/未知 trust 一律按「未审核」渲染
+  （后端解析层 v2.16 起本就 fail-closed → external，语义不变）；
+- 安装确认弹窗的信任说明以条目**真实 trust** 为准，不再用「在注册表里」
+  反推「已人工审核收录」；
+- 成套产物条目的主按钮文案改为「**安装固定产物**」（有真实审核记录才可称
+  「审核版本」）；安装路由不变（packageUrl+packageHash → /api/registry/install
+  哈希校验链路，fail-closed 无放行出口）。
+
+- 自检 748 → 758 项（第 37 节 10 项：trust fail-closed 后端回归 +
+  前端 fail-open 源码盯防 + 四问/三入口发货盯防）；ui_smoke 13 → 17 项
+  （三入口 tab 往返 / 原生 button 键盘激活 / 四问详情弹窗）；pytest 37 项不变。
+
 ## 2.22.0 — 2026-10-09（首次启动向导：消除「全新克隆 → 能用」的最后一步）
 
 外部产品评审 P0（「让普通用户一次用成功」）的当轮落地。README 承诺

@@ -81,10 +81,13 @@ export async function handleDataAction(t){
       const regKnown = !!regEntry;
       // v2.16：注册表条目带成套 artifact 字段 → 走不可变包安装链路
       const usePkg = !!(regEntry && regEntry.packageUrl && regEntry.packageHash);
+      // v2.23 fail-closed：信任说明以条目真实 trust 为准（缺失/未知 = 未审核），
+      // 不再用「在注册表里」反推「已人工审核」。
       const trust = regEntry ? (regEntry.trust || "external") : "external";
       const trustNote = trust === "official"
         ? '官方收录'
-        : regKnown ? '社区精选（已人工审核收录）' : '<b>未审核</b>（搜索结果，未经收录审核）';
+        : trust === "reviewed" ? '社区精选（已人工审核收录）'
+        : '<b>未审核</b>（' + (regKnown ? '收录未审核或信任级别未知' : '搜索结果，未经收录审核') + '）';
       let routeNote = '安装走 ghpm，自带事务与回滚。';
       if (usePkg){
         routeNote = '安装走<b>不可变产物</b>：下载后先做 SHA-256 供应链校验'

@@ -10,9 +10,11 @@ export let CATALOG_STALE = false;
 export let cat = "全部";
 export let filter = "all";
 export let REG = {plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}, favorites:[]};   // 社区注册表（v2.11；v2.21 增 favorites）
+export let tab = "local";   // v2.23 三入口：local=本机技能 / curated=精选市场 / explore=探索 GitHub
 
 export function setState(v){ STATE = v; }
 export function setCatalog(c, stale){ CATALOG = c; CATALOG_STALE = !!stale; }
 export function setReg(r){ REG = r; }
 export function setCat(c){ cat = c; }
 export function setFilter(f){ filter = f; }
+export function setTab(t){ tab = t; }
