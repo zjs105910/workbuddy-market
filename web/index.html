@@ -28,28 +28,37 @@
         <button class="primary" id="btnReg">注册到 WorkBuddy</button>
       </div>
     </div>
-    <div class="badges" id="badges"></div>
+    <div class="metrics" id="metrics"></div>
+    <details class="adv" id="adv">
+      <summary>高级信息（市场 ID / 校验档位 / 内部路径等）</summary>
+      <div class="adv-body" id="advBody"></div>
+    </details>
   </header>
 
   <div id="hint"></div>
 
+  <nav class="tabs" id="tabs" role="tablist" aria-label="市场主入口">
+    <button class="tab on" id="tab-local" data-tab="local" role="tab" aria-selected="true">本机技能</button>
+    <button class="tab" id="tab-curated" data-tab="curated" role="tab" aria-selected="false">精选市场</button>
+    <button class="tab" id="tab-explore" data-tab="explore" role="tab" aria-selected="false">探索 GitHub</button>
+  </nav>
+
   <div class="toolbar">
-    <div class="search"><input id="q" placeholder="搜索插件、关键词、GitHub 仓库…" autocomplete="off"></div>
+    <div class="search"><input id="q" placeholder="搜索插件、关键词、GitHub 仓库…" autocomplete="off" aria-label="搜索插件"></div>
     <div class="chips" id="cats"></div>
-    <div class="chips" id="filters">
-      <div class="chip on" data-f="all">全部</div>
-      <div class="chip" data-f="todo">未装完</div>
-      <div class="chip" data-f="done">已装好</div>
-      <div class="chip" data-f="fav">♥ 我的收藏</div>
+    <div class="chips" id="filters" role="group" aria-label="筛选">
+      <button class="chip on" data-f="all">全部</button>
+      <button class="chip" data-f="todo">未装完</button>
+      <button class="chip" data-f="done">已装好</button>
+      <button class="chip" data-f="fav">♥ 我的收藏</button>
     </div>
   </div>
 
   <div id="content"></div>
 
   <footer>
-    本机插件市场 · <code id="fRoot"></code><br>
-    改 <code>market.config.json</code> 后点「重新打包」即可增删市场内容 ·
-    数据目录 <code id="fWb"></code>
+    本机插件市场 · 改 <code>market.config.json</code> 后点「重新打包」即可增删市场内容 ·
+    市场根与数据目录等内部路径见顶部「高级信息」
   </footer>
 </div>
 

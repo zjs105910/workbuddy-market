@@ -2,9 +2,9 @@
    index.html 以 <script type="module"> 加载本文件 —— module 脚本
    默认 defer，DOM 已就绪，与旧的 body 末尾脚本时序一致。 */
 
-import { STATE, REG, cat, setState, setCatalog, setReg, setCat, setFilter } from "./state.js";
+import { STATE, REG, cat, tab, setState, setCatalog, setReg, setCat, setTab, setFilter } from "./state.js";
 import { api } from "./api.js";
-import { $, esc, mb, toast, confirmBox, infoBox } from "./utils.js";
+import { $, esc, attr, mb, toast, confirmBox, infoBox } from "./utils.js";
 import { renderCards } from "./plugins.js";
 import { regUpdatable, showUpdateCenter } from "./update.js";
 import { regDetailHtml } from "./details.js";
@@ -16,35 +16,38 @@ import { handleDataAction } from "./install.js";
 function render(){
   const st = STATE;
   $("#mName").textContent = st.marketName || "本机插件市场";
-  $("#mSub").innerHTML = '市场 ID <code>'+st.marketId+'</code> · '+st.stats.localPlugins+
-    ' 个本机插件 / '+st.stats.localSkills+' 个 skill · '+st.stats.remoteSources+' 个 GitHub 源';
-  $("#fRoot").textContent = st.root;
-  $("#fWb").textContent = st.wbHome;
+  // v2.23：副标题只留一句人话；marketId / 校验档位 / 内部路径收进「高级信息」
+  $("#mSub").textContent = (st.configDescription || "本机优先的 WorkBuddy 插件市场");
 
-  const b = [];
-  if(st.marketVersion) b.push('<span class="badge">v'+st.marketVersion+'</span>');
-  b.push(st.registered
-    ? '<span class="badge ok"><i class="dot"></i>已注册进 WorkBuddy</span>'
-    : '<span class="badge warn"><i class="dot"></i>尚未注册</span>');
-  b.push(st.manifestOk
-    ? '<span class="badge ok"><i class="dot"></i>市场索引就绪</span>'
-    : '<span class="badge bad"><i class="dot"></i>市场索引缺失</span>');
-  b.push(st.ghpmOk
-    ? '<span class="badge ok"><i class="dot"></i>ghpm 可用</span>'
-    : '<span class="badge warn"><i class="dot"></i>ghpm 不可用</span>');
-  b.push('<span class="badge">已装本机 skill '+st.stats.installedLocalSkills+'/'+st.stats.localSkills+'</span>');
-  b.push('<span class="badge">本市场托管 '+st.stats.ownedSkills+' 个</span>');
+  // ---- 顶部指标条（v2.23）：只放用户最关心的四个数
+  const updCount = regUpdatable().length;
+  const svc = st.registered
+    ? '<span class="metric ok"><i class="dot"></i>服务正常 · 已注册</span>'
+    : '<span class="metric warn"><i class="dot"></i>服务正常 · 未注册</span>';
+  $("#metrics").innerHTML =
+    '<span class="metric"><b>'+st.stats.localPlugins+'</b> 个本机插件</span>'+
+    '<span class="metric">已装 <b>'+st.stats.installedLocalSkills+'</b> / '+st.stats.localSkills+' skill</span>'+
+    '<span class="metric'+(updCount?' upd':'')+'">可更新 <b>'+updCount+'</b></span>'+ svc;
+
+  // ---- 高级信息（v2.23 折叠区）：低频诊断字段一律收进来
   const vm = st.stats.verify || "auto";
-  const vmText = vm === "strict" ? "校验档位 strict（全部精确读取）"
-               : vm === "fast"   ? "校验档位 fast（状态用指纹，安装/卸载仍精确）"
-               : "校验档位 auto（状态用指纹，安装/卸载精确）";
-  b.push('<span class="badge'+(vm === "strict" ? ' warn' : '')+'">'+vmText+'</span>');
-  $("#badges").innerHTML = b.join("");
+  const vmText = vm === "strict" ? "strict（全部精确读取）"
+               : vm === "fast"   ? "fast（状态用指纹，安装/卸载仍精确）"
+               : "auto（状态用指纹，安装/卸载精确）";
+  $("#advBody").innerHTML =
+    '<ul>'+
+    '<li>市场 ID：<code>'+esc(st.marketId)+'</code>'+(st.marketVersion?' · v'+esc(st.marketVersion):'')+'</li>'+
+    '<li>校验档位：'+vmText+'</li>'+
+    '<li>GitHub 收录源：'+st.stats.remoteSources+' 个 · 本市场托管 '+st.stats.ownedSkills+' 个 skill</li>'+
+    '<li>市场索引：'+(st.manifestOk?'就绪':'<b>缺失</b>（点「重新打包」生成）')+'</li>'+
+    '<li>ghpm 安装器：'+(st.ghpmOk?'可用':'不可用（GitHub 源安装不可用）')+'</li>'+
+    '<li>市场根：<code>'+esc(st.root)+'</code></li>'+
+    '<li>数据目录：<code>'+esc(st.wbHome)+'</code></li>'+
+    '</ul>';
 
   $("#btnTrash").textContent = "回收站" + (st.trash.count ? " ("+st.trash.count+")" : "");
 
   // 更新中心（v2.21）：有可更新插件时才露出，点击弹出聚合视图。
-  const updCount = regUpdatable().length;
   const bu = $("#btnUpdate");
   if(bu){ bu.style.display = updCount ? "" : "none"; bu.textContent = "更新中心 ("+updCount+")"; }
 
@@ -60,7 +63,7 @@ function render(){
 
   const cats = ["全部"].concat(st.categories || []);
   $("#cats").innerHTML = cats.map(c =>
-    '<div class="chip'+(c===cat?" on":"")+'" data-c="'+c+'">'+c+'</div>').join("");
+    '<button class="chip'+(c===cat?" on":"")+'" data-c="'+attr(c)+'" aria-pressed="'+(c===cat)+'">'+c+'</button>').join("");
 
   $("#btnReg").textContent = st.registered ? "撤销注册" : "注册到 WorkBuddy";
   $("#btnReg").className = st.registered ? "" : "primary";
@@ -101,8 +104,20 @@ async function loadLog(){
 
 /* ---------------- 事件委托（点击） ---------------- */
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
+  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
   if(!t) return;
+
+  // v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
+  if(t.dataset.tab){
+    setTab(t.dataset.tab);
+    document.querySelectorAll("#tabs .tab").forEach(b => {
+      const on = b.dataset.tab === t.dataset.tab;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    renderCards();
+    return;
+  }
 
   if(t.dataset.fav){
     // 收藏 / 取消收藏（v2.21）：本机持久化，Local-first。

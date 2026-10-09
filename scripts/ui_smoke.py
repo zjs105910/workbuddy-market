@@ -219,19 +219,47 @@ def main():
             else:
                 ck("分类切换往返不炸（单分类，跳过）", True)
 
-            # ---- 注册表详情弹窗（社区目录有收录时）
+            # ---- v2.23：筛选 chip 是原生 button → 键盘 Enter 可激活
+            fchip = page.locator("#filters .chip").first
+            fchip.focus()
+            fchip.press("Enter")
+            page.wait_for_timeout(300)
+            ck("★ 筛选 chip 为原生 button（键盘 Enter 可激活）",
+               fchip.evaluate("el => el.tagName === 'BUTTON'"))
+            page.locator('[data-f="all"]').click()
+            page.wait_for_timeout(200)
+
+            # ---- v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
+            page.click("#tab-curated")
+            page.wait_for_timeout(400)
+            t1 = page.locator("#content").inner_text()
+            ck("★ tab 精选市场：区块标题出现", ("精选市场" in t1) or ("社区目录" in t1))
+            page.click("#tab-explore")
+            page.wait_for_timeout(400)
+            t2 = page.locator("#content").inner_text()
+            ck("★ tab 探索 GitHub：收录源区块出现", "GitHub 收录源" in t2)
+            page.click("#tab-local")
+            page.wait_for_timeout(400)
+            ck("★ tab 本机技能：卡片恢复", page.locator("#content .card").count() >= 1)
+
+            # ---- 注册表详情弹窗（社区目录有收录时）：v2.23 四问结构
+            page.click("#tab-curated")
+            page.wait_for_timeout(300)
             detail_btn = page.locator("[data-regdetail]").first
             if detail_btn.count():
                 detail_btn.click()
                 page.wait_for_selector("#cfm.show", timeout=5000)
                 body = page.locator("#cfmBody").inner_text()
-                ck("★ 注册表详情弹窗：来源与信任/兼容性信息块",
-                   ("来源与信任" in body) and ("兼容性" in body))
+                ck("★ 注册表详情弹窗：安装前四问（来自哪里/是否可信/能做什么/能否安装）",
+                   all(k in body for k in ("来自哪里", "是否可信", "能做什么", "能否安装")),
+                   body[:80])
                 page.locator("#cfmYes").click()
                 page.wait_for_timeout(200)
             else:
                 CI_GATE["skipped_core"].append("注册表详情弹窗")
                 ck("注册表详情弹窗（社区目录为空，跳过）", True)
+            page.click("#tab-local")
+            page.wait_for_timeout(300)
 
             # ---- 本机安装端到端：隔离 WBM_HOME 是空的 → 第一张本机卡片必有「补齐」
             #      （/api/install 是同步接口：响应回来即装完，toast 汇总，不走任务弹窗）

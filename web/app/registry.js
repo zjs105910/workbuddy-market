@@ -31,6 +31,9 @@ export function isRegInstalled(repo){
 }
 
 export function regTrustOf(repo){
+  // v2.23 fail-closed：注册表条目缺 trust / 值不认识 → 一律当 external，
+  // 绝不默认成 reviewed（v2.21 的 `|| "reviewed"` 是 fail-open，已修）。
   const e = (REG.plugins||[]).find(p => p.repo === repo);
-  return e ? (e.trust || "reviewed") : "external";
+  const t = e ? e.trust : "external";
+  return (t === "official" || t === "reviewed") ? t : "external";
 }

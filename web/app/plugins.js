@@ -1,7 +1,7 @@
 /* 卡片渲染：本机插件 / GitHub 收录源 / 社区目录 / 全网搜索（v2.22 拆分）。
    只做「数据 → HTML 字符串」；事件交给 main.js 的统一委托分发。 */
 
-import { STATE, CATALOG, CATALOG_STALE, REG, cat, filter } from "./state.js";
+import { STATE, CATALOG, CATALOG_STALE, REG, cat, filter, tab } from "./state.js";
 import { liveOf, regPass, regTrustOf, isRegInstalled } from "./registry.js";
 import { isFav } from "./favorites.js";
 import { trustBadge } from "./trust.js";
@@ -126,7 +126,7 @@ function cardLocal(p){
     '<p class="desc">'+esc(p.description)+'</p>'+
     (p.keywords&&p.keywords.length ? '<div class="kw">'+p.keywords.map(k=>'<i>'+esc(k)+'</i>').join("")+'</div>' : '')+
     safetyBar(u)+
-    '<div><span class="toggle" data-toggle="'+p.id+'">▾ 看 '+p.skills.length+' 个 skill 的状态</span></div>'+
+    '<div><button class="toggle" data-toggle="'+p.id+'">▾ 看 '+p.skills.length+' 个 skill 的状态</button></div>'+
     '<div class="sk" id="sk-'+p.id+'">'+rows+'</div>'+
     '<div class="card-foot">'+stTxt+btns+'</div>'+
   '</div>';
@@ -177,13 +177,19 @@ function cardRegistry(e){
   const shotsHtml = shots.length
     ? '<div class="shots">'+shots.map(s => cardShot(s, e.displayName)).join("")+'</div>'
     : '';
+  // v2.23：成套产物字段 → 主按钮走不可变产物链路（哈希校验），
+  // 文案如实 —— 有审核记录才说「审核」，只有哈希就叫「固定产物」。
+  const hasPkg = !!(e.packageUrl && e.packageHash);
+  const instLabel = hasPkg ? "安装固定产物" : "一键安装";
+  const instTitle = hasPkg ? "下载后按收录时固定的 SHA-256 逐包校验，不符即拒绝"
+                           : "走 ghpm 源码安装（自带事务与回滚）";
   return '<div class="card">'+
     '<div class="card-head">'+
       '<div class="icon">'+iconOf(e.category)+'</div>'+
       '<div style="flex:1"><h3>'+title+'</h3>'+
         '<div class="meta">'+
           '<span>'+esc(e.category)+'</span>'+
-          trustBadge(e.trust || "reviewed")+
+          trustBadge(e.trust)+   // v2.23 fail-closed：缺失/未知 → 未审核，绝不默认已审核
           (e.license ? '<span>'+esc(e.license)+'</span>' : '')+
           (e.qualityScore ? '<span>质 '+e.qualityScore+'</span>' : '')+
           '<code style="font-size:11px">'+esc(e.repo)+'</code>'+
@@ -200,12 +206,12 @@ function cardRegistry(e){
       '<button class="tiny" data-regdetail="'+attr(e.repo)+'">详情</button>'+
       (inst
         ? '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>'
-        : '<button class="tiny primary" data-radd="'+attr(e.repo)+'">一键安装</button>')+
+        : '<button class="tiny primary" data-radd="'+attr(e.repo)+'" title="'+attr(instTitle)+'">'+instLabel+'</button>')+
     '</div>'+
   '</div>';
 }
 
-/* ---------------- 总渲染 ---------------- */
+/* ---------------- 总渲染（v2.23：按三入口 tab 分区） ---------------- */
 export function renderCards(){
   const local = (STATE.plugins||[]).filter(pass);
   const remote = (STATE.remotes||[]).filter(pass);
@@ -213,36 +219,47 @@ export function renderCards(){
   const regRepos = new Set((STATE.remotes||[]).map(r => String(r.rawName||"").toLowerCase()));
   const regAll = (REG.plugins||[]).filter(e => !regRepos.has(String(e.repo||"").toLowerCase()));
   const comm = regAll.filter(regPass);
+  const q = $("#q").value.trim();
   let h = "";
-  h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
-  h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
-                    : '<div class="empty">没有符合条件的本机插件</div>';
-  let sub = remote.length+' 个 · 由 ghpm 下载安装，联网可用';
-  if(CATALOG && CATALOG.refreshedAt){
-    sub += ' · 目录数据 '+esc(String(CATALOG.refreshedAt).slice(0,16).replace("T"," "))+
-           (CATALOG_STALE ? '（已过期）' : '')+'（每日自动刷新）';
+
+  if(tab === "local"){
+    // ---- 入口一：本机技能（管理自己的 Skills）
+    h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
+    h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
+                      : '<div class="empty">没有符合条件的本机插件。'+
+                        '本机 skill 不在这里？编辑 market.config.json 收录后点「重新打包」。</div>';
   }
-  sub += ' <button class="tiny" data-crefresh="1">刷新目录</button>';
-  h += '<div class="sec-title">GitHub 收录源 <span class="n">'+sub+'</span></div>';
-  h += remote.length ? '<div class="grid">'+remote.map(cardRemote).join("")+'</div>'
-                     : '<div class="empty">没有符合条件的 GitHub 源</div>';
-  // 社区注册表区块（v2.11）：来源与数量如实展示，离线兜底要看得出来
-  if(comm.length || (REG.plugins && REG.plugins.length)){
+
+  if(tab === "curated"){
+    // ---- 入口二：精选市场（经过收录审核的社区插件）
     let rsub = REG.plugins && REG.plugins.length
       ? (REG.stale ? REG.plugins.length+' 个收录 · 数据非最新' : REG.plugins.length+' 个收录') : '';
     if(REG.updatedAt) rsub += ' · 注册表 '+esc(REG.updatedAt);
     if(REG.source && REG.source !== "cache" && REG.source.indexOf("github.com") < 0)
       rsub += '（'+esc(REG.source)+'）';
-    h += '<div class="sec-title">社区目录 <span class="n">'+rsub+'</span></div>';
+    h += '<div class="sec-title">精选市场（社区目录） <span class="n">'+rsub+'</span></div>';
     h += comm.length ? '<div class="grid">'+comm.map(cardRegistry).join("")+'</div>'
                      : '<div class="empty">社区目录没有匹配的条目</div>';
   }
-  // 本地（含收录源）零匹配且关键词够长 → 社区目录已并入上方过滤，再兜底全网搜索
-  const q = $("#q").value.trim();
-  if(!local.length && !remote.length && q.length >= 2){
-    h += '<div class="sec-title">GitHub 全网搜索 <span class="n" id="ghState"></span></div>'+
-         '<div class="grid" id="ghGrid"></div>';
+
+  if(tab === "explore"){
+    // ---- 入口三：探索 GitHub（收录源 + 全网搜索，明确标注未审核来源）
+    let sub = remote.length+' 个 · 由 ghpm 下载安装，联网可用';
+    if(CATALOG && CATALOG.refreshedAt){
+      sub += ' · 目录数据 '+esc(String(CATALOG.refreshedAt).slice(0,16).replace("T"," "))+
+             (CATALOG_STALE ? '（已过期）' : '')+'（每日自动刷新）';
+    }
+    sub += ' <button class="tiny" data-crefresh="1">刷新目录</button>';
+    h += '<div class="sec-title">GitHub 收录源 <span class="n">'+sub+'</span></div>';
+    h += remote.length ? '<div class="grid">'+remote.map(cardRemote).join("")+'</div>'
+                       : '<div class="empty">没有符合条件的 GitHub 源</div>';
+    // 本地（含收录源）零匹配且关键词够长 → 兜底全网搜索（结果一律未审核）
+    if(!remote.length && q.length >= 2){
+      h += '<div class="sec-title">GitHub 全网搜索 <span class="n" id="ghState"></span></div>'+
+           '<div class="grid" id="ghGrid"></div>';
+    }
   }
+
   $("#content").innerHTML = h;
-  if(!local.length && !remote.length && q.length >= 2) ghEnsure(q);
+  if(tab === "explore" && !remote.length && q.length >= 2) ghEnsure(q);
 }

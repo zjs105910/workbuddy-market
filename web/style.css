@@ -58,6 +58,36 @@
   .badge.bad{background:var(--bad-soft);border-color:var(--bad-line);color:var(--bad)}
   .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
 
+  /* ---- v2.23：顶部指标条 + 高级信息折叠 + 三入口 tab ---- */
+  .metrics{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .metric{
+    display:inline-flex;align-items:center;gap:7px;font-size:13px;
+    padding:6px 13px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--muted);
+  }
+  .metric b{color:var(--text);font-size:15px}
+  .metric.ok{background:var(--ok-soft);border-color:var(--ok-line);color:var(--ok)}
+  .metric.ok b{color:var(--ok)}
+  .metric.warn{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+  .metric.upd{background:var(--accent-soft);border-color:var(--accent-line);color:#2c4a86}
+  .metric.upd b{color:var(--accent)}
+  details.adv{margin-top:10px;font-size:12.5px;color:var(--muted)}
+  details.adv summary{cursor:pointer;user-select:none;padding:4px 2px}
+  details.adv summary:hover{color:var(--accent)}
+  .adv-body ul{margin:8px 0 2px;padding-left:20px}
+  .adv-body li{margin:3px 0}
+  .adv-body code{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px;word-break:break-all}
+
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{
+    font:inherit;cursor:pointer;font-size:14px;font-weight:600;
+    padding:9px 18px;border-radius:11px;border:1px solid var(--line);
+    background:var(--panel);color:var(--muted);transition:.15s;
+  }
+  .tab:hover{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+  .tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .tab:focus-visible,.chip:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
   .hint{
     display:flex;gap:10px;align-items:flex-start;
     background:var(--accent-soft);border:1px solid var(--accent-line);
@@ -76,7 +106,7 @@
   .search::before{content:"⌕";position:absolute;left:12px;top:7px;color:var(--faint);font-size:16px}
   .chips{display:flex;gap:6px;flex-wrap:wrap}
   .chip{
-    font-size:12.5px;padding:5px 12px;border-radius:999px;cursor:pointer;
+    font:inherit;font-size:12.5px;padding:5px 12px;border-radius:999px;cursor:pointer;
     border:1px solid var(--line);background:var(--panel);color:var(--muted);transition:.15s;
   }
   .chip:hover{border-color:var(--accent-line);color:var(--accent)}
@@ -130,7 +160,7 @@
   .sk .tag.ok{background:var(--ok-soft);color:var(--ok)}
   .sk .tag.warn{background:var(--warn-soft);color:var(--warn)}
   .sk .tag.grey{color:var(--faint);border:1px solid var(--line)}
-  .toggle{font-size:11.5px;color:var(--accent);cursor:pointer;user-select:none}
+  .toggle{font:inherit;font-size:11.5px;color:var(--accent);cursor:pointer;user-select:none;background:none;border:none;padding:0}
 
   .veil{
     position:fixed;inset:0;background:rgba(20,31,48,.4);backdrop-filter:blur(2px);
