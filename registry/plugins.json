@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-10-07",
+  "updatedAt": "2026-10-11",
   "_comment": "社区注册表：本市场认可的 WorkBuddy 插件 GitHub 仓库清单。静态字段（repo / displayName / category / description / keywords / trust / sourceCommit / license / review / permissions）人工审核后提交；动态字段（stars / pushedAt / latestSha / refreshedAt）由 .github/workflows/registry.yml 每天自动重建；产物与声明字段（packageUrl / packageHash / manifestHash / attestationUrl / platforms / minWorkBuddyVersion / version）由 .github/workflows/artifacts.yml（v2.17/v2.20）按打包 manifest 回写 —— 后两类请勿手工编辑。收录标准：仓库内含 SKILL.md 技能（可直接被 ghpm 安装到 ~/.workbuddy/skills）、非归档、活跃维护。市场端按 TTL 在线拉取本文件（raw → api.github.com → 本地副本三级兜底）。收录内容契约见 registry/registry-schema.json（contract v2），由 scripts/validate_registry.py 在 CI 强制校验——加字段先升契约版本。",
   "plugins": [
     {
@@ -888,6 +888,578 @@
       "packageHash": "ccd8a90e41136a481be372da74ab96c3bdf350e60747d0f57b61318609f7fd9b",
       "manifestHash": "546ea968afe719f646fc468be5ce4a34c36c1692a7a76b9be9a523f2e276ff65",
       "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-09/alchaincyf-huashu-design-2026.10.09.0830494.zip.attestation.json"
+    },
+    {
+      "repo": "machina-sports/sports-skills",
+      "displayName": "体育数据技能集",
+      "displayNameEn": "Sports Skills",
+      "category": "效率",
+      "description": "面向体育场景的开源 agent 技能集：实时赛事数据获取、比赛结果预测、联赛与球员信息查询等 27 个技能，按主题分组，适合构建体育资讯与数据分析工作流。",
+      "keywords": [
+        "体育",
+        "赛事数据",
+        "预测",
+        "技能集"
+      ],
+      "homepage": "https://github.com/machina-sports/sports-skills",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "5bb9d1d180e76b93353adf1a755322ac8f66f438",
+      "stars": 243,
+      "pushedAt": "2026-10-10",
+      "latestSha": "5bb9d1d180e76b93353adf1a755322ac8f66f438"
+    },
+    {
+      "repo": "stefanoskarakasis/Product-Marketing-Skills",
+      "displayName": "产品营销技能市场",
+      "displayNameEn": "PMM Skills Marketplace",
+      "category": "商业",
+      "description": "产品营销（PMM）技能市场：包含定位、发布、竞争分析、客户研究、内容与销售赋能等 30+ 个代理技能与命令，覆盖产品营销全流程。",
+      "keywords": [
+        "产品营销",
+        "PMM",
+        "定位",
+        "发布",
+        "竞争分析"
+      ],
+      "homepage": "https://github.com/stefanoskarakasis/Product-Marketing-Skills",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "ec0108f0f590e0694f24fe4144b0b90f6896e6c3",
+      "stars": 6,
+      "pushedAt": "2026-10-10",
+      "latestSha": "ec0108f0f590e0694f24fe4144b0b90f6896e6c3"
+    },
+    {
+      "repo": "tackeyy/mission",
+      "displayName": "任务闭环 Mission",
+      "displayNameEn": "Mission",
+      "category": "开发工具",
+      "description": "质量门禁驱动的自治任务闭环技能集：任务拆解、执行、验证与交付全程受质量闸约束，含 12 个技能，适合让代理在明确验收标准下长跑完成任务。",
+      "keywords": [
+        "自治任务",
+        "质量门禁",
+        "任务闭环",
+        "Claude Code"
+      ],
+      "homepage": "https://github.com/tackeyy/mission",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "4274db69a3af7457ba70c941c6c9edd4c2ca015a",
+      "stars": 9,
+      "pushedAt": "2026-10-10",
+      "latestSha": "4274db69a3af7457ba70c941c6c9edd4c2ca015a"
+    },
+    {
+      "repo": "victorrentea/human-review",
+      "displayName": "人工评审 Human-Review",
+      "displayNameEn": "Human Review",
+      "category": "开发工具",
+      "description": "为 Claude Code 设计的人工评审技能：自动汇编一页式变更摘要与风险清单，帮助人类评审者快速理解代理改动并给出批准或驳回意见。",
+      "keywords": [
+        "代码评审",
+        "人工审核",
+        "变更摘要",
+        "Claude Code"
+      ],
+      "homepage": "https://github.com/victorrentea/human-review",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "0071f98803eefc81a5211394f1bde2b73bc1d6f2",
+      "stars": 20,
+      "pushedAt": "2026-10-10",
+      "latestSha": "0071f98803eefc81a5211394f1bde2b73bc1d6f2"
+    },
+    {
+      "repo": "buidangminh23/spacing-skill",
+      "displayName": "UI 间距规范",
+      "displayNameEn": "Spacing Skill",
+      "category": "设计",
+      "description": "反拥挤间距技能：一条经过打磨的 UI 间距规范，让代理生成的界面保持呼吸感与一致的视觉节奏，适合嵌入任何前端工作流。",
+      "keywords": [
+        "UI",
+        "间距",
+        "设计规范",
+        "前端"
+      ],
+      "homepage": "https://github.com/buidangminh23/spacing-skill",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "ddfa2a4df1e0e81eaab1913184ca1d0221b02cd4",
+      "stars": 8,
+      "pushedAt": "2026-10-10",
+      "latestSha": "ddfa2a4df1e0e81eaab1913184ca1d0221b02cd4"
+    },
+    {
+      "repo": "skywain/trip-planner-skill",
+      "displayName": "旅行规划 Trip-Planner",
+      "displayNameEn": "Trip Planner Skill",
+      "category": "效率",
+      "description": "AI 旅行规划技能：按天数、预算与偏好生成可执行的行程单，覆盖交通、住宿与景点编排，兼容 Claude Code / Codex 等多种代理工具。",
+      "keywords": [
+        "旅行",
+        "行程规划",
+        "出行",
+        "预算"
+      ],
+      "homepage": "https://github.com/skywain/trip-planner-skill",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "3f957770c6978180e3a626f5751dabb06c4657de",
+      "stars": 42,
+      "pushedAt": "2026-10-10",
+      "latestSha": "3f957770c6978180e3a626f5751dabb06c4657de"
+    },
+    {
+      "repo": "beggarticksarthurtatum121/reddit-skills",
+      "displayName": "Reddit 浏览器自动化",
+      "displayNameEn": "Reddit Skills",
+      "category": "自动化",
+      "description": "基于真实浏览器与账号的 Reddit 自动化技能集：浏览、检索、发帖与互动等 6 个技能，强调以用户本人身份合规操作。",
+      "keywords": [
+        "Reddit",
+        "浏览器自动化",
+        "社区",
+        "发帖"
+      ],
+      "homepage": "https://github.com/beggarticksarthurtatum121/reddit-skills",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "0739c5e9a3b81b57b7f44dfc95262531a49ec674",
+      "stars": 4,
+      "pushedAt": "2026-10-10",
+      "latestSha": "0739c5e9a3b81b57b7f44dfc95262531a49ec674"
+    },
+    {
+      "repo": "docsor1212/pubmed-verifier",
+      "displayName": "PubMed 引用核验",
+      "displayNameEn": "PubMed Verifier",
+      "category": "科研",
+      "description": "PubMed 文献引用批量核验工具：对 AI 生成的引用逐条比对 PubMed 数据库，检测编造与张冠李戴，降低科研写作中的幻觉引用。",
+      "keywords": [
+        "PubMed",
+        "引用核验",
+        "科研诚信",
+        "幻觉检测"
+      ],
+      "homepage": "https://github.com/docsor1212/pubmed-verifier",
+      "addedAt": "2026-10-11",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "ae908b72a3aed3e15d87b58772dab6c4f1b174b7",
+      "stars": 2,
+      "pushedAt": "2026-10-10",
+      "latestSha": "ae908b72a3aed3e15d87b58772dab6c4f1b174b7"
+    },
+    {
+      "repo": "bsq415/research-rigor-skill",
+      "displayName": "科研严谨执行",
+      "displayNameEn": "Research Rigor Skill",
+      "category": "科研",
+      "description": "人类主导、证据门控的科研全周期执行技能：从问题定义、文献综述到实验设计与结论输出，每一步都要求可验证证据支撑。",
+      "keywords": [
+        "科研方法",
+        "证据门控",
+        "文献综述",
+        "研究执行"
+      ],
+      "homepage": "https://github.com/bsq415/research-rigor-skill",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "708718adacbcc4e8ff8fb8066690a98f8c955fca",
+      "stars": 2,
+      "pushedAt": "2026-10-10",
+      "latestSha": "708718adacbcc4e8ff8fb8066690a98f8c955fca"
+    },
+    {
+      "repo": "gal-a/qikly",
+      "displayName": "验收测试生成 Qikly",
+      "displayNameEn": "Qikly",
+      "category": "测试",
+      "description": "从验收标准生成测试套件的技能：先按验收条件生成测试用例，再驱动实现直至全部通过，覆盖单元与集成两层。",
+      "keywords": [
+        "测试",
+        "验收标准",
+        "TDD",
+        "测试套件"
+      ],
+      "homepage": "https://github.com/gal-a/qikly",
+      "addedAt": "2026-10-11",
+      "license": "Apache-2.0",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "6bd695387d37105d31eb653d855941cdf19d8f02",
+      "stars": 16,
+      "pushedAt": "2026-10-10",
+      "latestSha": "6bd695387d37105d31eb653d855941cdf19d8f02"
+    },
+    {
+      "repo": "Kimeur/motion-launch-videos",
+      "displayName": "发布视频生成",
+      "displayNameEn": "Motion Launch Videos",
+      "category": "设计",
+      "description": "发布视频批量生成技能集：从简短的产品说明生成脚本、分镜与成片，循环产出可发布的宣传视频，共 12 个技能。",
+      "keywords": [
+        "视频生成",
+        "产品发布",
+        "脚本",
+        "分镜"
+      ],
+      "homepage": "https://github.com/Kimeur/motion-launch-videos",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "b639fc47af4df992452c00674a575bf344cddfa8",
+      "stars": 5,
+      "pushedAt": "2026-10-10",
+      "latestSha": "b639fc47af4df992452c00674a575bf344cddfa8"
+    },
+    {
+      "repo": "danieljustus/symaira-eraseme",
+      "displayName": "数据经纪商除名",
+      "displayNameEn": "Eraseme",
+      "category": "安全",
+      "description": "自动化数据经纪商除名技能：批量向数据经纪商提交除名请求、跟踪处理进度，帮助清理个人数据痕迹，强化隐私保护。",
+      "keywords": [
+        "隐私",
+        "数据经纪商",
+        "除名",
+        "个人数据"
+      ],
+      "homepage": "https://github.com/danieljustus/symaira-eraseme",
+      "addedAt": "2026-10-11",
+      "license": "Apache-2.0",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "e29f9dd438a4f82b66555dcef353f744a0a638d1",
+      "stars": 9,
+      "pushedAt": "2026-10-10",
+      "latestSha": "e29f9dd438a4f82b66555dcef353f744a0a638d1"
+    },
+    {
+      "repo": "yschimke/compose-ai-tools",
+      "displayName": "Compose 开发助手",
+      "displayNameEn": "Compose AI Tools",
+      "category": "开发工具",
+      "description": "面向 Jetpack Compose 的代理辅助技能：UI 组件生成、代码规范检查等 3 个技能，帮助代理写出符合 Compose 最佳实践的 Android 界面代码。",
+      "keywords": [
+        "Android",
+        "Jetpack Compose",
+        "UI",
+        "代码生成"
+      ],
+      "homepage": "https://github.com/yschimke/compose-ai-tools",
+      "addedAt": "2026-10-11",
+      "license": "Apache-2.0",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "ddb68afad71ffaacba8cfa2d693d3cab9cc70f67",
+      "stars": 117,
+      "pushedAt": "2026-10-10",
+      "latestSha": "ddb68afad71ffaacba8cfa2d693d3cab9cc70f67"
+    },
+    {
+      "repo": "creedants/pstack-t3",
+      "displayName": "pstack 技能集 T3 版",
+      "displayNameEn": "pstack-t3",
+      "category": "合集",
+      "description": "Lauren Tan 的 pstack 代理技能集向 T3 Code 的移植版：覆盖前端工程、产品思维与协作流程等 130 个技能，任何模型都能取用。",
+      "keywords": [
+        "pstack",
+        "前端",
+        "技能合集",
+        "T3 Code"
+      ],
+      "homepage": "https://github.com/creedants/pstack-t3",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "a70a9b885239db83b9a901c83c491aa1fc74f2b7",
+      "stars": 3,
+      "pushedAt": "2026-10-10",
+      "latestSha": "a70a9b885239db83b9a901c83c491aa1fc74f2b7"
+    },
+    {
+      "repo": "theonly1me/shadowclone",
+      "displayName": "工程品味合集 Shadowclone",
+      "displayNameEn": "Shadowclone",
+      "category": "合集",
+      "description": "把个人工程品味带进每一个编码代理的技能合集：代码风格、架构取舍与评审标准等 44 个技能，来自一线工程师的实战沉淀。",
+      "keywords": [
+        "工程品味",
+        "代码风格",
+        "架构",
+        "技能合集"
+      ],
+      "homepage": "https://github.com/theonly1me/shadowclone",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "7ad536d74ca3f00b530aa57f1d74a6a23f314566",
+      "stars": 9,
+      "pushedAt": "2026-10-10",
+      "latestSha": "7ad536d74ca3f00b530aa57f1d74a6a23f314566"
+    },
+    {
+      "repo": "bks-lab/open-bridge",
+      "displayName": "上下文桥 Open-Bridge",
+      "displayNameEn": "Open Bridge",
+      "category": "开发工具",
+      "description": "给编码代理的上下文桥技能集：以纯 Markdown 沉淀工作约定、决策与领域知识等 41 个技能，免去反复向代理解释背景。",
+      "keywords": [
+        "上下文",
+        "知识沉淀",
+        "Markdown",
+        "协作"
+      ],
+      "homepage": "https://github.com/bks-lab/open-bridge",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "b04f1478e0294382bfec280722dc369078d1d4d1",
+      "stars": 12,
+      "pushedAt": "2026-10-10",
+      "latestSha": "b04f1478e0294382bfec280722dc369078d1d4d1"
+    },
+    {
+      "repo": "kurone-kito/idd-skill",
+      "displayName": "循环工程套装 IDD",
+      "displayNameEn": "IDD Skill",
+      "category": "开发工具",
+      "description": "循环工程（Iterative Development Discipline）自动化配置技能套件：4 个技能帮助代理建立稳定的需求-实现-验证迭代循环。",
+      "keywords": [
+        "循环工程",
+        "迭代开发",
+        "自动化",
+        "配置"
+      ],
+      "homepage": "https://github.com/kurone-kito/idd-skill",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "e548b64f7fb7567cd598153f14221d2715d454db",
+      "stars": 11,
+      "pushedAt": "2026-10-10",
+      "latestSha": "e548b64f7fb7567cd598153f14221d2715d454db"
+    },
+    {
+      "repo": "Marsjunwang/nblane",
+      "displayName": "技能共进化 NBLane",
+      "displayNameEn": "NBLane",
+      "category": "效率",
+      "description": "人 + 代理 + 团队技能共同进化平台：以纯文本沉淀技能资产，5 个技能覆盖个人与团队层面的技能演化与复用。",
+      "keywords": [
+        "技能进化",
+        "团队协作",
+        "纯文本",
+        "知识管理"
+      ],
+      "homepage": "https://github.com/Marsjunwang/nblane",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "ebe70553aa0e5ebabcbcece62b97bac70f2081ad",
+      "stars": 5,
+      "pushedAt": "2026-10-10",
+      "latestSha": "ebe70553aa0e5ebabcbcece62b97bac70f2081ad"
+    },
+    {
+      "repo": "Bank848/Claude-Abo",
+      "displayName": "便携技能包 Claude-Abo",
+      "displayNameEn": "Claude Abo",
+      "category": "合集",
+      "description": "便携式 Claude Code 配置模板：66 个经过实战验证的技能开箱即用，一条命令即可在新机器上复原完整工作环境。",
+      "keywords": [
+        "便携配置",
+        "模板",
+        "技能合集",
+        "开箱即用"
+      ],
+      "homepage": "https://github.com/Bank848/Claude-Abo",
+      "addedAt": "2026-10-11",
+      "license": "NOASSERTION",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "59b498d848ada6fe6716d33d8125026406f4abca",
+      "stars": 5,
+      "pushedAt": "2026-10-10",
+      "latestSha": "59b498d848ada6fe6716d33d8125026406f4abca"
+    },
+    {
+      "repo": "morluto/rea",
+      "displayName": "逆向工程代理 Rea",
+      "displayNameEn": "REA",
+      "category": "安全",
+      "description": "逆向工程代理技能：从应用行为入手向下还原实现细节，2 个技能覆盖行为观测与结构还原，适合学习与兼容性分析。",
+      "keywords": [
+        "逆向工程",
+        "行为分析",
+        "学习",
+        "兼容性"
+      ],
+      "homepage": "https://github.com/morluto/rea",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "0d89978333a7f139c53f35f1bb622d08eb73affa",
+      "stars": 66391,
+      "pushedAt": "2026-10-10",
+      "latestSha": "0d89978333a7f139c53f35f1bb622d08eb73affa"
+    },
+    {
+      "repo": "frankxai/Starlight-Intelligence-System",
+      "displayName": "星际智能系统",
+      "displayNameEn": "Starlight Intelligence System",
+      "category": "效率",
+      "description": "给整个 AI 舰队一个共享大脑：带证明的记忆、知识组织与跨会话延续等 69 个技能，适合多代理长期协作场景。",
+      "keywords": [
+        "记忆系统",
+        "知识管理",
+        "多代理",
+        "共享大脑"
+      ],
+      "homepage": "https://github.com/frankxai/Starlight-Intelligence-System",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "af0caef7187504439beeafb643a9694f5d542289",
+      "stars": 11,
+      "pushedAt": "2026-10-10",
+      "latestSha": "af0caef7187504439beeafb643a9694f5d542289"
+    },
+    {
+      "repo": "ericrisco/rsc-harness",
+      "displayName": "代理技能百科 RSC",
+      "displayNameEn": "RSC Harness",
+      "category": "合集",
+      "description": "超大体量的代理技能百科：开发、写作、测试、运维等方向 271 个技能，按需取用，适合作为团队技能弹药库。",
+      "keywords": [
+        "技能百科",
+        "合集",
+        "多方向",
+        "团队"
+      ],
+      "homepage": "https://github.com/ericrisco/rsc-harness",
+      "addedAt": "2026-10-11",
+      "license": "MIT",
+      "trust": "reviewed",
+      "review": {
+        "status": "reviewed",
+        "reviewedAt": "2026-10-11",
+        "method": "manual"
+      },
+      "sourceCommit": "f866289b3e7ec69354cf854e67b52fa29aee088e",
+      "stars": 183,
+      "pushedAt": "2026-10-10",
+      "latestSha": "f866289b3e7ec69354cf854e67b52fa29aee088e"
     }
   ]
 }
