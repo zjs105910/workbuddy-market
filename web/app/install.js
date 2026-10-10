@@ -6,9 +6,33 @@ import { STATE, REG } from "./state.js";
 import { api } from "./api.js";
 import { $, esc, toast, confirmBox, errorBox } from "./utils.js";
 import { permBlock } from "./trust.js";
+import { regUpdatable } from "./update.js";
 import { watchJob, refreshNow } from "./jobs.js";
 
 export async function handleDataAction(t){
+  /* ---- 更新中心：全部更新（v2.26，一键批量） ---- */
+  if(t.dataset.rupdateAll){
+    // 从更新中心弹窗里点出来的 —— 先关掉弹窗再启动任务
+    if($("#cfmNo").style.display === "none") $("#cfm").classList.remove("show");
+    const list = regUpdatable();
+    if(!list.length){ toast("没有可更新项"); return true; }
+    let started = 0, firstJob = null;
+    for(const u of list){
+      try{
+        const r = await api("/api/remote/update", {repo: u.repo});
+        started++;
+        if(!firstJob) firstJob = r.jobId;
+      }catch(err){
+        toast(u.repo + " 更新启动失败：" + err.message, true);
+      }
+    }
+    if(started){
+      toast("已开始 " + started + " 个更新任务（并发上限 4，进度见任务弹窗与事件流）");
+      if(firstJob) watchJob(firstJob, "批量更新");
+    }
+    return true;
+  }
+
   /* ---- 本机插件：补齐 / 更新 ---- */
   if(t.dataset.install){
     const id = t.dataset.install, mode = t.dataset.mode || "missing";

@@ -24,10 +24,14 @@ function render(){
   const svc = st.registered
     ? '<span class="metric ok"><i class="dot"></i>服务正常 · 已注册</span>'
     : '<span class="metric warn"><i class="dot"></i>服务正常 · 未注册</span>';
+  // v2.26：有可更新项时「可更新 N」本身就是入口 —— 点击直达更新中心
+  const updChip = updCount
+    ? '<button class="metric metric-btn upd" data-updatecenter="1" title="点击打开更新中心，一键更新">可更新 <b>'+updCount+'</b></button>'
+    : '<span class="metric">可更新 <b>0</b></span>';
   $("#metrics").innerHTML =
     '<span class="metric"><b>'+st.stats.localPlugins+'</b> 个本机插件</span>'+
     '<span class="metric">已装 <b>'+st.stats.installedLocalSkills+'</b> / '+st.stats.localSkills+' skill</span>'+
-    '<span class="metric'+(updCount?' upd':'')+'">可更新 <b>'+updCount+'</b></span>'+ svc;
+    updChip + svc;
 
   // ---- 高级信息（v2.23 折叠区）：低频诊断字段一律收进来
   const vm = st.stats.verify || "auto";
@@ -104,7 +108,7 @@ async function loadLog(){
 
 /* ---------------- 事件委托（点击） ---------------- */
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
+  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
   if(!t) return;
 
   // v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub

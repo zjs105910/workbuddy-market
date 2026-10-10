@@ -1,7 +1,7 @@
-/* 更新中心（v2.21，评审 #15；v2.22 拆分）。
+/* 更新中心（v2.21，评审 #15；v2.22 拆分；v2.26 一键全更新）。
    聚合所有「已装且上游有新提交」的社区条目：当前装到的 sha 与注册表
-   latestSha 不同即视为有更新。dsh-market 是逐插件更新 + 全部更新，
-   这里先做「聚合 + 逐条检查更新」——更新动作复用既有的 /api/remote/update。 */
+   latestSha 不同即视为有更新。更新动作复用既有的 /api/remote/update
+   （ghpm 事务 + 回滚）；「可更新 N」指标芯片（main.js）点击直达本面板。 */
 
 import { REG } from "./state.js";
 import { esc, attr, infoBox } from "./utils.js";
@@ -33,10 +33,15 @@ export function showUpdateCenter(){
         '<b>'+esc(u.displayName)+'</b>'+
         '<span class="repo">'+esc(u.repo)+'</span>'+
         '<code>'+esc(u.current)+'</code><span class="arrow">→</span><code>'+esc(u.latest)+'</code>'+
-        trustBadge(u.trust || "reviewed")+
+        trustBadge(u.trust)+   // v2.26 fail-closed：缺失/未知 → 未审核
         '<button class="tiny primary" style="margin-left:auto" data-rupdate="'+attr(u.repo)+'">更新</button>'+
         '</div>').join("")+'</div>'+
-      '<div class="note">更新走 ghpm，自带事务与回滚；旧版本会先进回收站，可恢复。</div>';
+    '<div style="margin:10px 0 0">'+
+      '<button class="primary" data-rupdate-all="1">全部更新（'+upd.length+' 个）</button>'+
+    '</div>'+
+    '<div class="note">更新走 ghpm，自带事务与回滚；旧版本会先进回收站，可恢复。'+
+    '点「全部更新」后各条目作为独立后台任务并行执行（并发上限 4），'+
+    '进度见任务弹窗与事件流。</div>';
   }
   return infoBox("更新中心", body);
 }
