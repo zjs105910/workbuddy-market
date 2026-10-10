@@ -66,6 +66,11 @@
            retryable、内部错误不泄原文、不谎称「未受影响」、
            路径脱敏、/api/doctor 只读端到端 + 403 门禁、
            --status 配置缺失人话出口
+第 39 节   v2.25：开源入门体验 —— 演示截图与采集脚本盯防、
+           Quick Start / 平台矩阵 / FAQ 专节发货盯防
+第 40 节   v2.27：更新后 latestSha 回写 —— ghpm 实测 sha 进注册
+           表缓存、无关仓库与无 sha 行不动、get_registry 立即可见、
+           _registry_drift 前 7 位比对（短 sha 回写不产生假 409）
 
 `SELFTEST_VERSION` 与内核的 `market_core.MARKET_VERSION` 必须同号 ——
 自检里有一条用例专门盯这个，防止文档版本漂移（v2.3 时就漂过一次）。
@@ -85,7 +90,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.26"
+SELFTEST_VERSION = "2.27"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -605,6 +610,9 @@ def run() -> None:
 
     # ============ 39. v2.25：开源入门体验（Quick Start / 平台矩阵 / 截图） ============
     round24()
+
+    # ============ 40. v2.27：更新后 latestSha 回写 / 漂移前缀口径 ============
+    round25()
 
 
 def round20():
@@ -1185,6 +1193,66 @@ def round24():
     faq = (repo / "docs" / "FAQ.md").read_text(encoding="utf-8")
     ck("★ FAQ 有首次启动 / 配置初始化专节（缺失/已有/损坏/回车/非交互）",
        "首次启动 / 配置相关" in faq and "原样保留" in faq and "只浏览" in faq)
+
+
+def round25():
+    """v2.27：更新后 latestSha 回写 / 漂移检查前缀口径（第 40 节）。
+
+    用户实测：ghpm 更新报告「已是最新」，但「可更新 1」仍挂着 ——
+    根因是 latestSha 是每日 CI 快照，上游在快照后推进、ghpm 已追平
+    实时上游时误报。盯防四件事：
+    1. ghpm 输出里的实测 sha（[跳过] / [更新] / 已是最新行）被回写进
+       注册表缓存 latestSha；
+    2. 无关仓库 / 无 sha 行 → 不动缓存（解析不出绝不猜）；
+    3. 回写后 /api/registry 数据源（get_registry）立即可见新值；
+    4. _registry_drift 用前 7 位比对 —— 7 位短 sha 回写不产生假 409。
+    """
+    section("40. v2.27：更新后 latestSha 回写 / 漂移前缀口径")
+    import market_server as srv3
+
+    base_cache = {"schema": core.REGISTRY_SCHEMA, "updatedAt": "2026-10-10",
+                  "fetchedAt": "2026-10-10T00:00:00Z",
+                  "fetchedAtEpoch": time.time() + 3600,   # 未来时间 = 缓存新鲜，不触网
+                  "plugins": [{
+                      "repo": "anthropics/skills", "displayName": "Skills",
+                      "category": "测试", "trust": "official",
+                      "sourceCommit": "dbd4588" + "a" * 33,
+                      "latestSha": "aaa0000"}]}
+    core.save_registry_cache(base_cache)
+
+    # --- 40A. [跳过] 行的实测 sha 回写
+    lines = ["$ update anthropics/skills",
+             "  [跳过]  anthropics/skills      dbd4588 已是最新"]
+    ck("★ ghpm「跳过/已是最新」行 → 实测 sha 回写缓存",
+       srv3._sync_registry_sha_from_job("anthropics/skills", lines) is True
+       and core.load_registry_cache()["plugins"][0]["latestSha"] == "dbd4588")
+
+    # --- 40B. get_registry（/api/registry 数据源）立即可见
+    reg = core.get_registry()
+    e = next(x for x in reg["plugins"] if x["repo"] == "anthropics/skills")
+    ck("★ 回写后 get_registry 立即可见（内存缓存已失效）",
+       str(e.get("latestSha", "")).lower() == "dbd4588")
+
+    # --- 40C. 无关仓库 / 无 sha 行 → 不动
+    ck("★ 无关仓库的输出 → 不回写",
+       srv3._sync_registry_sha_from_job("other/repo", lines) is False
+       and core.load_registry_cache()["plugins"][0]["latestSha"] == "dbd4588")
+    ck("★ 没有 sha 的行 → 解析不出，绝不猜",
+       srv3._sync_registry_sha_from_job("anthropics/skills",
+                                        ["$ update anthropics/skills"]) is False)
+
+    # --- 40D. 漂移检查前缀口径：7 位回写不产生假 409
+    ck("★ _registry_drift：sourceCommit 与 latestSha 前 7 位一致 → 无漂移",
+       srv3._registry_drift("anthropics/skills") is None)
+    cache2 = core.load_registry_cache()
+    cache2["plugins"][0]["latestSha"] = "fff1234"
+    core.save_registry_cache(cache2)
+    d = srv3._registry_drift("anthropics/skills")
+    ck("★ _registry_drift：真前移 → 照常报漂移",
+       d is not None and d["latestSha"][:7] == "fff1234")
+
+    # --- 收尾：清掉缓存，别污染其他检查
+    core.REGISTRY_PATH.unlink(missing_ok=True)
 
 
 def round19():
@@ -3662,7 +3730,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.26.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.27.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3743,9 +3811,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.26.0"
-       and core.MARKET_VERSION == "2.26.0"
-       and SELFTEST_VERSION == "2.26", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.27.0"
+       and core.MARKET_VERSION == "2.27.0"
+       and SELFTEST_VERSION == "2.27", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")

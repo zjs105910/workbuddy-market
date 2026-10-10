@@ -76,6 +76,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 import secrets
 import signal
 import subprocess
@@ -663,7 +664,10 @@ def _registry_drift(repo: str) -> dict | None:
         return None
     src = str(entry.get("sourceCommit") or "")
     latest = str(entry.get("latestSha") or "")
-    if not src or not latest or src == latest:
+    # v2.27：比对口径取前 7 位 —— 更新任务会把 ghpm 实测的 7 位短 sha
+    # 回写进缓存 latestSha（见 _sync_registry_sha_from_job），长度不一致
+    # 不能算漂移；前 7 位一致 = 上游没动过。
+    if not src or not latest or src[:7] == latest[:7]:
         return None
     return {"repo": repo, "sourceCommit": src, "latestSha": latest,
             "error": f"{repo} 上游已前移：审核固定在 {src[:12]}…，"
@@ -703,6 +707,16 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
                 args.append("--allow-non-skill")
             ok = _run_ghpm(args, jid)
             _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}")
+            if action == "update" and ok:
+                # v2.27：ghpm 实测的上游 sha 回写注册表缓存，消除
+                # 「更新完仍显示可更新」的快照滞后假阳性
+                with _jobs_lock:
+                    job = _jobs.get(jid)
+                if job and job.get("lines"):
+                    try:
+                        _sync_registry_sha_from_job(repo, job["lines"])
+                    except Exception as exc:      # noqa: BLE001 —— 回写失败不影响任务结果
+                        core.log("warn", "registry", f"latestSha 回写失败：{exc}")
             core.log("info" if ok else "error", "job",
                      f"{action} {repo} {'成功' if ok else '失败'}")
         finally:
@@ -710,6 +724,51 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
 
     threading.Thread(target=work, daemon=True).start()
     return jid
+
+
+_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+
+def _sync_registry_sha_from_job(repo: str, lines) -> bool:
+    """v2.27：更新任务完成后，把 ghpm 实测的上游 sha 回写进注册表缓存。
+
+    「可更新」的判定是「已装 sha vs 注册表 latestSha」，而 latestSha 是
+    每日 CI 的快照 —— 上游在快照之后推进、ghpm 更新又已追平实时上游时，
+    就会出现「更新完仍显示可更新」的假阳性。ghpm 的对比对象是实时上游，
+    它报告的 sha 比快照新 —— 用实测值修正**缓存**（不动注册表源文件，
+    明天的 CI 会用 40 位全量值覆盖回来；这里回写的是 ghpm 输出里的短
+    sha，比对双方都取前 7 位，见 _registry_drift 的口径）。
+
+    解析纪律：只认包含仓库名且带 [跳过] / [更新] 标记（或「已是最新」）
+    的行；同行可能「旧 → 新」两个 sha，取最后一个 = 新值。解析不出就
+    如实返回 False，绝不猜。
+    """
+    if not repo or not lines:
+        return False
+    sha = None
+    for ln in lines:
+        s = str(ln)
+        if repo.casefold() not in s.casefold():
+            continue
+        if "[跳过]" not in s and "[更新]" not in s and "已是最新" not in s:
+            continue
+        for tok in _SHA_RE.findall(s):
+            sha = tok.lower()          # 取行内最后一个 sha
+    if not sha:
+        return False
+    cache = core.load_registry_cache()
+    changed = False
+    for e in cache.get("plugins", []):
+        if (str(e.get("repo", "")).casefold() == str(repo).casefold()
+                and str(e.get("latestSha", "")).lower()[:7] != sha[:7]):
+            e["latestSha"] = sha
+            changed = True
+    if changed:
+        core.save_registry_cache(cache)
+        invalidate_registry_mem()
+        core.log("info", "registry",
+                 f"{repo} latestSha 已按 ghpm 实测回写为 {sha[:7]}")
+    return changed
 
 
 def _registry_install_job(repo: str, mode: str = "missing", force: bool = False):
