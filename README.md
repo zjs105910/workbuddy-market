@@ -40,6 +40,57 @@
 
 ---
 
+## 快速上手（Quick Start）
+
+> 三十秒版本：**克隆仓库 → 双击 `一键启动.cmd` → 直接回车**。
+> 从 v2.22 起不需要手工建配置文件。
+
+1. **获取并启动**：`git clone` 后双击 `一键启动.cmd`（或 `python launcher.py`）。
+   首次启动向导会做环境预检（Python / 目录 / 配置 / skills / 端口），每项
+   给出 成功 / 警告 / 失败 三态结果；
+2. **首次配置自动初始化**：检测到没有 `market.config.json` 时，自动从模板
+   创建（并发安全、绝不覆盖已有配置；损坏的文件原样保留并给出修复建议）；
+3. **只浏览 / 注册**：首次创建配置后终端会问一次 —— **回车 = 只浏览市场**
+   （默认，不改动 WorkBuddy 的任何配置）；输入 `2` = 注册进 WorkBuddy 插件面板
+   （仍要过打包 / 自检前置检查）。之后随时可在网页点「注册到 WorkBuddy」；
+4. **搜索、看详情、安装**：顶部三个入口 —— **本机技能**（管理自己打包的
+   Skills）/ **精选市场**（收录审核过的社区插件）/ **探索 GitHub**（未审核
+   来源明确标注）。安装前点「详情」看四问：来自哪里 / 是否可信 / 能做什么 /
+   能否安装；
+5. **检查、更新、卸载、恢复**：卡片上的「补齐 / 更新 / 卸载…」都有分级预览
+   与确认；卸载移进回收站可恢复；顶部「更新中心」聚合所有可更新项；
+6. **出错用诊断**：失败会给出 人话原因 + 已完成/未影响范围 + 下一步操作
+   （可重试 / 看日志 / 复制诊断）；顶栏「体检」跑只读体检并导出脱敏报告；
+   命令行等价物是 `workbuddy-market doctor`。
+
+![本机技能](docs/screenshots/home-local.png)
+
+![精选市场](docs/screenshots/home-curated.png)
+
+![安装前四问](docs/screenshots/detail-four-questions.png)
+
+> 截图由 `scripts/capture-screenshots.py` 在隔离区用**合成数据**从真实运行的
+> 界面采集（不含任何真实用户的 skill 内容、路径或口令）；界面持续演进，
+> 以你本机实际页面为准。
+
+### 平台支持矩阵
+
+如实区分「CI 覆盖」「实际验证」「尚未验证」—— **通过 Python 测试 ≠
+WorkBuddy 宿主集成已验证**：
+
+| 平台 | CI 覆盖 | 实际验证 | 说明 |
+|---|---|---|---|
+| Windows 10/11 | 语法/隐私/契约 + **selftest 硬门槛** + wheel 构建 + 浏览器冒烟（本地） | ✅ 日常使用环境；WorkBuddy 5.7.6 面板实测（见 docs/WorkBuddy-5.7.6-面板实测.md） | 主战场，最可靠 |
+| Linux (Ubuntu) | 语法/隐私/契约 + POSIX 语义冒烟 + pytest + wheel 构建 + **ui-smoke 浏览器门禁** | ⚠️ 仅 CI runner 实测 | 未在真实 WorkBuddy 宿主集成验证 |
+| macOS | 语法/隐私/契约 + POSIX 语义冒烟 + pytest（v2.18 起槽位） | ❌ 未验证 | 真实 fcntl/symlink 语义从未人工跑过 |
+
+### 参与
+
+提 Issue / PR 前先看 [CONTRIBUTING.md](CONTRIBUTING.md)（含提交内容隐私纪律
+与测试要求）；协议与收录标准见 [docs/plugin-spec.md](docs/plugin-spec.md)。
+
+---
+
 ## 一、怎么用（傻瓜模式）
 
 | 我想…                       | 双击这个                     |
@@ -208,7 +259,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 771 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 776 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -251,7 +302,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 771 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 776 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -469,6 +520,26 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | **v2.22** | **首次启动向导：配置缺失自动初始化 + 环境预检 + 纯浏览/注册选择** | [CHANGELOG.md](CHANGELOG.md) 2.22.0 条目 |
 | **v2.23** | **界面重排：三入口 + 顶部指标条 + 安装前「四问」+ 信任 fail-closed** | [CHANGELOG.md](CHANGELOG.md) 2.23.0 条目 |
 | **v2.24** | **结构化错误 + doctor 网页体检 + UI 回归扩展（a11y / 响应式 / 界面状态）** | [CHANGELOG.md](CHANGELOG.md) 2.24.0 条目 |
+| **v2.25** | **开源入门体验：Quick Start + 真实演示截图 + 平台支持矩阵 + FAQ 补全** | [CHANGELOG.md](CHANGELOG.md) 2.25.0 条目 |
+
+### v2.25 摘要（2026-10-10）
+
+外部产品评审 P1（「重构开源项目的入门体验」）当轮落地 —— 不动稳定内核：
+
+- **README 快速上手**：三十秒路径（克隆 → 双击 → 回车）+ 六步引导
+  （获取启动 / 配置自动初始化 / 只浏览或注册 / 搜索安装 / 更新卸载恢复 /
+  出错诊断），新用户不再需要通读全文；
+- **真实演示截图**（3 张）：`scripts/capture-screenshots.py` 在隔离区用
+  **合成数据**从真实运行的界面采集 —— 本机技能页 / 精选市场页 / 安装前
+  四问详情，不含任何真实用户的 skill 内容、路径或口令；截图可再生，
+  不伪造；
+- **平台支持矩阵**：如实区分 Windows（CI 硬门槛 + 宿主实测）/ Linux
+  （CI 全覆盖，无宿主集成验证）/ macOS（CI 槽位，未验证），明示
+  「通过 Python 测试 ≠ WorkBuddy 宿主集成已验证」；
+- **FAQ 补全**：首次启动 / 配置初始化专节（缺失自动初始化 / 已有配置
+  不动 / 损坏原样保留 / 回车 = 只浏览 / 非交互不等待 / 不自动收录）；
+- 自检 771 → 776 项（第 39 节 5 项：截图与采集脚本盯防 / Quick Start
+  与平台矩阵发货盯防）；pytest 37 项不变。
 
 ### v2.24 摘要（2026-10-09）
 
@@ -661,7 +732,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 771 passed, 0 failed
+python selftest.py        # 776 passed, 0 failed
 python launcher.py --status
 python launcher.py --recover
 ```
