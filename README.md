@@ -259,7 +259,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 776 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 781 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← ★ 配置模板（入库），先复制成下面那份再改
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -302,7 +302,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 776 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 781 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -522,6 +522,18 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | **v2.24** | **结构化错误 + doctor 网页体检 + UI 回归扩展（a11y / 响应式 / 界面状态）** | [CHANGELOG.md](CHANGELOG.md) 2.24.0 条目 |
 | **v2.25** | **开源入门体验：Quick Start + 真实演示截图 + 平台支持矩阵 + FAQ 补全** | [CHANGELOG.md](CHANGELOG.md) 2.25.0 条目 |
 | **v2.26** | **更新体验：「可更新 N」即点即达 + 更新中心一键全部更新** | [CHANGELOG.md](CHANGELOG.md) 2.26.0 条目 |
+| **v2.27** | **修复：更新完成后「可更新」假阳性（ghpm 实测 sha 回写注册表缓存）** | [CHANGELOG.md](CHANGELOG.md) 2.27.0 条目 |
+
+### v2.27 摘要（2026-10-11）
+
+用户实测反馈：更新完成后顶部「可更新 1」仍不消失。
+
+- **根因**：「可更新」比对的是每日 CI 快照 latestSha，上游在快照后推进、
+  ghpm 更新已追平实时上游时，快照落后即误报；
+- **修复**：更新任务成功后解析 ghpm 输出里的实测 sha（[跳过]/[更新]/
+  已是最新行，解析不出绝不猜），回写注册表**缓存** latestSha 并失效
+  内存缓存；`_registry_drift` 改前 7 位比对，避免 7 位回写造成假 409；
+- selftest 776 → 781 项（第 40 节 5 项）；**此修复需重启市场服务生效**。
 
 ### v2.26 摘要（2026-10-10）
 
@@ -744,7 +756,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 776 passed, 0 failed
+python selftest.py        # 781 passed, 0 failed
 python scripts/ui_smoke.py --ci   # 推送前必跑：与 CI 同口径（核心检查被跳过即硬失败）
 python launcher.py --status
 python launcher.py --recover
