@@ -280,6 +280,11 @@ def main():
                 ck("本机安装端到端（无可安装项，跳过）", True)
 
             # ---- 收藏开关（POST /api/favorites，写进隔离 STATE_HOME）
+            # v2.23 起 Homepage 分三个 tab，收藏按钮只在「精选市场」渲染 ——
+            # 检查前必须切过去（v2.25 实锤：停在「本机技能」tab 找不到
+            # data-fav 被静默跳过，--ci 门禁即 FAIL）。
+            page.click("#tab-curated")
+            page.wait_for_timeout(300)
             fav = page.locator("[data-fav]").first
             if fav.count():
                 fav.click()
@@ -290,6 +295,8 @@ def main():
             else:
                 CI_GATE["skipped_core"].append("收藏开关")
                 ck("收藏开关（无社区条目，跳过）", True)
+            page.click("#tab-local")
+            page.wait_for_timeout(300)
 
             # ==== v2.24 扩展：卸载旅程 / Escape / 响应式 ====
             # 等安装 toast 收起（3.4s 自动隐藏），避免把安装的 toast 误读成卸载结果

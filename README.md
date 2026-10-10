@@ -733,6 +733,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
 python selftest.py        # 776 passed, 0 failed
+python scripts/ui_smoke.py --ci   # 推送前必跑：与 CI 同口径（核心检查被跳过即硬失败）
 python launcher.py --status
 python launcher.py --recover
 ```
