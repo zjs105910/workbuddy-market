@@ -85,7 +85,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.24"
+SELFTEST_VERSION = "2.25"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -602,6 +602,9 @@ def run() -> None:
 
     # ============ 38. v2.24：结构化错误 / doctor Web 入口 / 路径脱敏 ============
     round23()
+
+    # ============ 39. v2.25：开源入门体验（Quick Start / 平台矩阵 / 截图） ============
+    round24()
 
 
 def round20():
@@ -1150,6 +1153,38 @@ def round23():
        and "market.config.json" in (json.loads(r.stdout or "{}").get("error") or ""))
     ck("★ --status 配置缺失 → stderr 无 Python traceback",
        "Traceback" not in (r.stderr or ""))
+
+
+def round24():
+    """v2.25：开源入门体验（第 39 节）。
+
+    文档轮的盯防线（评审 P1「重构开源项目的入门体验」）：
+    1. 演示截图真实存在且由可再生脚本采集（不是伪造图片、不是手工贴图）；
+    2. README 快速上手 / 平台支持矩阵 / 参与入口在发货内容里；
+    3. FAQ 有首次启动 / 配置初始化专节。
+    """
+    section("39. v2.25：开源入门体验（Quick Start / 平台矩阵 / 截图）")
+    repo = Path(__file__).resolve().parent
+    shots = repo / "docs" / "screenshots"
+    names = ("home-local.png", "home-curated.png", "detail-four-questions.png")
+    ck("★ 演示截图随仓库分发且非空（真实界面采集）",
+       all((shots / n).is_file() and (shots / n).stat().st_size > 20000
+           for n in names),
+       " ".join(f"{n}={((shots / n).stat().st_size // 1024) if (shots / n).is_file() else 0}KB"
+                for n in names))
+    ck("★ 截图采集脚本可再生（合成数据 + 隔离区纪律）",
+       (repo / "scripts" / "capture-screenshots.py").is_file()
+       and "WBM_MARKET_ROOT" in (repo / "scripts" / "capture-screenshots.py")
+       .read_text(encoding="utf-8"))
+    rd = (repo / "README.md").read_text(encoding="utf-8")
+    ck("★ README 快速上手 / 平台支持矩阵 / 参与入口在发货内容里",
+       "快速上手" in rd and "平台支持矩阵" in rd and "CONTRIBUTING.md" in rd
+       and "docs/screenshots/home-local.png" in rd)
+    ck("★ README 平台矩阵区分「CI 覆盖 ≠ 宿主集成已验证」",
+       "WorkBuddy 宿主集成" in rd)
+    faq = (repo / "docs" / "FAQ.md").read_text(encoding="utf-8")
+    ck("★ FAQ 有首次启动 / 配置初始化专节（缺失/已有/损坏/回车/非交互）",
+       "首次启动 / 配置相关" in faq and "原样保留" in faq and "只浏览" in faq)
 
 
 def round19():
@@ -3627,7 +3662,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.24.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.25.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3708,9 +3743,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.24.0"
-       and core.MARKET_VERSION == "2.24.0"
-       and SELFTEST_VERSION == "2.24", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.25.0"
+       and core.MARKET_VERSION == "2.25.0"
+       and SELFTEST_VERSION == "2.25", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
