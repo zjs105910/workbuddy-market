@@ -33,6 +33,15 @@
 
 > 取舍说明：这条路拿到的是**技能分发**——没有安装前四问、所有权分级和可恢复卸载。要完整的安全链路，请用上面的完整版。
 
+### 会用命令行？一条命令安装 ✅
+
+```bash
+pipx install workbuddy-market
+workbuddy-market doctor     # 体检；list / search 逛社区目录
+```
+
+（需要先装 [pipx](https://pipx.pypa.io/)；`uv tool install workbuddy-market` 等价。）
+
 ### 用 Git 的话
 
 ```powershell
