@@ -71,6 +71,5 @@ body:
     attributes:
       label: Sanitized diagnostics
       description: 可以附体检报告的脱敏结果或相关日志片段。发布前请检查并删除令牌、私人路径与 Skill 内容。
-      render: text
     validations:
       required: false
