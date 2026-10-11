@@ -26,6 +26,12 @@
 
 Python 3.10+ is still required (first-run setup checks it and explains what to install). No manual config file needed — it is initialized automatically on first launch.
 
+### Already using WorkBuddy? Zero-install marketplace
+
+Just want the curated community skills, no tooling: download the [marketplace zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip) and add it as a custom marketplace in the WorkBuddy plugin panel. Rebuilt daily by CI from the human-reviewed registry.
+
+> Trade-off: this path gives you skill distribution only — no pre-install review, no ownership grading, no recoverable uninstall. For the full safety chain, use the full version above.
+
 ### With Git
 
 Requirements: Python 3.10+ and Git.
