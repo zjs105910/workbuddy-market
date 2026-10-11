@@ -30,21 +30,21 @@ SCENES = [
     {"key": "intro", "title": "WorkBuddy Market",
      "narration": "WorkBuddy Market，把本机 Skills 变成可发现、可管理的插件市场。"},
     {"key": "local", "title": "本机技能 · 集中管理",
-     "narration": "本机技能集中呈现，方便浏览和管理。"},
+     "narration": "本机技能卡片让常用工具集中展示，方便浏览和管理。"},
     {"key": "search", "title": "关键词搜索 · 更快发现",
-     "narration": "输入关键词，快速定位想要的技能。"},
+     "narration": "输入关键词，快速找到想要的技能。"},
     {"key": "curated", "title": "精选市场 · 社区发现",
-     "narration": "精选市场收录社区技能；探索入口可发现更多公开仓库。"},
+     "narration": "精选市场展示社区技能，也可探索更多公开仓库。"},
     {"key": "inspect", "title": "安装前 · 先看四问",
-     "narration": "安装前先看来源、信任等级、权限和兼容性。权限声明不是沙箱，来源仍要自己判断。"},
+     "narration": "安装前先看来源、信任、权限与兼容性。权限声明不是沙箱，仍需自行判断。"},
     {"key": "explore", "title": "探索 GitHub · 扩展发现",
-     "narration": "从精选列表之外继续探索公开技能仓库；实际搜索结果受 GitHub 可用性影响。"},
+     "narration": "探索入口可搜索更多公开技能；结果取决于 GitHub 可用性。"},
     {"key": "install", "title": "真实流程 · 隔离演示安装",
-     "narration": "现在安装的是隔离环境中的合成 Skill，不会改动真实 WorkBuddy 配置。"},
+     "narration": "这里安装合成演示 Skill，只写入临时环境，不触碰真实配置。"},
     {"key": "uninstall", "title": "可恢复操作 · 降低误删风险",
-     "narration": "卸载前核对管理归属与内容变化，符合条件的内容进入回收站。"},
+     "narration": "卸载前检查归属与内容变化，符合条件的技能进入回收站。"},
     {"key": "outro", "title": "一起把 WorkBuddy Skills 生态做起来",
-     "narration": "喜欢这个项目，欢迎点 Star、提 Issue，或贡献文档、测试与插件收录。"},
+     "narration": "喜欢这个项目，欢迎点 Star、提 Issue、贡献文档或测试。"},
 ]
 
 
@@ -131,7 +131,7 @@ def copy_demo_runtime(market_root: Path, state_root: Path) -> None:
 
 def synthesize(text: str, path: Path, voice_bin: str) -> float:
     subprocess.run(
-        [voice_bin, "-v", "zh", "-s", "170", "-p", "45", "-w", str(path), text],
+        [voice_bin, "-v", "zh", "-s", "190", "-p", "45", "-w", str(path), text],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     with wave.open(str(path), "rb") as audio:
         return audio.getnframes() / audio.getframerate()
@@ -449,10 +449,10 @@ def main() -> int:
                 if elapsed < TARGET_SECONDS:
                     page.wait_for_timeout(int((TARGET_SECONDS - elapsed) * 1000))
                 final_elapsed = time.monotonic() - recording_started
-                if final_elapsed > MAX_SECONDS:
-                    raise RuntimeError(f"Demo took {final_elapsed:.1f}s; max is {MAX_SECONDS}s")
                 context.close()
                 browser.close()
+                if final_elapsed > MAX_SECONDS:
+                    raise RuntimeError(f"Demo took {final_elapsed:.1f}s; max is {MAX_SECONDS}s")
                 raw_candidates = sorted(raw_dir.glob("*.webm"))
                 if not raw_candidates:
                     raise RuntimeError("Playwright did not produce a browser recording")
