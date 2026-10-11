@@ -46,6 +46,12 @@ Permission and compatibility details shown before installation:
 
 > Screenshots are captured with synthetic data. Available actions and results depend on your local environment and the source plugin.
 
+## Demo video and formal releases
+
+- [Reproducible demo: recording steps, subtitles, and privacy boundaries](docs/demo-video.md)
+- [Formal Release process](docs/release-process.md)
+- Tagged app releases will include the MP4 demo, Chinese subtitles, Python wheel/sdist, and SHA-256 checksums on [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases). Releases named `registry-artifacts-*` contain community plugin artifacts, not the marketplace application itself.
+
 ## Safety notes
 
 - The marketplace checks ownership and content changes before removing a managed Skill; Skills installed elsewhere are not supposed to be removed by this marketplace.
