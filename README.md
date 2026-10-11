@@ -31,6 +31,8 @@
 
 不想跑任何工具，只想装社区精选技能：下载 [精选市场 zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip)，在 **WorkBuddy 插件面板 → 添加自定义市场** 里选这个 zip 即可。内容每日由 CI 从人工审核的注册表自动重建。
 
+> 这是精选目录的**轻量子集**：仓库体积超 30MB、含符号链接或没有标准 skill 结构的收录条目不会进包（搜不到某技能多半是这个原因）。完整清单见 zip 内 `.codebuddy-plugin/marketplace.json` 的 `included` / `excluded` 字段，或 Release 附件里的 manifest。
+
 > 取舍说明：这条路拿到的是**技能分发**——没有安装前四问、所有权分级和可恢复卸载。要完整的安全链路，请用上面的完整版。
 
 ### 会用命令行？一条命令安装 ✅
