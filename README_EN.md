@@ -32,6 +32,15 @@ Just want the curated community skills, no tooling: download the [marketplace zi
 
 > Trade-off: this path gives you skill distribution only — no pre-install review, no ownership grading, no recoverable uninstall. For the full safety chain, use the full version above.
 
+### Prefer the command line? One command
+
+```bash
+pipx install workbuddy-market
+workbuddy-market doctor     # health check; list / search to browse the registry
+```
+
+(Requires [pipx](https://pipx.pypa.io/); `uv tool install workbuddy-market` is equivalent.)
+
 ### With Git
 
 Requirements: Python 3.10+ and Git.
