@@ -27,6 +27,12 @@
 
 需要 Python 3.10+（首次启动向导会检测并给出明确提示）。配置文件不需要手工创建——首次启动自动初始化。
 
+### 已经在用 WorkBuddy？零安装直连市场 ✅
+
+不想跑任何工具，只想装社区精选技能：下载 [精选市场 zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip)，在 **WorkBuddy 插件面板 → 添加自定义市场** 里选这个 zip 即可。内容每日由 CI 从人工审核的注册表自动重建。
+
+> 取舍说明：这条路拿到的是**技能分发**——没有安装前四问、所有权分级和可恢复卸载。要完整的安全链路，请用上面的完整版。
+
 ### 用 Git 的话
 
 ```powershell
