@@ -108,7 +108,7 @@ def build_marketplace(registry_file: Path, out_zip: Path,
         repo = entry.get("repo") or ""
         commit = entry.get("sourceCommit") or ""
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or not commit:
-            failed.append(f"{repo or '?'}: 缺 repo/sourceCommit")
+            failed.append({"repo": repo or "?", "reason": "缺 repo/sourceCommit"})
             continue
         try:
             # 拉取 + 安全解包 + 选 skills 根（与产物构建同一套纪律）
@@ -167,14 +167,15 @@ def build_marketplace(registry_file: Path, out_zip: Path,
                 shutil.rmtree(staging.parent / f".mkext-{i}", ignore_errors=True)
             print(f"[{i}/{len(entries)}] OK  {repo} → {slug}（{len(skills)} 个 skill）")
         except Exception as exc:  # 单条失败不拖垮整批
-            failed.append(f"{repo}: {type(exc).__name__}: {exc}")
+            failed.append({"repo": repo, "reason": f"{type(exc).__name__}: {exc}"})
             print(f"[{i}/{len(entries)}] FAIL {repo}: {exc}")
 
     if not built:
         for p in sorted(staging.parent.glob(".mkext-*")):
             shutil.rmtree(p, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
-        raise SystemExit("全部条目构建失败，拒绝发布空市场：" + "；".join(failed[:5]))
+        raise SystemExit("全部条目构建失败，拒绝发布空市场："
+                         + "；".join(f"{f['repo']}: {f['reason']}" for f in failed[:5]))
 
     marketplace = {
         "name": MARKET_NAME,
@@ -184,6 +185,8 @@ def build_marketplace(registry_file: Path, out_zip: Path,
         "builtAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sourceRegistry": "registry/plugins.json",
         "plugins": built,
+        "included": [b["name"] for b in built],
+        "excluded": [{"repo": f["repo"], "reason": f["reason"][:160]} for f in failed],
     }
     (staging / ".codebuddy-plugin" / "marketplace.json").write_text(
         json.dumps(marketplace, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -200,7 +203,8 @@ def build_marketplace(registry_file: Path, out_zip: Path,
     summary = {
         "built": len(built), "failed": len(failed),
         "sizeBytes": out_zip.stat().st_size,
-        "failures": failed,
+        "included": [b["name"] for b in built],
+        "excluded": failed,
     }
     (out_zip.parent / "workbuddy-marketplace.manifest.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
