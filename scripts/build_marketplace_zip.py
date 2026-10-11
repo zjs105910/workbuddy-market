@@ -85,7 +85,8 @@ def _fetch_with_retry(url: str, attempts: int = 4) -> bytes:
 
 
 def build_marketplace(registry_file: Path, out_zip: Path,
-                      limit: int | None = None) -> dict:
+                      limit: int | None = None,
+                      max_plugin_bytes: int = 30 * 1024 * 1024) -> dict:
     registry = json.loads(registry_file.read_text(encoding="utf-8"))
     entries = registry.get("plugins") or []
     if limit:
@@ -125,6 +126,16 @@ def build_marketplace(registry_file: Path, out_zip: Path,
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 version = _ba.fallback_version(commit, now)
                 shutil.copytree(skills_root, dest / "skills")
+                # 体积闸门：zip 市场是给 WorkBuddy 直接下载的，单个插件超大
+                # 会拖垮整个市场（首版曾因个别大仓库整包 878MB）。超限即剔除
+                # 并如实记录，不静默裁剪内容。
+                used = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
+                if used > max_plugin_bytes:
+                    shutil.rmtree(dest, ignore_errors=True)
+                    taken.discard(slug)
+                    raise ValueError(
+                        f"插件体积 {used // 1048576}MB 超过上限 "
+                        f"{max_plugin_bytes // 1048576}MB，已剔除")
                 (dest / ".codebuddy-plugin").mkdir()
                 plugin_json = {
                     "name": slug,
@@ -203,8 +214,11 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY_FILE)
     ap.add_argument("--out", type=Path, default=Path("dist/workbuddy-marketplace.zip"))
     ap.add_argument("--limit", type=int, default=None, help="只构建前 N 条（冒烟用）")
+    ap.add_argument("--max-plugin-mb", type=int, default=30,
+                    help="单插件体积上限（MB），超限剔除并记录")
     args = ap.parse_args(argv)
-    summary = build_marketplace(args.registry, args.out, args.limit)
+    summary = build_marketplace(args.registry, args.out, args.limit,
+                                args.max_plugin_mb * 1024 * 1024)
     return 0 if summary["built"] > 0 else 1
 
 
