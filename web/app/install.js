@@ -119,10 +119,13 @@ export async function handleDataAction(t){
         ? '官方收录'
         : trust === "reviewed" ? '社区精选（已人工审核收录）'
         : '<b>未审核</b>（' + (regKnown ? '收录未审核或信任级别未知' : '搜索结果，未经收录审核') + '）';
-      let routeNote = '安装走 ghpm，自带事务与回滚。';
+      let routeNote = '安装走 ghpm，自带事务与回滚。<b>卸载提示：</b>此来源的技能'
+        + '不由本市场的卸载管理（避免误删），移除时请用命令 <code>ghpm remove 项目名</code>。';
       if (usePkg){
         routeNote = '安装走<b>不可变产物</b>：下载后先做 SHA-256 供应链校验'
-          + '（与收录审核时固定的哈希比对，不符即整包拒绝），再进事务安装。';
+          + '（与收录审核时固定的哈希比对，不符即整包拒绝），再进事务安装。'
+          + '<b>卸载提示：</b>此来源的技能不由本市场的卸载管理（避免误删），'
+          + '移除时请用命令 <code>ghpm remove 项目名</code>。';
       }
       const note = known
         ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>'+routeNote+'</div>'
