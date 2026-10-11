@@ -1,5 +1,7 @@
 # WorkBuddy Market
 
+[简体中文](README.md) · [English](README_EN.md)
+
 [![CI](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
