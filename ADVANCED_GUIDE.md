@@ -264,7 +264,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 781 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 789 项自检（默认隔离模式，不碰真实环境）
 ├── market.config.example.json        ← 配置模板（入库）；首次启动自动初始化私有配置
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
@@ -307,7 +307,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 781 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 789 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -515,7 +515,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 781 passed, 0 failed
+python selftest.py        # 789 passed, 0 failed
 python scripts/ui_smoke.py --ci   # 推送前必跑：与 CI 同口径（核心检查被跳过即硬失败）
 python launcher.py --status
 python launcher.py --recover
