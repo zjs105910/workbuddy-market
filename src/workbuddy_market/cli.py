@@ -166,9 +166,13 @@ def _registry_list_main(argv: list) -> int:
         return 0
 
     if not rows:
-        print("没有匹配的条目。")
+        print(f"没有匹配的条目（社区目录共 {len(plugins)} 条，"
+              f"来源：{reg.get('source')}）。")
         return 0
-    print(f"社区目录 {len(rows)} 条（来源：{reg.get('source')}"
+    # v2.28：命中数 / 总数 同框展示 —— 「search 4 条」曾被误读成数据源
+    # 只有 4 条；总数同框后口径自解释。
+    print(f"社区目录匹配 {len(rows)} / 共 {len(plugins)} 条"
+          f"（来源：{reg.get('source')}"
           f"{'，数据非最新' if reg.get('stale') else ''}）：")
     for e in rows:
         star = f"★{e['stars']}" if e.get("stars") else "  ·"
@@ -178,6 +182,12 @@ def _registry_list_main(argv: list) -> int:
               f"({e.get('repo')})  {star}  {fav}")
         if e.get("description"):
             print(f"      {e['description'][:80]}")
+        # v2.28：注册表自带 displayNameEn / descriptionEn —— 顺手给英文用户
+        # 一行原文名，不必等完整 i18n（渐进路线的第一步）。
+        if e.get("displayNameEn") and e.get("displayNameEn") != e.get("displayName"):
+            print(f"      ({e['displayNameEn'][:80]})")
+        elif e.get("descriptionEn") and e.get("description"):
+            print(f"      ({e['descriptionEn'][:80]})")
     return 0
 
 
