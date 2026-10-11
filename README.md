@@ -19,7 +19,15 @@
 
 ## 快速上手（Windows）
 
-要求：Python 3.10+、Git。想先体验网页，不改动 WorkBuddy 配置，推荐从安全模式开始。
+### 没有 Git？三步免安装 ✅
+
+> 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)，点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
+> 2. **解压**：右键解压到任意目录（路径不要含特殊字符）；
+> 3. **双击**：双击 `安全模式-只开网页.cmd` 先浏览市场；准备好接入 WorkBuddy 时再双击 `一键启动.cmd`。
+
+需要 Python 3.10+（首次启动向导会检测并给出明确提示）。配置文件不需要手工创建——首次启动自动初始化。
+
+### 用 Git 的话
 
 ```powershell
 git clone https://github.com/zjs105910/workbuddy-market.git

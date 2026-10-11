@@ -18,6 +18,16 @@
 
 ## Quick start (Windows)
 
+### No Git? Three steps, no install
+
+> 1. **Download**: open the [latest release](https://github.com/zjs105910/workbuddy-market/releases/latest) and grab **Source code (zip)** (or the [main-branch ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip));
+> 2. **Extract**: unzip to any folder;
+> 3. **Run**: double-click `安全模式-只开网页.cmd` to browse the marketplace first; when ready to integrate with WorkBuddy, double-click `一键启动.cmd`.
+
+Python 3.10+ is still required (first-run setup checks it and explains what to install). No manual config file needed — it is initialized automatically on first launch.
+
+### With Git
+
 Requirements: Python 3.10+ and Git.
 
 To try the web UI first without registering the marketplace in WorkBuddy:
