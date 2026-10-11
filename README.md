@@ -45,6 +45,12 @@ cd workbuddy-market
 
 > 截图由项目脚本使用合成数据生成。实际可用操作会根据本机环境与插件来源有所不同。
 
+## 产品演示与正式版本
+
+- [可复现演示：录制方法、中文字幕与隐私边界](docs/demo-video.md)
+- [正式 Release 发布流程](docs/release-process.md)
+- 正式版本的 MP4、字幕、Python 安装包与 SHA-256 校验文件将在 [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases) 中一起发布。`registry-artifacts-*` 是社区插件产物，不是市场本体安装包。
+
 ## 安装前请知道
 
 - 卸载时会检查插件是否由本市场管理、内容是否被修改；不属于本市场管理的技能不会被随意删除。回收站与事务恢复用于降低误操作影响。
