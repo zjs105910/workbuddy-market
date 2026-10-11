@@ -90,7 +90,7 @@ import threading
 import time
 from pathlib import Path
 
-SELFTEST_VERSION = "2.27"
+SELFTEST_VERSION = "2.28"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
@@ -613,6 +613,9 @@ def run() -> None:
 
     # ============ 40. v2.27：更新后 latestSha 回写 / 漂移前缀口径 ============
     round25()
+
+    # ============ 41. v2.28：CLI 口径诚实化 / zip 市场构建清单 ============
+    round26()
 
 
 def round20():
@@ -3730,7 +3733,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.27.0', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.28.0', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -3811,9 +3814,9 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.27.0"
-       and core.MARKET_VERSION == "2.27.0"
-       and SELFTEST_VERSION == "2.27", core.MARKET_VERSION)
+       wm.version.MARKET_VERSION == "2.28.0"
+       and core.MARKET_VERSION == "2.28.0"
+       and SELFTEST_VERSION == "2.28", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器
     ck("validate_id 放行正常名字", core.validate_id("ok-name_1", "f") == "ok-name_1")
@@ -5465,6 +5468,126 @@ def round17():
        "packageHash" not in doc_after["plugins"][1])
 
     shutil.rmtree(lab, ignore_errors=True)
+
+
+def round26():
+    """v2.28：审计修复轮（CLI 口径诚实化 / zip 市场构建清单）。
+
+    使用与宣发审计的 4 个用户可见问题的盯防线：
+    1. CLI list/search 头部改为「匹配 X / 共 Y 条」—— 命中数与总数同框，
+       「search 4 条」不再被误读成数据源只有 4 条；
+    2. 注册表自带 displayNameEn 时，CLI 顺手输出一行原文名（渐进 i18n）；
+    3. zip 市场构建产物自带 included / excluded 清单 —— 用户能对上
+       「注册表收录 N 条，zip 里怎么只有 M 个」；
+    4. 单插件体积闸门：超限剔除并如实记录 reason，拒绝发布空市场，
+       绝不静默裁剪内容。
+    """
+    section("41. v2.28：CLI 口径诚实化 / zip 市场构建清单")
+    import contextlib as _ctx41
+    import io as _io41
+    import tarfile as _tf41
+    import zipfile as _zf41
+    import importlib.util as _ilu41
+    import workbuddy_market.cli as wcli41
+
+    # --- 41A/41B. CLI 头部口径 + 英文名行（缓存新鲜，不触网）
+    core.save_registry_cache({
+        "schema": core.REGISTRY_SCHEMA, "updatedAt": "2026-10-12",
+        "fetchedAt": "2026-10-12T00:00:00Z",
+        "fetchedAtEpoch": time.time() + 3600,
+        "plugins": [
+            {"repo": "owner/cn", "displayName": "中文技能",
+             "displayNameEn": "Chinese Skill", "description": "一个示例",
+             "category": "测试", "trust": "reviewed", "sourceCommit": "a" * 40},
+            {"repo": "owner/plain", "displayName": "Plain",
+             "description": "另一个示例", "category": "测试",
+             "trust": "reviewed", "sourceCommit": "b" * 40}]})
+    buf = _io41.StringIO()
+    with _ctx41.redirect_stdout(buf):
+        rc = wcli41._registry_list_main(["list"])
+    out = buf.getvalue()
+    ck("★ CLI list 头部：匹配数与总数同框",
+       rc == 0 and "社区目录匹配 2 / 共 2 条" in out, out[:80])
+    ck("★ 注册表带英文名 → 输出原文名行", "(Chinese Skill)" in out)
+    buf2 = _io41.StringIO()
+    with _ctx41.redirect_stdout(buf2):
+        rc2 = wcli41._registry_list_main(["search", "chinese"])
+    out2 = buf2.getvalue()
+    ck("★ CLI search 头部：命中 1 / 共 2（英文关键词命中 displayNameEn）",
+       rc2 == 0 and "社区目录匹配 1 / 共 2 条" in out2, out2[:80])
+    core.REGISTRY_PATH.unlink(missing_ok=True)
+
+    # --- 41C/41D. zip 市场构建：included/excluded 清单 + 体积闸门
+    spec41 = _ilu41.spec_from_file_location(
+        "build_marketplace_zip",
+        str(Path(__file__).resolve().parent / "scripts" /
+            "build_marketplace_zip.py"))
+    bz41 = _ilu41.module_from_spec(spec41)
+    spec41.loader.exec_module(bz41)
+
+    lab41 = _TMP / "r26-lab"
+    shutil.rmtree(lab41, ignore_errors=True)
+    lab41.mkdir(parents=True)
+
+    tar_path = lab41 / "ok.tar.gz"
+    with _tf41.open(tar_path, "w:gz") as tf41:
+        data41 = "---\nname: alpha\n---\n"
+        ti41 = _tf41.TarInfo("ok_repo-abc/skills/alpha/SKILL.md")
+        ti41.size = len(data41.encode("utf-8"))
+        tf41.addfile(ti41, _io41.BytesIO(data41.encode("utf-8")))
+    ok_tar41 = tar_path.read_bytes()
+
+    real_fetch41 = bz41._fetch_with_retry
+
+    def fake_fetch41(url: str) -> bytes:
+        if url.endswith("/" + "a" * 40 + ".tar.gz"):
+            return ok_tar41
+        raise RuntimeError("网络炸了")
+
+    bz41._fetch_with_retry = fake_fetch41
+    try:
+        reg41 = lab41 / "reg.json"
+        reg41.write_text(json.dumps({"schema": 1, "plugins": [
+            {"repo": "owner/ok", "sourceCommit": "a" * 40,
+             "displayName": "OK", "description": "d1"},
+            {"repo": "owner/bad", "sourceCommit": "b" * 40,
+             "displayName": "Bad", "description": "d2"}]},
+            ensure_ascii=False), encoding="utf-8")
+        out41 = lab41 / "mkt.zip"
+        summary = bz41.build_marketplace(reg41, out41)
+        ck("★ zip 构建：单条失败不拖垮整批，excluded 结构化（repo+reason）",
+           summary["built"] == 1 and summary["failed"] == 1
+           and summary["excluded"][0]["repo"] == "owner/bad"
+           and "网络炸了" in summary["excluded"][0]["reason"],
+           json.dumps(summary.get("excluded"), ensure_ascii=False)[:100])
+        with _zf41.ZipFile(out41) as zf41:
+            mp41 = json.loads(zf41.read(".codebuddy-plugin/marketplace.json"))
+        ck("★ marketplace.json 自带 included/excluded",
+           mp41["included"] == [mp41["plugins"][0]["name"]]
+           and mp41["excluded"][0]["repo"] == "owner/bad")
+        man41 = json.loads((out41.parent / "workbuddy-marketplace.manifest.json")
+                           .read_text(encoding="utf-8"))
+        ck("★ manifest 与 marketplace.json 清单一致",
+           man41["included"] == mp41["included"] and len(man41["excluded"]) == 1)
+
+        # --- 41D. 体积闸门：超限剔除 → 拒发空市场并说明原因
+        reg42 = lab41 / "reg2.json"
+        reg42.write_text(json.dumps({"schema": 1, "plugins": [
+            {"repo": "owner/ok", "sourceCommit": "a" * 40,
+             "displayName": "OK", "description": "d1"}]},
+            ensure_ascii=False), encoding="utf-8")
+        gated = None
+        try:
+            bz41.build_marketplace(reg42, lab41 / "mkt2.zip",
+                                   max_plugin_bytes=1)
+        except SystemExit as exc41:
+            gated = str(exc41)
+        ck("★ 体积闸门：超限剔除 → 拒发空市场并如实说明原因",
+           gated is not None and "拒绝发布空市场" in gated and "体积" in gated,
+           (gated or "")[:100])
+        shutil.rmtree(lab41, ignore_errors=True)
+    finally:
+        bz41._fetch_with_retry = real_fetch41
 
 
 def _raises(fn, exc_type, *args, **kwargs) -> bool:
