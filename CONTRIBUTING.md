@@ -1,49 +1,71 @@
 # 贡献指南
 
-谢谢考虑贡献！这个项目目前处于「内核已稳、协议成形中」的阶段，
-贡献前请先读一遍本文和 `README.md`，可以少走很多弯路。
+感谢你考虑为 WorkBuddy Market 贡献代码、文档或插件收录建议。欢迎先从修正文档、复现问题或完善测试开始。
 
 ## 动手之前
 
-1. **先跑一遍自检**：`python selftest.py`（隔离模式，不碰真实环境）。
-   全绿是任何改动的起点，也是终点。
-2. **改行为之前先复现**。本项目有条铁律：评审/直觉给的结论要先用探针验证，
-   历史上不止一次「看起来是 O(N²)」的结论被探针证伪。
-3. **看 `docs/开源重构方案.md`**：模块拆分（R1-R8）有精确的函数级映射表和
-   依赖顺序（config ← scanner ← packaging ← installer），别打乱。
+1. 阅读 [项目首页](README.md)、[详细使用指南](ADVANCED_GUIDE.md) 与 [安全策略](SECURITY.md)。
+2. **改行为前先复现问题**：提供可重复的步骤或测试用例，避免只按直觉修改。
+3. 如果涉及内核模块迁移，请先查看 `docs/开源重构方案.md` 中的依赖顺序。
+4. 尽量把纯重构与行为变化拆成不同 PR，便于审查与定位回归。
 
 ## 环境要求
 
-- Python 3.10+（无第三方运行时依赖，纯标准库）
-- Windows 为主战场（msvcrt / junction / 大小写语义都在这上面踩过坑），
-  Linux/macOS 的行为测试正在补
+- Python 3.10+
+- 运行时使用 Python 标准库；测试额外需要 pytest（开发可选依赖）
+- Windows 是主要实测环境；Linux 有 CI 与部分语义测试；macOS 尚不代表真实 WorkBuddy 宿主已验证
+
+安装开发测试依赖：
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+## 本地验证
+
+提交前，请在项目根目录、与你的改动相符的环境里运行：
+
+```bash
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python selftest.py
+python -m pytest tests/ -q
+python scripts/validate_registry.py registry/plugins.json
+python scripts/privacy-audit.py
+```
+
+其中 `selftest.py` 默认使用隔离临时目录；`--real` 是面向现有环境的只读检查，不应在普通回归中替代隔离自检。
+
+如果改动了前端、安装流程或关键 UI 交互，还应运行浏览器门禁：
+
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+python scripts/ui_smoke.py --ci
+```
+
+`--ci` 是严格模式：Playwright 缺失或核心检查被跳过都会失败。若当前环境不能运行某项检查，请在 PR 中写明原因与尚未验证的部分，不要把未运行写成通过。
+
+在发布或大范围改动前，还可运行完整历史隐私审计：
+
+```bash
+python scripts/privacy-audit.py --history
+```
 
 ## 提交规范
 
-- **拆分与行为变更分开**。一个 PR 里只做「搬代码」或「改行为」其中之一，
-  混在一起出问题时无法归因。
-- 破坏性操作必须 fail-closed（扫描失败 ≠ 目录为空）。
-- 不许用廉价指纹做安装/卸载判定（`classify_skill` 的 `purpose` 机制）。
-- 事务/恢复/fail-closed 语义一行都不许变，除非 PR 里单独说明并带了探针证据。
-- 改版本号时同步：`src/workbuddy_market/version.py`、`selftest.py` 的
-  `SELFTEST_VERSION`、README 的自检项数与对应章节。
-
-## 自检怎么跑
-
-```bash
-python selftest.py            # 隔离模式（默认）：临时目录里造假 skill 走完整流程
-python selftest.py --real     # 只读检查现网状态
-python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-```
+- 破坏性操作必须 fail-closed（扫描失败不等于目录为空）。
+- 不要用廉价指纹作为安装或卸载判定；遵守 `classify_skill` 的 `purpose` 机制。
+- 事务、恢复与 fail-closed 语义的变更必须单独说明风险、探针证据和回滚路径。
+- 不要提交真实用户的 Skill 内容、本机私有配置、令牌、私人路径或未经脱敏的日志。
+- 修改插件协议时，先更新协议文档并说明向后兼容性。
+- 如修改版本号或自检契约，请同步更新 `src/workbuddy_market/version.py`、`selftest.py` 对应盯防和相关文档；不要为让测试变绿而删除有效的回归断言。
 
 ## 测试怎么写
 
-新用例进 `selftest.py` 对应章节（或新建小节），使用现成的 `ck` / `section` /
-`prepare_fixture` 基建。涉及模块注入的用例注意：包内部调用走
-`workbuddy_market.<mod>` 命名空间，patch 目标要选对（见 selftest 第 19/24/25 节）。
+新增用例请优先放入相关的 `tests/` 单元测试，涉及核心不变量时同步补充 `selftest.py` 对应章节。使用现有的 `ck` / `section` / `prepare_fixture` 基础设施。包内依赖通常通过 `workbuddy_market.<module>` 命名空间调用，patch 时请确认目标位置。
 
 ## 协议与设计
 
-- 插件协议 / Provider / Lockfile 的设计稿在 `docs/protocol/`，
-  改协议先改文档、评审通过再动代码。
-- 工程约定与历史踩坑记录见仓库根 `README.md` 各节。
+- 插件协议、Provider 与 Lockfile 的设计材料见 `docs/protocol/`。
+- 使用者问题先查 [FAQ](docs/FAQ.md)；安全漏洞请按 [SECURITY.md](SECURITY.md) 中的私密渠道报告，不要公开发布可利用细节。
+- 提交 PR 时请使用仓库的 PR 模板，说明行为变化、验证结果和未覆盖的风险。
