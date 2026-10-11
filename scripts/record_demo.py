@@ -425,7 +425,7 @@ def main() -> int:
 
                 clear_caption(page)
                 page.wait_for_function(
-                    "!document.querySelector('#toast').classList.contains('show')",
+                    "(() => { const t = document.querySelector('#toast'); return !t || !t.classList.contains('show'); })()",
                     timeout=12000)
                 uninstall_button = page.locator("[data-uninstall]").first
                 if uninstall_button.count() < 1:
