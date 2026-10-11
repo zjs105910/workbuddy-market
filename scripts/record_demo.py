@@ -211,6 +211,9 @@ def render_mp4(ffmpeg: str, raw_video: Path, voice_files: list[Path],
 
 
 def title_card(page, final: bool = False) -> None:
+    # Fully unload the app document (its polling timers must not survive into
+    # the static CTA card and attempt to query UI nodes that no longer exist).
+    page.goto("about:blank", wait_until="domcontentloaded")
     if final:
         page.set_content(
             """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
