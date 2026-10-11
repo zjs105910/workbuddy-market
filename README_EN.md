@@ -50,7 +50,9 @@ Permission and compatibility details shown before installation:
 
 - [Reproducible demo: recording steps, subtitles, and privacy boundaries](docs/demo-video.md)
 - [Formal Release process](docs/release-process.md)
-- Tagged app releases will include the MP4 demo, Chinese subtitles, Python wheel/sdist, and SHA-256 checksums on [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases). Releases named `registry-artifacts-*` contain community plugin artifacts, not the marketplace application itself.
+- [Watch or download the current demo build (about 80 seconds, MP4 + Chinese subtitles)](https://github.com/zjs105910/workbuddy-market/actions/runs/38121812213) (Actions artifact expires in 30 days).
+
+Tagged app releases will include the MP4 demo, Chinese subtitles, Python wheel/sdist, and SHA-256 checksums on [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases). The current demo is a temporary artifact; releases named `registry-artifacts-*` contain community plugin artifacts, not the marketplace application itself.
 
 ## Safety notes
 
