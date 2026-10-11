@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an improvement to discovery, installation, safety, or usability
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提出建议。优先说明实际使用场景与当前遇到的问题，方便维护者判断改进价值。
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: 现在的流程哪里难用、费时或容易出错？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: 描述期望行为或可接受的解决方案。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      validations:
+        required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Related area
+      options:
+        - Discoverability / onboarding
+        - Search / registry
+        - Install / update / uninstall
+        - Security / privacy
+        - CLI / automation
+        - Documentation
+        - Other
+    validations:
+      required: true
