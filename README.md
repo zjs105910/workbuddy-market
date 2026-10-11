@@ -49,7 +49,8 @@ cd workbuddy-market
 
 - [可复现演示：录制方法、中文字幕与隐私边界](docs/demo-video.md)
 - [正式 Release 发布流程](docs/release-process.md)
-- 正式版本的 MP4、字幕、Python 安装包与 SHA-256 校验文件将在 [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases) 中一起发布。`registry-artifacts-*` 是社区插件产物，不是市场本体安装包。
+- [观看当前演示构建（约 80 秒，MP4 + 中文字幕）](https://github.com/zjs105910/workbuddy-market/actions/runs/38121812213)（Actions 附件有效期 30 天）。
+- 正式版本的 MP4、字幕、Python 安装包与 SHA-256 校验文件将在 [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases) 中一起发布。当前演示构建是临时附件；`registry-artifacts-*` 是社区插件产物，不是市场本体安装包。
 
 ## 安装前请知道
 

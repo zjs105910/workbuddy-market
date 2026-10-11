@@ -25,6 +25,12 @@
   无关仓库与无 sha 行不动 / 漂移前缀口径两向）；
   此修复需要重启市场服务生效（改了 market_server.py）。
 
+**可复现演示与正式 Release 发布基建**
+- 新增 `scripts/record_demo.py`：从真实服务端与前端运行浏览器流程，使用隔离临时目录、合成 Skill 和固定注册表快照，生成普通话旁白、SRT 字幕、原创合成氛围音与带 SHA-256 的 manifest；不复制个人配置或本机 Skill。
+- 新增 `Demo video` Actions 工作流，核心 UI 改动后可自动/手动重新录制并上传临时构建附件；验收视频为 80.24 秒、1280×720，旁白、字幕和文件哈希已核对一致。
+- 新增正式 `Release` 工作流：版本 tag 必须匹配 `MARKET_VERSION` 与 changelog，先跑 Windows/Linux/macOS × Python 3.10/3.13 验证，再打包 wheel/sdist、演示 MP4/SRT、manifest 与 SHA-256 校验文件。
+- 补充演示复现说明与发布操作清单；Release 说明会链接快速开始、问题反馈、安全策略与贡献指南，并区分本体 Release 与 `registry-artifacts-*` 社区插件产物。
+
 ## 2.26.0 — 2026-10-10（更新体验修复：「可更新 N」即点即用 + 一键全部更新）
 
 用户实测反馈：「可更新 1」点了没反应，期望点它就能更新。两处修复：

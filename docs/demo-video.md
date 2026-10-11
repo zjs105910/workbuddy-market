@@ -42,6 +42,8 @@ sudo apt-get install ffmpeg espeak-ng fonts-noto-cjk
 
 ## 在 GitHub 获取演示视频
 
+- [当前已验证的演示构建（Actions artifact，30 天有效）](https://github.com/zjs105910/workbuddy-market/actions/runs/38121812213)：来源 commit `62b55d2e0e1b1918dd48e75d2b0db2e160b8c500`；MP4 约 80.24 秒、1280×720。
+
 - `Demo video` 工作流会在演示脚本、核心 UI 或相关运行时文件更新时运行，也可以在 Actions 页面手动触发。成功后将 MP4、SRT 和 manifest 保存为 30 天的 workflow artifact。
 - 正式版本打上与 `src/workbuddy_market/version.py` 完全一致的 `vX.Y.Z` tag 后，`Release` 工作流会再次从 tagged source 录制视频，并将 MP4、中文字幕、manifest、wheel、sdist 和 `SHA256SUMS.txt` 一起发布。
 - Release 工作流会先跑 Windows/Linux/macOS 的验证矩阵，版本标签与 `CHANGELOG.md` 不匹配、测试失败或演示录制失败时都不会发布。
