@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage questions and FAQ
+    url: https://github.com/zjs105910/workbuddy-market/blob/main/docs/FAQ.md
+    about: Check common questions about first launch, registry entries, installation, and recovery.
+  - name: Security vulnerability reporting
+    url: https://github.com/zjs105910/workbuddy-market/blob/main/SECURITY.md
+    about: Please follow the security policy instead of posting sensitive vulnerability details publicly.
