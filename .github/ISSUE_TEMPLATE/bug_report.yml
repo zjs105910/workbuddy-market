@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible problem with WorkBuddy Market
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请搜索现有 Issues。请勿粘贴口令、访问令牌、真实用户路径或私人 Skill 内容。
+  - type: input
+    id: version
+    attributes:
+      label: WorkBuddy Market version or commit
+      description: 可在版本记录或最近一次提交中找到。
+      placeholder: "e.g. v2.x / commit SHA"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10
+        - Windows 11
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: workbuddy_version
+    attributes:
+      label: WorkBuddy version
+      placeholder: "e.g. 5.7.6, or not installed"
+    validations:
+      required: false
+  - type: dropdown
+    id: launch_method
+    attributes:
+      label: Launch method
+      options:
+        - 安全模式-只开网页.cmd
+        - 一键启动.cmd
+        - python launcher.py
+        - CLI / other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: 写出最小复现步骤；如有错误信息，请保留原始报错。
+      placeholder: "1. ...
+2. ...
+3. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: 可以附体检报告的脱敏结果或相关日志片段。发布前请检查并删除令牌、私人路径与 Skill 内容。
+      render: text
+    validations:
+      required: false
