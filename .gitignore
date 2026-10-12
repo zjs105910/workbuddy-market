@@ -1,6 +1,11 @@
 # ---- 市场内容（个人数据，不随仓库分发；clone 后按 README 第四节自备）----
+# 例外：根清单 .codebuddy-plugin/marketplace.json 是 v2.31 起入库的自带市场
+# （相对路径引用 bundled/，零漂移），供 /plugin marketplace add 短命令使用。
+# 注意：本机运行 --sync 会把它重写成本机市场清单（wb-local-market），
+# 这是预期行为；开发机用 git update-index --skip-worktree 屏蔽脏状态。
 plugins/
-.codebuddy-plugin/
+.codebuddy-plugin/*
+!.codebuddy-plugin/marketplace.json
 
 # ---- 本机市场配置（含个人 skill 组合，不入库；入库模板是 market.config.example.json）----
 market.config.json

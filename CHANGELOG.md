@@ -4,6 +4,30 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.31.0 — 2026-10-12（新增：短命令自带市场 + README 收录清单）
+
+参考社区实践（blatwo/workbuddy-marketplace）的第二轮安装体验优化：
+
+- **短命令自带市场**：仓库根入库 `.codebuddy-plugin/marketplace.json`
+  （相对路径引用 `bundled/` 目录），`/plugin marketplace add
+  zjs105910/workbuddy-market` 一条命令即装仓库自带的 3 个插件
+  （browser-cdp / github-project-manager / novel-writing-suite，共 6.6MB
+  随仓库分发，零漂移）；完整 25+ 社区目录仍走 `#marketplace` 分支长命令
+  ——官方 marketplace.json 的 github source 不支持 pin commit，完整目录
+  入库不现实、引 HEAD 违背供应链口径（取舍说明见 FAQ 第八节）；
+- **README 收录清单表格**：`scripts/render_registry_readme.py` 从人工审核
+  的注册表渲染「已收录插件」表格进两份 README 的标记区间（只读静态字段，
+  动态数据不进 README，避免 daily refresh 产生无意义 diff）；
+  registry.yml 在每日刷新的同一 PR 里顺带更新；
+- **贡献入口**：README（中英）新增「收录你的插件」三步指引；
+- **bundled/ 目录**：三个自带插件从 gitignore 的 plugins/ 拆出一份随仓库
+  分发（原 plugins/ 仍是本机个人数据语义，不变）；根清单与本地运行时清单
+  同路径两用的冲突用 `--skip-worktree`（开发机）与文档说明消化；
+- **门禁**：新增 tests/unit/test_core_marketplace.py 6 例（bundled 完整性 /
+  清单-目录一致性 / README 标记成对 / 渲染脚本幂等冒烟）；审计规则豁免
+  GitHub 机器地址（git@ / noreply@ / actions@github.com，非个人邮箱）并加
+  3 例防搭车测试；selftest 789 项不变；pytest 67 → 75。
+
 ## 2.30.0 — 2026-10-12（新增：原生市场一键接入渠道）
 
 参考社区实践（blatwo/workbuddy-marketplace）补上安装体验的最大缺口：

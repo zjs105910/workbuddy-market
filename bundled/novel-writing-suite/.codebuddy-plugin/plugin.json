@@ -1,0 +1,23 @@
+{
+  "name": "novel-writing-suite",
+  "version": "1.0.0",
+  "description": "中文网文创作全流程：扫榜选题、长篇与短篇写作、长篇与短篇拆文、多视角审查、去 AI 味、逆向导入、封面生成，外加工具集基础设施部署。12 个互相路由的 skill 组成一条完整流水线，入口是 story。",
+  "description_zh": "中文网文创作全流程：扫榜选题、长篇与短篇写作、长篇与短篇拆文、多视角审查、去 AI 味、逆向导入、封面生成，外加工具集基础设施部署。12 个互相路由的 skill 组成一条完整流水线，入口是 story。",
+  "description_en": "A complete Chinese web-novel writing pipeline: trend scanning, long/short-form drafting, long/short-form deconstruction, multi-perspective review, AI-flavour removal, reverse import, and cover art generation.",
+  "author": {
+    "name": "WorkBuddy Local Market"
+  },
+  "keywords": [
+    "网文",
+    "小说",
+    "写作",
+    "拆文",
+    "扫榜",
+    "去AI味",
+    "封面",
+    "长篇",
+    "短篇"
+  ],
+  "category": "写作",
+  "license": "MIT"
+}

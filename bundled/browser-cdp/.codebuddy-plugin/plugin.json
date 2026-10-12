@@ -1,0 +1,20 @@
+{
+  "name": "browser-cdp",
+  "version": "1.0.0",
+  "description": "通过 Chrome DevTools Protocol 驱动真实 Chrome，复用已有登录态：以调试模式启动、打开页面、等待加载、点击与取数、截图。适合需要登录后才能访问的站点。",
+  "description_zh": "通过 Chrome DevTools Protocol 驱动真实 Chrome，复用已有登录态：以调试模式启动、打开页面、等待加载、点击与取数、截图。适合需要登录后才能访问的站点。",
+  "description_en": "Drive a real Chrome over the DevTools Protocol while reusing existing login sessions: launch in debug mode, open URLs, wait for load, evaluate, click and screenshot.",
+  "author": {
+    "name": "WorkBuddy Local Market"
+  },
+  "keywords": [
+    "浏览器",
+    "自动化",
+    "CDP",
+    "Chrome",
+    "爬虫",
+    "截图"
+  ],
+  "category": "自动化",
+  "license": "MIT"
+}

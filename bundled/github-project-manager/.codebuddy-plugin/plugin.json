@@ -1,0 +1,21 @@
+{
+  "name": "github-project-manager",
+  "version": "4.0.0",
+  "description": "把 GitHub 上的开源项目和技能包装到本机并持续维护：预检、安装、列出、扫描、检查更新、一键更新、移除、回滚、数据完整性校验与环境诊断。带原子锁、心跳租约、事务级失败回滚、内容指纹校验和 ZIP 安全防护。",
+  "description_zh": "把 GitHub 上的开源项目和技能包装到本机并持续维护：预检、安装、列出、扫描、检查更新、一键更新、移除、回滚、数据完整性校验与环境诊断。带原子锁、心跳租约、事务级失败回滚、内容指纹校验和 ZIP 安全防护。",
+  "description_en": "Install and maintain open-source projects and skill packs from GitHub: inspect, add, list, scan, check, update, remove, rollback, verify and doctor. Atomic locking, transactional rollback, content fingerprinting and ZIP hardening.",
+  "author": {
+    "name": "WorkBuddy Local Market"
+  },
+  "keywords": [
+    "GitHub",
+    "包管理",
+    "插件管理",
+    "更新",
+    "回滚",
+    "校验",
+    "ghpm"
+  ],
+  "category": "开发工具",
+  "license": "MIT"
+}

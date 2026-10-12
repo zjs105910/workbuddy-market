@@ -74,3 +74,13 @@ class TestEmailUnchanged:
 
     def test_noreply_allowed(self):
         assert _kinds("a 328969776+zjs105910@users.noreply.github.com b") == []
+
+    def test_github_machine_addrs_allowed(self):
+        # 平台机器地址非个人邮箱（审计夹具：SSH/系统通知形态）
+        assert _kinds("parse git@github.com:alice/utils.git") == []  # pa:allow
+        assert _kinds("from noreply@github.com") == []  # pa:allow
+
+    def test_similar_personal_addr_still_flagged(self):
+        # git@github.com 放行不得搭车放行真实个人地址（审计夹具）
+        assert _kinds("git@my-github.com") == ["E-MAIL"]  # pa:allow
+        assert _kinds("someone@gitee.com") == ["E-MAIL"]  # pa:allow

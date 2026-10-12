@@ -113,14 +113,26 @@ flowchart LR
   `localPlugins` 保持为空 —— 把哪些收进市场由你编辑 `market.config.json`
   后点「重新打包」决定。
 
-## 八、三种安装路径怎么选？（v2.30 起）
+## 八、四种安装路径怎么选？（v2.31 起）
 
 | 路径 | 命令/操作 | 适合谁 | 拿到什么 |
 | --- | --- | --- | --- |
-| **原生市场（一条命令）** | 对话框执行 `/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace` | 已在用 CodeBuddy Code / WorkBuddy 面板的人 | 精选技能快照，`marketplace update` 即刷新 |
+| **自带市场（短命令）** | 对话框执行 `/plugin marketplace add zjs105910/workbuddy-market` | 想最快上手的人 | 仓库 `bundled/` 目录自带的 3 个插件，内容随仓库固定，零漂移 |
+| **原生市场（完整目录）** | 对话框执行 `/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace` | 已在用 CodeBuddy Code / WorkBuddy 面板的人 | 25+ 精选技能快照，`marketplace update` 即刷新 |
 | **精选 zip** | 下载 `workbuddy-marketplace.zip` → 面板添加自定义市场 | 只想点鼠标、不想碰命令行 | 同一份快照的 zip 形态 |
 | **完整版市场本体** | `pipx install workbuddy-market` 或源码启动 | 想管理自己的 skills、要安全链路的人 | 安装前四问、所有权分级、事务回收站与可恢复卸载 |
 
-前两条是**技能分发快照**（每日 CI 按审核固定的 sourceCommit 重建，两条路内容同源）；
-只有完整版有完整安全链路。原生市场分支由 `scripts/publish_marketplace_branch.py`
-每日幂等发布，内容没变不推。
+前三条是**技能分发**：自带市场随仓库 `bundled/` 提交固定；后两条是每日 CI 按
+审核固定的 sourceCommit 重建的快照（两条路内容同源）。只有完整版有完整安全
+链路。原生市场分支由 `scripts/publish_marketplace_branch.py` 每日幂等发布，
+内容没变不推。
+
+> 为什么完整社区目录不走短命令？官方 marketplace.json 的 github source 不支持
+> 指定 commit——短命令市场只能引用仓库内文件或上游 HEAD。前者要求把 25+ 第三方
+> 仓库内容全部入库（体积与版权都不现实），后者会让安装漂移出审核固定的 commit，
+> 违背本市场的供应链承诺。所以完整目录走固定 sourceCommit 的每日重建分支。
+
+> 开发者注意：clone 本仓库后运行 `--sync` 会把根目录
+> `.codebuddy-plugin/marketplace.json` 重写成本机市场清单（这是运行时状态文件，
+> 与入库的自带市场清单共用同一路径）。这是预期行为；开发机可用
+> `git update-index --skip-worktree .codebuddy-plugin/marketplace.json` 屏蔽脏状态。

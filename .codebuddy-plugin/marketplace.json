@@ -1,0 +1,75 @@
+{
+  "name": "workbuddy-market",
+  "description": "WorkBuddy Market 仓库自带插件市场：内容随仓库 bundled/ 目录提交固定（相对路径引用，零漂移）。想要每日重建的 25+ 精选社区目录，请改用 /plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace",
+  "owner": {
+    "name": "WorkBuddy Market",
+    "email": "328969776+zjs105910@users.noreply.github.com"
+  },
+  "version": "2.31.0",
+  "plugins": [
+    {
+      "name": "novel-writing-suite",
+      "description": "中文网文创作全流程：扫榜选题、长篇与短篇写作、长篇与短篇拆文、多视角审查、去 AI 味、逆向导入、封面生成，外加工具集基础设施部署。12 个互相路由的 skill 组成一条完整流水线，入口是 story。",
+      "description_en": "A complete Chinese web-novel writing pipeline: trend scanning, long/short-form drafting, long/short-form deconstruction, multi-perspective review, AI-flavour removal, reverse import, and cover art generation.",
+      "version": "1.0.0",
+      "source": "./bundled/novel-writing-suite",
+      "category": "写作",
+      "author": {
+        "name": "WorkBuddy Local Market"
+      },
+      "license": "MIT",
+      "keywords": [
+        "网文",
+        "小说",
+        "写作",
+        "拆文",
+        "扫榜",
+        "去AI味",
+        "封面",
+        "长篇",
+        "短篇"
+      ]
+    },
+    {
+      "name": "github-project-manager",
+      "description": "把 GitHub 上的开源项目和技能包装到本机并持续维护：预检、安装、列出、扫描、检查更新、一键更新、移除、回滚、数据完整性校验与环境诊断。带原子锁、心跳租约、事务级失败回滚、内容指纹校验和 ZIP 安全防护。",
+      "description_en": "Install and maintain open-source projects and skill packs from GitHub: inspect, add, list, scan, check, update, remove, rollback, verify and doctor. Atomic locking, transactional rollback, content fingerprinting and ZIP hardening.",
+      "version": "4.0.0",
+      "source": "./bundled/github-project-manager",
+      "category": "开发工具",
+      "author": {
+        "name": "WorkBuddy Local Market"
+      },
+      "license": "MIT",
+      "keywords": [
+        "GitHub",
+        "包管理",
+        "插件管理",
+        "更新",
+        "回滚",
+        "校验",
+        "ghpm"
+      ]
+    },
+    {
+      "name": "browser-cdp",
+      "description": "通过 Chrome DevTools Protocol 驱动真实 Chrome，复用已有登录态：以调试模式启动、打开页面、等待加载、点击与取数、截图。适合需要登录后才能访问的站点。",
+      "description_en": "Drive a real Chrome over the DevTools Protocol while reusing existing login sessions: launch in debug mode, open URLs, wait for load, evaluate, click and screenshot.",
+      "version": "1.0.0",
+      "source": "./bundled/browser-cdp",
+      "category": "自动化",
+      "author": {
+        "name": "WorkBuddy Local Market"
+      },
+      "license": "MIT",
+      "keywords": [
+        "浏览器",
+        "自动化",
+        "CDP",
+        "Chrome",
+        "爬虫",
+        "截图"
+      ]
+    }
+  ]
+}

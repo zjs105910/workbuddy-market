@@ -53,6 +53,10 @@ _EMAIL = re.compile(
     r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"
 )
 _EMAIL_ALLOW_SUFFIX = "@users.noreply.github.com"
+# 平台机器地址（非个人邮箱）：GitHub 官方文档/SSH 示例与系统通知地址。
+_EMAIL_ALLOW_ADDRS = {
+    "git@github.com", "noreply@github.com", "actions@github.com",
+}
 _EMAIL_ALLOW_DOMAINS = {
     "example.com", "example.org", "example.net", "example.edu",
     "domain.com", "yourdomain.com", "your-domain.com", "invalid",
@@ -116,6 +120,8 @@ def _git(*args: str) -> str:
 def _email_allowed(addr: str) -> bool:
     a = addr.lower()
     if a.endswith(_EMAIL_ALLOW_SUFFIX):
+        return True
+    if a in _EMAIL_ALLOW_ADDRS:
         return True
     return a.rsplit("@", 1)[-1] in _EMAIL_ALLOW_DOMAINS
 
