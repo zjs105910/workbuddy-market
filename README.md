@@ -27,7 +27,17 @@
 
 需要 Python 3.10+（首次启动向导会检测并给出明确提示）。配置文件不需要手工创建——首次启动自动初始化。
 
-### 已经在用 WorkBuddy？零安装直连市场 ✅
+### 已经在用 CodeBuddy Code / WorkBuddy？一条命令接入 ✅
+
+在对话框（或 CodeBuddy Code CLI）执行：
+
+```
+/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace
+```
+
+然后 `/plugin` 浏览精选技能，或 `/plugin install <插件名>@workbuddy-community-market`。这条路由每日 CI 从人工审核的注册表自动重建（按 sourceCommit 固定来源），`/plugin marketplace update` 即可刷新；不想用命令也可以走下面的 zip 导入。
+
+### 只想装精选技能（zip 导入）
 
 不想跑任何工具，只想装社区精选技能：下载 [精选市场 zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip)，在 **WorkBuddy 插件面板 → 添加自定义市场** 里选这个 zip 即可。内容每日由 CI 从人工审核的注册表自动重建。
 

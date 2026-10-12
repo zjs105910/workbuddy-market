@@ -4,6 +4,34 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.30.0 — 2026-10-12（新增：原生市场一键接入渠道）
+
+参考社区实践（blatwo/workbuddy-marketplace）补上安装体验的最大缺口：
+精选市场此前只有「下载 112MB zip → 面板导入」一条路，现在多了一条
+**一条命令的原生 git 市场入口**：
+
+```
+/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace
+```
+
+- **`marketplace` 分支**：每日 CI 在构建 zip 的同一个 job 里，把同一份
+  审核快照（sourceCommit 固定）原样发布到本仓库 `marketplace` 分支——
+  它就是一个标准的 CodeBuddy/WorkBuddy 原生市场仓库（根放
+  `.codebuddy-plugin/marketplace.json`），支持 `marketplace update`
+  刷新与自动更新；
+- **供应链口径不变**：插件条目用相对路径引用分支内快照（每插件自带
+  plugin.json），**不用** github-source 引上游 HEAD——那会让安装漂移
+  出审核固定的 commit，违背本市场的供应链承诺；
+- **幂等发布**：`scripts/publish_marketplace_branch.py` 先比对 tree
+  hash，内容没变不推，避免每日空转；PAT 缺失时如实失败不静默跳过；
+- README（中英）快速上手增加「一条命令接入」为首选入口，zip 导入
+  降级为备选；两种轻量入口的取舍说明（无四问/回收站）同步保留。
+
+- selftest 789 项不变；pytest 59 → 67（新增
+  `test_publish_marketplace_branch.py` 8 例：zip 校验/剥包/损坏拒绝、
+  幂等判定三分支 + 首次发布无旧分支回归、分支 README 必含一键命令与
+  取舍说明）。
+
 ## 2.29.0 — 2026-10-12（修复：多实例 marketId 撞车 + 发行链路加固）
 
 **用户可见修复**

@@ -42,3 +42,14 @@ jobs:
               --title "WorkBuddy Community Marketplace (rolling)" \
               --notes "精选社区市场的 WorkBuddy 原生 zip 快照，每日自动重建。下载 workbuddy-marketplace.zip 后在 WorkBuddy 插件面板添加自定义市场即可使用；想要安装前四问 / 所有权分级 / 可恢复卸载，请使用完整版 WorkBuddy Market。"
           fi
+
+      - name: Publish native marketplace branch (one-command add)
+        env:
+          REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+        run: |
+          # 与 zip 同一份审核快照，发布成 git 分支市场：
+          # /plugin marketplace add https://github.com/$GITHUB_REPOSITORY.git#marketplace
+          # 内容没变时脚本自动跳过（tree hash 比对），PAT 缺失时如实失败。
+          python scripts/publish_marketplace_branch.py \
+            --zip dist/workbuddy-marketplace.zip \
+            --repo "$GITHUB_REPOSITORY" --branch marketplace

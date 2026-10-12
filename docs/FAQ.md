@@ -112,3 +112,15 @@ flowchart LR
 - **向导发现的 skills 会自动进市场吗？** 不会。发现的 skills 只做摘要，
   `localPlugins` 保持为空 —— 把哪些收进市场由你编辑 `market.config.json`
   后点「重新打包」决定。
+
+## 八、三种安装路径怎么选？（v2.30 起）
+
+| 路径 | 命令/操作 | 适合谁 | 拿到什么 |
+| --- | --- | --- | --- |
+| **原生市场（一条命令）** | 对话框执行 `/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace` | 已在用 CodeBuddy Code / WorkBuddy 面板的人 | 精选技能快照，`marketplace update` 即刷新 |
+| **精选 zip** | 下载 `workbuddy-marketplace.zip` → 面板添加自定义市场 | 只想点鼠标、不想碰命令行 | 同一份快照的 zip 形态 |
+| **完整版市场本体** | `pipx install workbuddy-market` 或源码启动 | 想管理自己的 skills、要安全链路的人 | 安装前四问、所有权分级、事务回收站与可恢复卸载 |
+
+前两条是**技能分发快照**（每日 CI 按审核固定的 sourceCommit 重建，两条路内容同源）；
+只有完整版有完整安全链路。原生市场分支由 `scripts/publish_marketplace_branch.py`
+每日幂等发布，内容没变不推。

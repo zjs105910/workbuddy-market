@@ -26,7 +26,17 @@
 
 Python 3.10+ is still required (first-run setup checks it and explains what to install). No manual config file needed — it is initialized automatically on first launch.
 
-### Already using WorkBuddy? Zero-install marketplace
+### Already using CodeBuddy Code / WorkBuddy? One command ✅
+
+Run this in the chat box (or CodeBuddy Code CLI):
+
+```
+/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace
+```
+
+Then browse with `/plugin`, or `/plugin install <plugin>@workbuddy-community-market`. Rebuilt daily by CI from the human-reviewed registry (pinned at sourceCommit); run `/plugin marketplace update` to refresh. Prefer a file? Use the zip import below.
+
+### Curated skills only (zip import)
 
 Just want the curated community skills, no tooling: download the [marketplace zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip) and add it as a custom marketplace in the WorkBuddy plugin panel. Rebuilt daily by CI from the human-reviewed registry.
 
