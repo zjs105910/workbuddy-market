@@ -86,7 +86,15 @@ echo       CLI OK: !WBMEXE!
 REM ---- [4/5] market root (web UI + launcher + wizard) ----
 if exist "%DEST%\launcher.py" goto dest_ok
 echo [4/5] Downloading market root to %DEST% ...
-curl -fsSL -o "%TEMP%\wbm-main.zip" "%ZIPURL%"
+REM GitHub direct is unreachable on some networks (connection reset).
+REM Strategy: retry the primary URL, then fall back to the
+REM api.github.com zipball endpoint (different host, often reachable
+REM when github.com is not).
+curl -fsSL --retry 3 --retry-delay 2 -o "%TEMP%\wbm-main.zip" "%ZIPURL%"
+if errorlevel 1 (
+    echo       github.com direct failed, trying api.github.com fallback ...
+    curl -fsSL --retry 3 --retry-delay 2 -o "%TEMP%\wbm-main.zip" "https://api.github.com/repos/zjs105910/workbuddy-market/zipball/main"
+)
 if errorlevel 1 goto dl_fail
 mkdir "%DEST%" 2>nul
 REM Use the absolute path to Windows bsdtar: a plain `tar` may resolve to
