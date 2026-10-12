@@ -64,6 +64,23 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for release to be published (tag push races release build)
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # tag push 触发时 release.yml 还在建 Release（实测约 5-10 分钟），
+          # 轮询等它就绪，最多 25 分钟，否则下载步骤必然失败。
+          for i in $(seq 1 50); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $TAG ready after ~$((i * 30))s"; exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::release $TAG not published after 25 minutes"; exit 1
+
       - name: Download release assets
         shell: bash
         env:
