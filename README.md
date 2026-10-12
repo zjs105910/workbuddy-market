@@ -21,7 +21,9 @@
 
 ### 只想下载一个文件？一键安装（推荐） ✅
 
-下载 [install.cmd](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)（右上角下载按钮，或右键 [raw 链接](https://raw.githubusercontent.com/zjs105910/workbuddy-market/main/install.cmd) 另存为），双击即可。它会自动完成：检测/安装 Python → 装 pipx → 装并升级 `workbuddy-market` CLI → 下载市场本体到 `%USERPROFILE%\workbuddy-market` → 运行 doctor 体检 → 启动首次向导（**回车=只浏览，2=注册进 WorkBuddy**）。
+**[👉 点此直接下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)**（浏览器会立即开始下载；想先看一眼内容再下，也可以[打开文件页面](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)手动下载）。
+
+下载完成后**双击**即可。它会自动完成：检测/安装 Python → 装 pipx → 装并升级 `workbuddy-market` CLI → 下载市场本体到 `%USERPROFILE%\workbuddy-market` → 运行 doctor 体检 → 启动首次向导（**回车=只浏览，2=注册进 WorkBuddy**）。
 
 这就是**完整版**：四问预览、哈希校验、事务与可恢复卸载全都在。可重复运行（每一步幂等，顺带升级 CLI）。
 

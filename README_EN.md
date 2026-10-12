@@ -20,7 +20,9 @@
 
 ### Just one file? One-click installer (recommended) ✅
 
-Download [install.cmd](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd) (use the download button, or right-click [save-as from raw](https://raw.githubusercontent.com/zjs105910/workbuddy-market/main/install.cmd)) and double-click it. It automatically: checks/installs Python → installs pipx → pipx-installs/upgrades the `workbuddy-market` CLI → downloads the market root to `%USERPROFILE%\workbuddy-market` → runs doctor → starts the first-run wizard (**Enter = browse only, 2 = register into WorkBuddy**).
+**[👉 Click here to download install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)** (the download starts immediately; prefer to inspect it first? [open the file page](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd) and download manually).
+
+After downloading, **double-click** it. It automatically: checks/installs Python → installs pipx → pipx-installs/upgrades the `workbuddy-market` CLI → downloads the market root to `%USERPROFILE%\workbuddy-market` → runs doctor → starts the first-run wizard (**Enter = browse only, 2 = register into WorkBuddy**).
 
 This is the **full version**: pre-install review, hash verification, transactions, and recoverable uninstall are all included. Safe to re-run (every step is idempotent and upgrades the CLI).
 

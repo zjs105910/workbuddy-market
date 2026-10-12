@@ -117,7 +117,7 @@ flowchart LR
 
 | 路径 | 命令/操作 | 适合谁 | 拿到什么 |
 | --- | --- | --- | --- |
-| **一键安装（单文件）** | 下载 [install.cmd](../install.cmd) 双击 | 完全不想碰命令行的 Windows 新手 | **完整版**：自动装好 Python/pipx/CLI/市场本体并启动向导 |
+| **一键安装（单文件）** | 下载 [install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd) 双击（点击即下载） | 完全不想碰命令行的 Windows 新手 | **完整版**：自动装好 Python/pipx/CLI/市场本体并启动向导 |
 | **自带市场（短命令）** | 对话框执行 `/plugin marketplace add zjs105910/workbuddy-market` | 想最快上手的人 | 仓库 `bundled/` 目录自带的 3 个插件，内容随仓库固定，零漂移 |
 | **原生市场（完整目录）** | 对话框执行 `/plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace` | 已在用 CodeBuddy Code / WorkBuddy 面板的人 | 25+ 精选技能快照，`marketplace update` 即刷新 |
 | **精选 zip** | 下载 `workbuddy-marketplace.zip` → 面板添加自定义市场 | 只想点鼠标、不想碰命令行 | 同一份快照的 zip 形态 |

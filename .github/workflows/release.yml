@@ -98,6 +98,12 @@ jobs:
       - name: Build Python distribution
         run: python -m build --outdir dist
 
+      # 一键安装器随版分发（v2.32）：README 的「一键安装」直链指向
+      # releases/latest/download/install.cmd，浏览器点击即下载，
+      # 所以每个正式 Release 都必须带这个附件。
+      - name: Copy one-click installer into dist
+        run: cp install.cmd dist/install.cmd
+
       - name: Record demo video from tagged source
         run: |
           python scripts/record_demo.py \
@@ -137,7 +143,7 @@ jobs:
       - name: Generate SHA-256 checksums
         run: |
           cd dist
-          sha256sum *.whl *.tar.gz workbuddy-market-demo.mp4 workbuddy-market-demo.zh-CN.srt demo-manifest.json > SHA256SUMS.txt
+          sha256sum *.whl *.tar.gz install.cmd workbuddy-market-demo.mp4 workbuddy-market-demo.zh-CN.srt demo-manifest.json > SHA256SUMS.txt
 
       - name: Publish versioned GitHub Release
         env:
@@ -147,6 +153,7 @@ jobs:
           ASSETS=(
             dist/*.whl
             dist/*.tar.gz
+            dist/install.cmd
             dist/workbuddy-market-demo.mp4
             dist/workbuddy-market-demo.zh-CN.srt
             dist/demo-manifest.json
