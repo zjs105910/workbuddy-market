@@ -1,0 +1,76 @@
+# -*- coding: utf-8 -*-
+"""privacy-audit 路径规则：runner 占位名放行、真实用户名不放行（2026-10-12 评审）。
+
+背景：2026-10-12 定时 --history 审计 38 处命中中 4 处是 GitHub runner 的
+8.3 短路径占位名（C:\\Users\\RUNNER~1 等）——WIN 正则的放行名单漏了
+runner，POSIX 正则无 (?i) 挡不住大写 RUNNER~1。修复后用例钉死两个方向：
+占位名放行不得扩大到真实用户名；E-MAIL 规则不得被本次改动放松。
+"""
+import importlib.util
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SCRIPT = _REPO_ROOT / "scripts" / "privacy-audit.py"
+
+_spec = importlib.util.spec_from_file_location("privacy_audit", _SCRIPT)
+pa = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("privacy_audit", pa)
+_spec.loader.exec_module(pa)
+
+
+def _kinds(line):
+    findings = []
+    pa.scan_text(line, "t", findings, [])
+    return sorted(k for _, _, k, _ in findings)
+
+
+class TestRunnerPlaceholderAllowed:
+    """GitHub runner 占位名不报红（此前 4 处误报的回归钉子）。"""
+
+    def test_win_83_short_name(self):
+        assert _kinds(r"注释 C:\Users\RUNNER~1\... 说明") == []
+        assert _kinds("msg C:/Users/RUNNER~1/x end") == []
+
+    def test_win_plain_and_admin(self):
+        assert _kinds(r"C:\Users\RUNNER 和 C:\Users\runneradmin\AppData") == []
+
+    def test_posix_83_and_plain(self):
+        assert _kinds("/Users/RUNNER~1/x") == []
+        assert _kinds("/Users/RUNNER") == []
+        assert _kinds("/home/runner/x") == []
+        assert _kinds("/Users/runner/x") == []
+
+    def test_mixed_case_runner(self):
+        assert _kinds(r"C:\Users\Runner~1\x") == []
+
+
+class TestRealUserStillFlagged:
+    """放行不得扩大化：真实用户名形态仍必须报红。"""
+
+    def test_win_real_name(self):
+        # 审计夹具：断言该形态必须报红，非真实泄露（行尾标记供审计放行）
+        assert _kinds(r"C:\Users\zhangsan\x") == ["USER-PATH-WIN"]  # pa:allow
+
+    def test_posix_real_name(self):
+        # 审计夹具：同上
+        assert _kinds("/Users/zhangsan") == ["USER-PATH-POSIX"]  # pa:allow
+
+    def test_runner_like_name_not_allowed(self):
+        # runnerfan 不是 runner 占位名的已知形态，不得搭车放行（审计夹具）
+        assert _kinds(r"C:\Users\runnerfan\x") == ["USER-PATH-WIN"]  # pa:allow
+
+    def test_public_still_allowed(self):
+        assert _kinds(r"C:\Users\Public\x") == []
+        assert _kinds("/Users/workbuddy/x") == []
+
+
+class TestEmailUnchanged:
+    """本次改动不得影响 E-MAIL 规则的松紧。"""
+
+    def test_personal_email_flagged(self):
+        # 审计夹具：占位样例邮箱（非 allowlist 域，必须报红）
+        assert _kinds("contact someone@fake-mail.test") == ["E-MAIL"]  # pa:allow
+
+    def test_noreply_allowed(self):
+        assert _kinds("a 328969776+zjs105910@users.noreply.github.com b") == []

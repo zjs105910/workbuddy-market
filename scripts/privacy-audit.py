@@ -19,8 +19,8 @@ PRIVATE-KEY       -----BEGIN ... PRIVATE KEY-----。
 CREDENTIAL        ghp_ / github_pat_ / AKIA / sk- / xox... 等已知凭据前缀。
 SECRET-KV         api_key|secret|token|password|authorization : <20+ 位疑似随机串>
                   （值必须同时含字母和数字，纯单词 / 路径不算）。
-USER-PATH-WIN     C:\\Users\\<名>（放行 Public / Default / Shared）。
-USER-PATH-POSIX   /Users/<名>、/home/<名>（放行 user / runner / ubuntu 等公共占位名）。
+USER-PATH-WIN     C:\\Users\\<名>（放行 Public / Default / Shared；GitHub runner 占位名 RUNNER / RUNNER~1 / runneradmin 也放行）。
+USER-PATH-POSIX   /Users/<名>、/home/<名>（放行 user / runner / RUNNER~1 / ubuntu 等公共占位名）。
 
 例外机制
 --------
@@ -79,13 +79,13 @@ _SECRET_KV = re.compile(
 
 _WIN_PATH = re.compile(
     r"(?i)\b[C-Z]:[\\/]+Users[\\/]+"
-    r"(?!public(?:[\\/]|\b)|default(?:[\\/]|\b)|shared(?:[\\/]|\b))"
+    r"(?!public(?:[\\/]|\b)|default(?:[\\/]|\b)|shared(?:[\\/]|\b)|runner(?:admin)?(?:[\\/]|~|\b))"
     r"[A-Za-z0-9_.\-]{1,40}"
 )
 _POSIX_PATH = re.compile(
     r"(?<![A-Za-z0-9.])(?:/Users|/home)/"
     r"(?!public(?:/|\b)|default(?:/|\b)|shared(?:/|\b)|user(?:/|\b)"
-    r"|runner(?:/|\b)|ubuntu(?:/|\b)|admin(?:/|\b)|git(?:/|\b)"
+    r"|runner(?:/|\b)|RUNNER(?:/|~|\b)|ubuntu(?:/|\b)|admin(?:/|\b)|git(?:/|\b)"
     r"|workbuddy(?:/|\b))"
     r"[A-Za-z0-9_.\-]{1,40}"
 )
