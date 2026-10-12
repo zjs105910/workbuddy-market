@@ -50,8 +50,9 @@ jobs:
             gh release upload "$TAG" artifacts/*.zip artifacts/*.attestation.json artifacts/report.json --clobber
           else
             gh release create "$TAG" artifacts/*.zip artifacts/*.attestation.json artifacts/report.json \
+              --prerelease \
               --title "Registry artifacts $(date -u +%F)" \
-              --notes "按 registry/plugins.json 的 sourceCommit 构建的不可变产物。packageHash 见 report.json；安装端（v2.16+）逐包校验；*.attestation.json 为构建证明（v2.20，可与注册表固定值对账）。"
+              --notes "按 registry/plugins.json 的 sourceCommit 构建的不可变产物。packageHash 见 report.json；安装端（v2.16+）逐包校验；*.attestation.json 为构建证明（v2.20，可与注册表固定值对账）。Pre-release：仅为避免抢占 /releases/latest 指针，资产照常可下载。"
           fi
 
       - name: Patch registry with artifact fields

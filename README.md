@@ -21,7 +21,7 @@
 
 ### 没有 Git？三步免安装 ✅
 
-> 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)，点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
+> 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)（认准标题为 `WorkBuddy Market vX.Y.Z` 的条目；`registry-artifacts-*` 是插件产物 Pre-release，不是本体），点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
 > 2. **解压**：右键解压到任意目录（路径不要含特殊字符）；
 > 3. **双击**：双击 `安全模式-只开网页.cmd` 先浏览市场；准备好接入 WorkBuddy 时再双击 `一键启动.cmd`。
 
@@ -70,12 +70,18 @@ cd workbuddy-market
 
 > 截图由项目脚本使用合成数据生成。实际可用操作会根据本机环境与插件来源有所不同。
 
-## 产品演示与正式版本
+## 演示视频与下载入口
+
+v2.28.0 起正式 Release 随版本附带全部演示与安装资源。三种下载入口按需区分：
+
+- **演示视频**：在 [v2.28.0 Release](https://github.com/zjs105910/workbuddy-market/releases/tag/v2.28.0)（或最新一个 `WorkBuddy Market vX.Y.Z` 条目）下载 `workbuddy-market-demo.mp4`（约 80 秒）与 `workbuddy-market-demo.zh-CN.srt` 中文字幕，随正式版发布，无 30 天过期限制；
+- **完整市场本体**：对应版本的 `WorkBuddy Market vX.Y.Z` Release 条目（wheel / sdist / 源码 zip），或直接 `pipx install workbuddy-market`；
+- **精选市场 zip**（只装技能）：见上文「零安装直连市场」一节，由固定的 `marketplace` Release 每日重建。
+
+> 注意：`registry-artifacts-*` 是每日生成的社区插件产物 Release（已标记为 Pre-release），**不是**市场本体安装包。下载市场本体时认准标题为 `WorkBuddy Market vX.Y.Z` 的条目。
 
 - [可复现演示：录制方法、中文字幕与隐私边界](docs/demo-video.md)
 - [正式 Release 发布流程](docs/release-process.md)
-- [观看当前演示构建（约 80 秒，MP4 + 中文字幕）](https://github.com/zjs105910/workbuddy-market/actions/runs/38121812213)（Actions 附件有效期 30 天）。
-- 正式版本的 MP4、字幕、Python 安装包与 SHA-256 校验文件将在 [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases) 中一起发布。当前演示构建是临时附件；`registry-artifacts-*` 是社区插件产物，不是市场本体安装包。
 
 ## 安装前请知道
 

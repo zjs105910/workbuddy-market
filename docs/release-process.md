@@ -14,17 +14,17 @@
 
 发布由 `.github/workflows/release.yml` 负责。它只响应 `v*` tag；不会因普通 push 自动发布正式 Release。
 
-1. 版本号只在 `src/workbuddy_market/version.py` 中维护。准备发 `2.27.0` 时，tag 必须是 `v2.27.0`，并且 `CHANGELOG.md` 必须有对应的 `## 2.27.0` 段。
+1. 版本号只在 `src/workbuddy_market/version.py` 中维护。准备发 `X.Y.Z` 时，tag 必须是 `vX.Y.Z`，并且 `CHANGELOG.md` 必须有对应的 `## X.Y.Z` 段。本文统一用 `X.Y.Z` 作占位符，实际发布时替换成版本文件中的当前值。
 2. 在已通过验证的 main commit 上创建并推送带注释的 tag：
 
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag -a v2.27.0 -m "WorkBuddy Market v2.27.0"
-git push origin v2.27.0
+git tag -a vX.Y.Z -m "WorkBuddy Market vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
-实际发布时把示例版本 `2.27.0` 替换成版本文件中的当前值；不要为了让工作流通过而随意更改版本或删减变更日志校验。
+`X.Y.Z` 只是一个占位符示例，不要照抄；永远以 `src/workbuddy_market/version.py` 的当前值为准。不要为了让工作流通过而随意更改版本或删减变更日志校验。
 
 3. 工作流先在 Windows/Linux/macOS 与 Python 3.10/3.13 矩阵中运行语法、隐私、注册表契约、POSIX 语义冒烟、pytest；Windows 另跑完整隔离 selftest。
 4. 验证通过后构建 wheel 与 sdist，使用 tagged source 录制演示视频，生成中文字幕与 manifest，计算 SHA-256 校验和。

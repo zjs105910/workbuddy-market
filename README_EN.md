@@ -20,7 +20,7 @@
 
 ### No Git? Three steps, no install
 
-> 1. **Download**: open the [latest release](https://github.com/zjs105910/workbuddy-market/releases/latest) and grab **Source code (zip)** (or the [main-branch ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip));
+> 1. **Download**: open the [latest release](https://github.com/zjs105910/workbuddy-market/releases/latest) (look for the entry titled `WorkBuddy Market vX.Y.Z`; `registry-artifacts-*` are plugin-artifact pre-releases, not the app) and grab **Source code (zip)** (or the [main-branch ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip));
 > 2. **Extract**: unzip to any folder;
 > 3. **Run**: double-click `安全模式-只开网页.cmd` to browse the marketplace first; when ready to integrate with WorkBuddy, double-click `一键启动.cmd`.
 
@@ -71,13 +71,18 @@ Permission and compatibility details shown before installation:
 
 > Screenshots are captured with synthetic data. Available actions and results depend on your local environment and the source plugin.
 
-## Demo video and formal releases
+## Demo video and download entries
+
+Since v2.28.0, each formal Release ships the demo and install assets together. Three download entries, pick by need:
+
+- **Demo video**: from the [v2.28.0 release](https://github.com/zjs105910/workbuddy-market/releases/tag/v2.28.0) (or the newest `WorkBuddy Market vX.Y.Z` entry) download `workbuddy-market-demo.mp4` (about 80 seconds) and `workbuddy-market-demo.zh-CN.srt` (Chinese subtitles); published with the release, no 30-day expiry;
+- **Full marketplace app**: the `WorkBuddy Market vX.Y.Z` release entry for the version you want (wheel / sdist / source zip), or simply `pipx install workbuddy-market`;
+- **Curated marketplace zip** (skills only): see the zero-install section above, rebuilt daily under the fixed `marketplace` release.
+
+> Note: `registry-artifacts-*` releases are daily community plugin artifacts (marked as Pre-release), **not** the marketplace app itself. For the app, look for the entry titled `WorkBuddy Market vX.Y.Z`.
 
 - [Reproducible demo: recording steps, subtitles, and privacy boundaries](docs/demo-video.md)
 - [Formal Release process](docs/release-process.md)
-- [Watch or download the current demo build (about 80 seconds, MP4 + Chinese subtitles)](https://github.com/zjs105910/workbuddy-market/actions/runs/38121812213) (Actions artifact expires in 30 days).
-
-Tagged app releases will include the MP4 demo, Chinese subtitles, Python wheel/sdist, and SHA-256 checksums on [GitHub Releases](https://github.com/zjs105910/workbuddy-market/releases). The current demo is a temporary artifact; releases named `registry-artifacts-*` contain community plugin artifacts, not the marketplace application itself.
 
 ## Safety notes
 
