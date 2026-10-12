@@ -24,6 +24,8 @@
 
 After downloading, **double-click** it. It automatically: checks/installs Python → installs pipx → pipx-installs/upgrades the `workbuddy-market` CLI → downloads the market root to `%USERPROFILE%\workbuddy-market` → runs doctor → starts the first-run wizard (**Enter = browse only, 2 = register into WorkBuddy**).
 
+> Windows will show an "unknown publisher" security warning on double-click — the script carries no paid code-signing certificate (normal for open source). Click **Run**; the script is plain text you can review line by line on the file page above.
+
 This is the **full version**: pre-install review, hash verification, transactions, and recoverable uninstall are all included. Safe to re-run (every step is idempotent and upgrades the CLI).
 
 ### No Git? Three steps to run (no Git needed, Python 3.10+ still required)
