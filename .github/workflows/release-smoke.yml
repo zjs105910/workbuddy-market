@@ -1,0 +1,118 @@
+# 正式发行包冒烟测试（v2.29 新增）。
+# 目标：证明「用户从 Releases 页下载到的东西可用」，而不是只有源码测试通过。
+# 流程：下载正式 Release 附件 → SHA256SUMS 逐件校验 → 干净 venv 装 wheel →
+#       入口点 / 版本 / doctor 体检。每日 registry-artifacts-* 与 marketplace
+#       Release（非 prerelease）不是市场本体，按 tag 前缀 v* 过滤，只测正式版。
+# doctor 语义：`--help` 必须退出 0；在非 clone 目录体检时「市场根」一项标 ✗
+# 并退出 1 是预期行为（见 src/workbuddy_market/doctor.py 模块注释），因此
+# doctor 步骤允许退出 0/1，但报告必须真实产出且含 ✓ 检查项。
+name: Release smoke test
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to smoke test (e.g. v2.28.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG_INPUT: ${{ inputs.tag }}
+          TAG_EVENT: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then TAG="$TAG_INPUT"; else TAG="$TAG_EVENT"; fi
+          if [ -z "$TAG" ]; then
+            echo "::error::no tag resolved"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir smoke-assets --clobber
+          ls -la smoke-assets
+
+      - name: Verify SHA256SUMS
+        shell: bash
+        working-directory: smoke-assets
+        run: |
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install wheel into clean venv
+        id: venv
+        shell: bash
+        run: |
+          python -m venv smokevenv
+          case "$RUNNER_OS" in
+            Windows) VPY=smokevenv/Scripts/python.exe ;;
+            *)       VPY=smokevenv/bin/python ;;
+          esac
+          "$VPY" -m pip install --quiet --disable-pip-version-check smoke-assets/*.whl
+          echo "vpy=$VPY" >> "$GITHUB_OUTPUT"
+
+      - name: Entry point and version smoke
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          VPY="${{ steps.venv.outputs.vpy }}"
+          # 入口点存在且 --help 正常（doctor --help 是 wheel 安装后的 CLI smoke 约定出口）
+          "$VPY" -c "from workbuddy_market.cli import main; import sys; sys.exit(main(['doctor','--help']))"
+          # 版本与 tag 一致
+          GOT=$("$VPY" -c "from workbuddy_market.version import MARKET_VERSION; print(MARKET_VERSION)")
+          WANT="${TAG#v}"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::version mismatch: package $GOT vs tag $WANT"; exit 1
+          fi
+          echo "package version: $GOT (matches $TAG)"
+
+      - name: Doctor smoke (report must render)
+        shell: bash
+        run: |
+          VPY="${{ steps.venv.outputs.vpy }}"
+          set +e
+          OUT=$("$VPY" -c "from workbuddy_market.cli import main; import sys; sys.exit(main(['doctor']))" 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          # 在非 clone 目录体检：报告有 ✗（如市场根）时退出 1 属预期，只拦其他退出码
+          if [ "$CODE" != "0" ] && [ "$CODE" != "1" ]; then
+            echo "::error::doctor crashed with exit code $CODE"; exit 1
+          fi
+          case "$OUT" in
+            *"✓"*) : ;;
+            *) echo "::error::doctor report has no passing checks"; exit 1 ;;
+          esac
