@@ -4,6 +4,23 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.33.0 — 2026-10-12（改进：真实用户测试反馈三连修）
+
+用户端实测（docs/first-run-walkthrough.md）反馈的三处体验问题：
+
+- **GitHub 搜索只显示 8 条**：`/api/gh/search` 新增可选 `limit` 参数
+  （坏值回退默认，上限仍 SEARCH_LIMIT_MAX=20），前端改传满档 20；
+  缺省行为不变，API 向后兼容；
+- **「本机技能 0」引发消失误会**：空态文案改为明确说明「首次安装默认
+  收录 0 个是安全设计，skills 都完好保存在 ~/.workbuddy/skills」+
+  收录方法（编辑 localPlugins → 重新打包）；
+- **install.cmd 的 doctor 在向导初始化前显示 ✗**：脚本加两行说明
+  （首次运行时 ✗ 属正常，向导初始化后自动消失）。
+
+同期入库：docs/first-run-walkthrough.md（真实用户首装全流程实录，
+含安全警告、下载兜底、doctor 误读、localPlugins 收录方法与卸载恢复）。
+selftest 789 项不变；pytest 75 不变。
+
 ## 2.32.0 — 2026-10-12（新增：单文件一键安装器）
 
 - **`install.cmd`**（仓库根）：下载这一个文件双击即得**完整版**——自动检测/

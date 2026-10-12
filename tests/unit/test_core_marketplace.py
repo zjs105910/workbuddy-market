@@ -17,6 +17,17 @@ BUNDLED_DIR = REPO_ROOT / "bundled"
 
 
 def _market() -> dict:
+    """读「入库版」根清单。
+
+    注意必须走 git 索引而不是工作区文件：开发机上 --sync 会把工作区文件
+    重写成本机运行时清单（wb-local-market），那份不是上游自带市场。
+    """
+    import subprocess
+    r = subprocess.run(["git", "show", ":.codebuddy-plugin/marketplace.json"],
+                       capture_output=True, cwd=REPO_ROOT)
+    if r.returncode == 0:
+        return json.loads(r.stdout.decode("utf-8"))
+    # 非 git 环境（罕见）：退回工作区文件
     return json.loads(MARKET_JSON.read_text(encoding="utf-8"))
 
 

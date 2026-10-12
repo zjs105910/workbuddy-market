@@ -118,6 +118,8 @@ echo       Market root ready: %DEST%
 
 REM ---- [5/5] doctor + launch ----
 echo [5/5] Health check ...
+echo       ^(First run: a few lines may show X here - they resolve once
+echo        the wizard initializes the config below. Not an error.^)
 pushd "%DEST%"
 if defined WBMEXE goto doctor_exe
 %PY% -m workbuddy_market doctor

@@ -55,7 +55,7 @@ function ghEnsure(q){
   ghTimer = setTimeout(async () => {
     GH.state = "loading"; ghPaint();
     try{
-      const r = await api("/api/gh/search?q=" + encodeURIComponent(GH.q));
+      const r = await api("/api/gh/search?q=" + encodeURIComponent(GH.q) + "&limit=20");
       if($("#q").value.trim() !== GH.q) return;   // 用户已改词，丢弃过期结果
       GH.items = r.items || []; GH.state = "done";
     }catch(err){ GH.error = err.message; GH.state = "error"; }
@@ -226,8 +226,8 @@ export function renderCards(){
     // ---- 入口一：本机技能（管理自己的 Skills）
     h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
     h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
-                      : '<div class="empty">没有符合条件的本机插件。'+
-                        '本机 skill 不在这里？编辑 market.config.json 收录后点「重新打包」。</div>';
+                      : '<div class="empty">没有符合条件的本机插件（首次安装默认收录 0 个，这是安全设计——你的 skills 都完好保存在 ~/.workbuddy/skills，一个没动）。'+
+                        '想收录：编辑 market.config.json 的 localPlugins 后点「重新打包」。</div>';
   }
 
   if(tab === "curated"){

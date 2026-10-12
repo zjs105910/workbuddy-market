@@ -1176,8 +1176,16 @@ class Handler(BaseHTTPRequestHandler):
                     q = core.validate_query(raw)
                 except core.ConfigError as exc:
                     return self._json({"ok": False, "error": str(exc)}, 400)
+                # v2.33：可选 limit 参数（前端传满档 20；缺省仍 8，坏值回退默认）
+                raw_lim = (qs.get("limit") or [""])[0]
+                limit = core.SEARCH_LIMIT_DEFAULT
+                if raw_lim:
+                    try:
+                        limit = max(1, min(int(raw_lim), core.SEARCH_LIMIT_MAX))
+                    except ValueError:
+                        pass
                 try:
-                    items = gh_search(q)
+                    items = gh_search(q, limit=limit)
                 except core.ConfigError as exc:
                     return self._json({"ok": False, "error": str(exc)}, 400)
                 except Exception as exc:  # 网络 / 限流 / DNS 都算上游失败
