@@ -40,29 +40,46 @@ jobs:
       - name: Validate registry contract
         run: python scripts/validate_registry.py registry/plugins.json
 
+      # PAT 建 PR（2026-10-12 CI 队列修复）：GITHUB_TOKEN 开的 PR，其 pull_request CI 永远
+      # 挂在 action_required（GitHub 防递归，bot 无法自批，#2–#6 全中实锤）；
+      # PAT 开的 PR actor 是人，CI 自动正常跑（人工建的 #1 对照实证）。
+      # secret 建议用细粒度 PAT：本仓库 Contents RW + Pull requests RW。
       - name: Create PR if changed
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REGISTRY_PAT }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "!! 缺少 secrets.REGISTRY_PAT —— 没有 PAT，bot 开的 PR 拿不到 CI 结论（永远 action_required）"
+            exit 1
+          fi
           if git diff --quiet registry/plugins.json; then
             echo "registry/plugins.json 无变化，跳过"
             exit 0
           fi
           BR="registry-refresh/$(date -u +%F)"
+          TITLE="registry: daily refresh $(date -u +%F)"
           git config user.name "registry-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BR"
           git add registry/plugins.json
-          git commit -m "registry: daily refresh $(date -u +%F)"
+          git commit -m "$TITLE"
           git push -f origin "$BR"
           gh pr create --base main --head "$BR" \
-            --title "registry: daily refresh $(date -u +%F)" \
+            --title "$TITLE" \
             --body "自动刷新注册表动态字段（stars / pushedAt / latestSha）。静态字段未动；合并前等 CI 通过。" \
             || {
               if gh pr view "$BR" --json number >/dev/null 2>&1; then
                 echo "该分支的 PR 已存在，跳过创建"
               else
-                echo "!! gh pr create 失败且 PR 不存在 —— 常见原因：仓库未开启『Allow GitHub Actions to create and approve pull requests』"
+                echo "!! gh pr create 失败且 PR 不存在 —— 检查 REGISTRY_PAT 是否有效且含 Contents RW + Pull requests RW"
                 exit 1
               fi
             }
+          NEW_NUM=$(gh pr view "$BR" --json number --jq .number)
+          # 收敛（2026-10-12 CI 队列修复）：关闭被本次取代的同类型旧 PR，过期变更不再累积
+          gh pr list --state open --limit 100 --json number,title,headRefName \
+            --jq ".[] | select(.title == \"$TITLE\" and .headRefName != \"$BR\") | .number" \
+          | while read -r n; do
+              [ -n "$n" ] || continue
+              gh pr close "$n" --comment "被 #$NEW_NUM（更新的 daily refresh）取代，自动关闭。"
+            done
