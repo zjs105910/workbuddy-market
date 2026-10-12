@@ -18,6 +18,12 @@
 
 ## Quick start (Windows)
 
+### Just one file? One-click installer (recommended) ✅
+
+Download [install.cmd](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd) (use the download button, or right-click [save-as from raw](https://raw.githubusercontent.com/zjs105910/workbuddy-market/main/install.cmd)) and double-click it. It automatically: checks/installs Python → installs pipx → pipx-installs/upgrades the `workbuddy-market` CLI → downloads the market root to `%USERPROFILE%\workbuddy-market` → runs doctor → starts the first-run wizard (**Enter = browse only, 2 = register into WorkBuddy**).
+
+This is the **full version**: pre-install review, hash verification, transactions, and recoverable uninstall are all included. Safe to re-run (every step is idempotent and upgrades the CLI).
+
 ### No Git? Three steps to run (no Git needed, Python 3.10+ still required)
 
 > 1. **Download**: open the [latest release](https://github.com/zjs105910/workbuddy-market/releases/latest) (look for the entry titled `WorkBuddy Market vX.Y.Z`; `registry-artifacts-*` are plugin-artifact pre-releases, not the app) and grab **Source code (zip)** (or the [main-branch ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip));

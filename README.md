@@ -19,6 +19,12 @@
 
 ## 快速上手（Windows）
 
+### 只想下载一个文件？一键安装（推荐） ✅
+
+下载 [install.cmd](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)（右上角下载按钮，或右键 [raw 链接](https://raw.githubusercontent.com/zjs105910/workbuddy-market/main/install.cmd) 另存为），双击即可。它会自动完成：检测/安装 Python → 装 pipx → 装并升级 `workbuddy-market` CLI → 下载市场本体到 `%USERPROFILE%\workbuddy-market` → 运行 doctor 体检 → 启动首次向导（**回车=只浏览，2=注册进 WorkBuddy**）。
+
+这就是**完整版**：四问预览、哈希校验、事务与可恢复卸载全都在。可重复运行（每一步幂等，顺带升级 CLI）。
+
 ### 没有 Git？三步跑起来（免 Git，需 Python 3.10+） ✅
 
 > 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)（认准标题为 `WorkBuddy Market vX.Y.Z` 的条目；`registry-artifacts-*` 是插件产物 Pre-release，不是本体），点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；

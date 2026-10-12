@@ -4,6 +4,22 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.32.0 — 2026-10-12（新增：单文件一键安装器）
+
+- **`install.cmd`**（仓库根）：下载这一个文件双击即得**完整版**——自动检测/
+  安装 Python 3.10+（winget 兜底）→ 装 pipx → pipx 安装/升级 `workbuddy-market`
+  CLI → 下载市场本体（main 分支 zip）到 `%USERPROFILE%\workbuddy-market` →
+  doctor 体检 → 启动首次向导（回车=浏览，2=注册）。全部步骤幂等，可重复运行
+  顺带升级；`--no-launch` 只装不启。README（中英）快速上手设为首选入口，
+  FAQ 第八节升为五种路径（一键安装=完整版的全自动形态）。
+- **三个 Windows 批处理坑（实测）**：① `if (...)` 块内引号里的 `(3,10)` 会
+  截断块解析——全文件改写为 goto 流程、零括号块；② cmd 里裸 `tar` 可能解析到
+  Git 的 GNU tar（把 `C:\...` 当远程主机 "Cannot connect to C:"）——必须用
+  绝对路径 `%SystemRoot%\System32\tar.exe`（bsdtar）；③ `cd` 会重置
+  errorlevel——先取 `set "TARERR=%errorlevel%"` 再 `cd` 回。
+- 本机实测三轮走通全流程（pipx 1.17.14 + CLI + 市场根下载解压 + doctor）。
+- selftest 789 项不变；pytest 75 不变；根清单 version 字段同步 2.32.0。
+
 ## 2.31.0 — 2026-10-12（新增：短命令自带市场 + README 收录清单）
 
 参考社区实践（blatwo/workbuddy-marketplace）的第二轮安装体验优化：
