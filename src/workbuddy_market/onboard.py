@@ -25,6 +25,7 @@ README 的产品承诺是「双击 一键启动.cmd」，但 v2.21 之前用户�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -114,6 +115,19 @@ def discover_skills() -> list:
 
 # ---------------------------------------------------------------- 配置初始化
 
+def unique_market_id(base: str, root: Path | None = None) -> str:
+    """给 marketId 追加「MARKET_ROOT 绝对路径哈希」后缀，保证 clone 级唯一。
+
+    与 paths._state_bucket 同一口径（sha256 前 12 位）。没有它，多个 clone
+    都用模板里的默认「wb-local-market」注册进 known_marketplaces.json：
+    后注册的覆盖先注册的（installLocation 被顶掉），卸载任何一个 clone
+    都会删掉这个共享 key —— 卸载 A 毁掉 B 的注册（2026-10-12 半验收实锤）。
+    """
+    digest = hashlib.sha256(str(root if root is not None else MARKET_ROOT)
+                            .encode("utf-8")).hexdigest()[:12]
+    return f"{base[:115]}-{digest}"
+
+
 def init_config(template_path=None) -> dict:
     """配置缺失时从模板安全初始化。
 
@@ -138,6 +152,10 @@ def init_config(template_path=None) -> dict:
     except (OSError, UnicodeDecodeError, ValueError) as exc:
         return {"action": "error",
                 "detail": f"模板 {template.name} 读不出来或不是合法 JSON：{exc}"}
+    # 新配置的 marketId 追加路径哈希后缀（clone 级唯一）：多个 clone 并存时
+    # 注册/撤销不再互相顶替。已存在的配置走 exists 分支，永不被改写。
+    if isinstance(data.get("marketId"), str):
+        data["marketId"] = unique_market_id(data["marketId"])
     try:
         validate_config(data)
     except ConfigError as exc:

@@ -812,8 +812,9 @@ def round21():
         ck("★ 配置缺失 + 模板存在 → 初始化成功", r["action"] == "created")
         created = json.loads(core.CONFIG_PATH.read_text(encoding="utf-8"))
         ck("★ 初始化产物是合法配置且可被 load_config 继续",
-           created["marketId"] == "wb-local-market"
-           and core.load_config()["marketId"] == "wb-local-market")
+           created["marketId"] == ob.unique_market_id("wb-local-market")
+           and created["marketId"] != "wb-local-market"
+           and core.load_config()["marketId"] == created["marketId"])
         ck("★ 发现的 skills 不被自动收录（localPlugins 保持空）",
            created["localPlugins"] == [] and created["remoteSources"] == []
            and len(ob.discover_skills()) >= 3)   # 前序轮次可能造了更多 skill，只增不减
@@ -968,7 +969,7 @@ def round21():
             ck("★ 全新克隆启动：配置被向导自动初始化（零手工步骤）",
                cfg_new.is_file()
                and json.loads(cfg_new.read_text(encoding="utf-8"))["marketId"]
-               == "wb-local-market")
+               == ob.unique_market_id("wb-local-market", mk))
             ck("★ 全新克隆启动：纯浏览模式 → known_marketplaces.json 不存在",
                not (wbhome / "plugins" / "known_marketplaces.json").exists())
             out_text = out_path.read_text(encoding="utf-8", errors="replace")

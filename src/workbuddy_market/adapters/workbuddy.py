@@ -218,6 +218,34 @@ def commit_known(mutate, *, attempts: int = 4, what: str = "修改"):
 
 # ---------------------------------------------------------------- 注册 / 撤销
 
+def check_market_id_conflict(known: dict, mid: str, root: Path) -> str | None:
+    """marketId 冲突检测：同 key 已被「另一个位置」的市场占用时返回人话原因。
+
+    正常（None）：key 不存在，或已注册条目的 installLocation / source.path
+    指向本市场自身（幂等重注册）。冲突时调用方必须拒绝写入 —— 直接覆盖会让
+    另一个市场的注册失效（卸载 A 毁掉 B 的注册的根源之一）。
+    """
+    existing = known.get(mid)
+    if not isinstance(existing, dict):
+        return None
+    loc = str(existing.get("installLocation")
+              or (existing.get("source") or {}).get("path", ""))
+    if not loc:
+        return None
+    try:
+        same = Path(loc).resolve() == root.resolve()
+    except OSError:
+        same = loc == str(root)
+    if same:
+        return None
+    return (f"marketId「{mid}」已被另一个市场占用\n"
+            f"  已注册位置：{loc}\n"
+            f"  本市场位置：{root}\n"
+            "  两个市场共用了同一个 marketId。请把本市场 market.config.json "
+            "的 marketId 改成唯一值再注册；本工具绝不静默覆盖 —— "
+            "直接写入会让另一个市场的注册失效。")
+
+
 def register(force: bool = False) -> bool:
     """把本市场写进 known_marketplaces.json。幂等；返回是否发生了改动。
 
@@ -241,6 +269,9 @@ def register(force: bool = False) -> bool:
                     == {k: v for k, v in b.items() if k != "lastUpdated"})
 
         def _mutate(known: dict):
+            conflict = check_market_id_conflict(known, mid, MARKET_ROOT)
+            if conflict:
+                raise RuntimeError(f"注册被拒绝：{conflict}")
             if not force and isinstance(known.get(mid), dict) and _same(known[mid], entry):
                 return False
             known[mid] = entry
