@@ -3,6 +3,9 @@
 # 流程：下载正式 Release 附件 → SHA256SUMS 逐件校验 → 干净 venv 装 wheel →
 #       入口点 / 版本 / doctor 体检。每日 registry-artifacts-* 与 marketplace
 #       Release（非 prerelease）不是市场本体，按 tag 前缀 v* 过滤，只测正式版。
+# 触发器：push tags v* 是实际生效的主路径 —— release.yml 用 GITHUB_TOKEN 创建
+#       Release，其 published 事件按 GitHub 规则不会再触发本 workflow，
+#       release: published 仅在手动建 Release 时兜底。
 # doctor 语义：`--help` 必须退出 0；在非 clone 目录体检时「市场根」一项标 ✗
 # 并退出 1 是预期行为（见 src/workbuddy_market/doctor.py 模块注释），因此
 # doctor 步骤允许退出 0/1，但报告必须真实产出且含 ✓ 检查项。
@@ -11,6 +14,8 @@ name: Release smoke test
 on:
   release:
     types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -22,14 +27,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-smoke-${{ inputs.tag || github.event.release.tag_name }}
+  group: release-smoke-${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   smoke:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease)
+      (github.event_name == 'push' && startsWith(github.ref_name, 'v')) ||
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease)
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +49,16 @@ jobs:
           EVENT: ${{ github.event_name }}
           TAG_INPUT: ${{ inputs.tag }}
           TAG_EVENT: ${{ github.event.release.tag_name }}
+          TAG_PUSH: ${{ github.ref_name }}
         run: |
-          if [ "$EVENT" = "workflow_dispatch" ]; then TAG="$TAG_INPUT"; else TAG="$TAG_EVENT"; fi
+          # push 触发走 tag ref 名；release 事件走 tag_name；dispatch 走输入。
+          # push tags 过滤器已限定 v*，这里再兜底一次防误触发。
+          case "$EVENT" in
+            workflow_dispatch) TAG="$TAG_INPUT" ;;
+            release)           TAG="$TAG_EVENT" ;;
+            push)              case "$TAG_PUSH" in v*) TAG="$TAG_PUSH" ;; *) TAG="" ;; esac ;;
+            *)                 TAG="" ;;
+          esac
           if [ -z "$TAG" ]; then
             echo "::error::no tag resolved"; exit 1
           fi
