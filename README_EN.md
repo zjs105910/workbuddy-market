@@ -18,7 +18,7 @@
 
 ## Quick start (Windows)
 
-### No Git? Three steps, no install
+### No Git? Three steps to run (no Git needed, Python 3.10+ still required)
 
 > 1. **Download**: open the [latest release](https://github.com/zjs105910/workbuddy-market/releases/latest) (look for the entry titled `WorkBuddy Market vX.Y.Z`; `registry-artifacts-*` are plugin-artifact pre-releases, not the app) and grab **Source code (zip)** (or the [main-branch ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip));
 > 2. **Extract**: unzip to any folder;
@@ -29,6 +29,8 @@ Python 3.10+ is still required (first-run setup checks it and explains what to i
 ### Already using WorkBuddy? Zero-install marketplace
 
 Just want the curated community skills, no tooling: download the [marketplace zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip) and add it as a custom marketplace in the WorkBuddy plugin panel. Rebuilt daily by CI from the human-reviewed registry.
+
+> Entry scope: the zip import was verified on the **WorkBuddy desktop plugin panel (5.7.6)**. CodeBuddy Code's marketplace entries (`marketplace.json` URL / Git repo / local path) belong to a different client and do not accept this zip — on CodeBuddy Code, install the full marketplace via pipx and register it instead.
 
 > Trade-off: this path gives you skill distribution only — no pre-install review, no ownership grading, no recoverable uninstall. For the full safety chain, use the full version above.
 

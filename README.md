@@ -19,7 +19,7 @@
 
 ## 快速上手（Windows）
 
-### 没有 Git？三步免安装 ✅
+### 没有 Git？三步跑起来（免 Git，需 Python 3.10+） ✅
 
 > 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)（认准标题为 `WorkBuddy Market vX.Y.Z` 的条目；`registry-artifacts-*` 是插件产物 Pre-release，不是本体），点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
 > 2. **解压**：右键解压到任意目录（路径不要含特殊字符）；
@@ -30,6 +30,8 @@
 ### 已经在用 WorkBuddy？零安装直连市场 ✅
 
 不想跑任何工具，只想装社区精选技能：下载 [精选市场 zip](https://github.com/zjs105910/workbuddy-market/releases/download/marketplace/workbuddy-marketplace.zip)，在 **WorkBuddy 插件面板 → 添加自定义市场** 里选这个 zip 即可。内容每日由 CI 从人工审核的注册表自动重建。
+
+> 入口适用范围：上述 zip 导入在 **WorkBuddy 桌面端（5.7.6 实测）插件面板**验证；CodeBuddy Code 的市场入口（`marketplace.json` URL / Git 仓库 / 本地路径）是不同客户端的路线，不支持直接导入本 zip——用 CodeBuddy Code 请改走 pipx 安装完整市场后注册。
 
 > 这是精选目录的**轻量子集**：仓库体积超 30MB、含符号链接或没有标准 skill 结构的收录条目不会进包（搜不到某技能多半是这个原因）。完整清单见 zip 内 `.codebuddy-plugin/marketplace.json` 的 `included` / `excluded` 字段，或 Release 附件里的 manifest。
 
