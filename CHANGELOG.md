@@ -4,6 +4,42 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.29.0 — 2026-10-12（修复：多实例 marketId 撞车 + 发行链路加固）
+
+**用户可见修复**
+
+- **多实例 marketId 撞车（P1，真实验收实测发现）**：首次启动向导过去给每个
+  新 clone 恒用模板默认 `marketId=wb-local-market`，多个市场实例在
+  `known_marketplaces.json` 里共用同一个 key——后注册的覆盖先注册的
+  `installLocation`，注销任意一个都会删掉共享 key（卸载 A 毁掉 B 的注册；
+  第三方条目不受影响）。两层修复，fail-closed：
+  - 向导 `init_config()` 从模板创建配置时给 marketId 追加 MARKET_ROOT
+    路径哈希后缀（sha256 前 12 位，与状态桶同口径），clone 级唯一；
+    已存在的配置一个字节都不会被动；
+  - 注册 `register()` 新增冲突守卫：key 已被另一位置的市场占用时拒绝
+    写入并给出人话提示，绝不静默覆盖。
+- **历史隐私审计误报修复**：GitHub Windows runner 的 8.3 短路径
+  `RUNNER~1`（机器占位名，非真人）被 USER-PATH 规则误报——根因是
+  `_WIN_PATH` 放行名单缺 runner、`_POSIX_PATH` 大小写敏感挡不住大写形态。
+  两规则放行 runner / RUNNER~1 / runneradmin 占位名，真实用户名仍报红；
+  新增 `tests/unit/test_privacy_audit.py` 钉死两个方向。
+
+**发行链路（不进包，工程侧）**
+
+- 新增 **release-smoke 工作流**：正式 Release（仅 `v*` 非 prerelease）发布
+  时在 ubuntu / windows / macos 三平台各跑一遍「下载全部附件 → SHA256SUMS
+  逐件校验 → 干净 venv 装 wheel → 入口点 doctor --help → 包版本对 tag →
+  doctor 体检报告校验」，把「CI 通过」升级为「用户下载到的发行包可用」；
+- 全部 workflow 的 action SHA 固定升级到 node24 代（checkout v5.1.0 /
+  setup-python v6.3.0 / upload-artifact v5.0.0），消除 hosted runner 的
+  Node 20 弃用警告；
+- 自动化 PR 改用 `secrets.REGISTRY_PAT` 创建（GITHUB_TOKEN 建的 PR 其
+  pull_request CI 永远挂 action_required），并加「建新 PR 后自动关闭
+  同类旧 PR」的收敛逻辑。
+
+- selftest 789 项不变（本轮修复由 pytest 钉死：37 → 59 项，
+  新增 marketId 唯一性 10 例 + 审计规则 10 例）。
+
 ## 2.28.0 — 2026-10-12（使用与宣发审计修复轮）
 
 对项目做了一轮「用户怎么用 / 怎么被看到」视角的审计，4 个用户可见问题的落地：

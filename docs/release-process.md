@@ -30,6 +30,25 @@ git push origin vX.Y.Z
 4. 验证通过后构建 wheel 与 sdist，使用 tagged source 录制演示视频，生成中文字幕与 manifest，计算 SHA-256 校验和。
 5. 工作流用 GitHub CLI 创建正式 Release。发行页面包含 Python 包、MP4、SRT、manifest 和校验文件；版本专属说明摘自 `CHANGELOG.md`，并给出快速开始、Issue 与贡献入口。
 
+## PyPI 同步（手动步骤）
+
+README 的 `pipx install workbuddy-market` 走 PyPI，而 release.yml 只发布
+GitHub Release 附件——**PyPI 不会自动更新**，发布后必须手动补一步，否则
+两条安装渠道会拿到不同版本：
+
+```bash
+# 1. 从干净 tagged source 构建本地校验
+python -m pip install --upgrade build twine
+python -m build
+# 2. 确认版本号与 tag 一致后上传（需要 PyPI API token，勿用用户名密码）
+python -m twine upload dist/workbuddy_market-X.Y.Z*
+# 3. 验证
+python -m pip index versions workbuddy-market   # 或查 pypi.org/project/workbuddy-market
+```
+
+每次发布后核对：GitHub Release tag = `version.py` 的 `MARKET_VERSION` =
+PyPI 最新版，三者一致才算发布闭环。
+
 ## 发布失败如何处理
 
 - 测试失败：不要强行发布。根据 Actions 失败步骤修复问题，推送修复 commit，再创建新的正确版本 tag 前确认 changelog/版本号同步。
