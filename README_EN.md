@@ -18,9 +18,9 @@
 
 ## Demo and downloads
 
-Watch the reproducible product demo (about 80 seconds) before choosing an installation path. Formal releases ship the video, subtitles, manifest, Python packages, and SHA-256 checksum file together.
+Watch the reproducible product demo (about 80 seconds) before choosing an installation path. Formal releases ship landscape and vertical demo videos, subtitles, the manifest, Python packages, and a SHA-256 checksum file together.
 
-- **Watch first**: [MP4 video](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [Chinese subtitles (SRT)](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
+- **Watch first**: [landscape MP4 (16:9)](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [vertical MP4 (9:16)](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo-vertical.mp4) · [Chinese subtitles (SRT)](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
 - **Install the full app**: [latest formal release](https://github.com/zjs105910/workbuddy-market/releases/latest) (Windows installer, wheel, sdist, and `SHA256SUMS.txt`); Windows users can also [download `install.cmd` directly](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd).
 - **Curated skills only**: see “Curated skills only (zip import)” below. This lightweight distribution does not include the full app's pre-install safety review or recoverable uninstall.
 - **Recording and release details**: [reproducible demo and privacy boundaries](docs/demo-video.md) · [formal Release process](docs/release-process.md)
