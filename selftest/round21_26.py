@@ -356,7 +356,7 @@ def round23():
 
     # --- 38C. 路径脱敏
     home = str(Path.home())
-    fake = home + "\\somewhere\\secret-name"
+    fake = str(Path(home) / "somewhere" / "secret-name")
     ck("★ _sanitize_text：用户主目录 → ~（用户名不进诊断报告）",
        srv2._sanitize_text(fake).startswith("~")
        and Path.home().name not in srv2._sanitize_text(fake))
@@ -385,9 +385,23 @@ def round23():
            and len(js["doctor"]["checks"]) > 0, str(st))
         ck("★ /api/doctor 无口令 → 403（新接口同样过 _guard）",
            hit4("/api/doctor")[0] == 403)
-        doc_txt = json.dumps(js, ensure_ascii=False)
+        # 脱敏的端到端验证必须**确定性注入** home 派生路径：Windows 上
+        # TEMP 恰好在用户主目录下（…\AppData\Local\Temp），旧断言里
+        # 「~ 必须出现」那一半是 Windows 的偶然通过；Linux/macOS 的
+        # TEMP 在 /tmp，doctor 输出里没有 home 路径可脱敏，~ 根本不
+        # 出现——那是测试的平台偏见，不是产品缺陷。patch doctor 的
+        # KNOWN_PATH 让「WorkBuddy 家目录」一项确定性地输出 home，
+        # 端点脱敏后必须变成 ~，其余响应仍照常查泄露。
+        from workbuddy_market import doctor as wb_doctor
+        real_known = wb_doctor.KNOWN_PATH
+        wb_doctor.KNOWN_PATH = Path(home) / "known_marketplaces.json"
+        try:
+            st_d, js_d = hit4("/api/doctor", {"X-Local-Market-Token": TOKD})
+        finally:
+            wb_doctor.KNOWN_PATH = real_known
+        doc_txt = json.dumps(js_d, ensure_ascii=False)
         ck("★ /api/doctor 响应不含真实用户主目录（已脱敏为 ~）",
-           home not in doc_txt and "~" in doc_txt)
+           st_d == 200 and home not in doc_txt and "~" in doc_txt)
     finally:
         httpd4.shutdown()
         httpd4.server_close()
