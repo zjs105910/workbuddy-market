@@ -394,8 +394,17 @@ def round4():
         ck("★ 同端口 Origin 放行", st_o == 200, str(st_o))
 
         # body 上限与坏 JSON
-        st_big, js_big = hit("/api/install", b"x" * (srv.MAX_BODY + 1024), AUTH)
-        ck("★ ★ 超限请求体 → 413", st_big == 413, f"{st_big} {str(js_big)[:50]}")
+        # 超限请求体的合法结局有两种：服务端读完头部就回 413 并关连接，
+        # 而客户端可能还在写 body——Linux/Darwin 的 TCP 栈对「带未读数据
+        # 关闭」直接 RST，写一半就 BrokenPipe（Windows 上是读响应时
+        # 10053）。两种结局都证明服务端没有接受超限 body，断言要同时认，
+        # 否则同一用例在 Windows 上靠时序侥幸过、在 POSIX 上必挂。
+        try:
+            st_big, js_big = hit("/api/install", b"x" * (srv.MAX_BODY + 1024), AUTH)
+        except (BrokenPipeError, ConnectionError, http.client.RemoteDisconnected) as exc:
+            st_big, js_big = "RESET", f"{type(exc).__name__}: {exc}"
+        ck("★ ★ 超限请求体 → 413", st_big == 413 or st_big == "RESET",
+           f"{st_big} {str(js_big)[:50]}")
         st_bad, js_bad = hit("/api/install", b"{not json", AUTH)
         ck("★ ★ 坏 JSON → 400 且说明原因",
            st_bad == 400 and "JSON" in str(js_bad), f"{st_bad} {str(js_bad)[:60]}")
