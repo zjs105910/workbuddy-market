@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "scripts/record_demo.py"
+      - "scripts/package_demo_video.py"
       - "scripts/ui_smoke.py"
       - "market_server.py"
       - "market_core.py"
@@ -52,12 +53,23 @@ jobs:
             --subtitles dist/workbuddy-market-demo.zh-CN.srt \
             --manifest dist/demo-manifest.json
 
-      - name: Upload MP4, subtitles, and manifest
+      - name: Polish landscape and render vertical social cut
+        run: |
+          python -m pip install --upgrade pillow
+          python scripts/package_demo_video.py \
+            --input dist/workbuddy-market-demo.mp4 \
+            --subtitles dist/workbuddy-market-demo.zh-CN.srt \
+            --manifest dist/demo-manifest.json \
+            --output dist/workbuddy-market-demo.mp4 \
+            --vertical-output dist/workbuddy-market-demo-vertical.mp4
+
+      - name: Upload MP4s, subtitles, and manifest
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: workbuddy-market-demo-${{ github.sha }}
           path: |
             dist/workbuddy-market-demo.mp4
+            dist/workbuddy-market-demo-vertical.mp4
             dist/workbuddy-market-demo.zh-CN.srt
             dist/demo-manifest.json
           if-no-files-found: error
