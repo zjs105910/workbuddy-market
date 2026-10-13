@@ -19,9 +19,9 @@
 
 ## 演示与下载
 
-先看约 80 秒的可复现产品演示，再选择适合你的安装方式。正式版 Release 会同时提供演示视频、字幕、manifest、Python 安装包和 SHA-256 校验文件。
+先看约 80 秒的可复现产品演示，再选择适合你的安装方式。正式版 Release 会同时提供横屏与竖屏演示视频、字幕、manifest、Python 安装包和 SHA-256 校验文件。
 
-- **先看演示**：[播放/下载 MP4](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [中文字幕（SRT）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
+- **先看演示**：[横屏 MP4（16:9）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [竖屏 MP4（9:16）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo-vertical.mp4) · [中文字幕（SRT）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
 - **安装完整版**：[最新版正式 Release](https://github.com/zjs105910/workbuddy-market/releases/latest)（含 Windows 安装器、wheel、sdist 和 `SHA256SUMS.txt`）；Windows 用户也可[直接下载 `install.cmd`](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)。
 - **只装精选技能**：继续看下方「只想装精选技能（zip 导入）」；这是轻量分发入口，不包含完整版的安装前安全预览与可恢复卸载。
 - **了解生成与安全边界**：[可复现演示的录制方法、字幕与隐私边界](docs/demo-video.md) · [正式 Release 发布流程](docs/release-process.md)
