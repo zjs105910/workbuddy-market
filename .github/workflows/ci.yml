@@ -59,6 +59,11 @@ jobs:
       # 路径与 py_compile 同口径：bundled/ plugins/ 是技能内容，不进门禁
       - name: Ruff check
         run: python -m ruff check market_core.py market_server.py launcher.py selftest.py src/ scripts/ tests/
+      # 同内容多份拷贝一致性：A 组（bundled 共享助手，per-skill 安装协议下的
+      # 必然重复）CI 可查；B 组（plugins/ 个人编辑面 ↔ bundled/ 分发副本）
+      # 在干净 clone 里没有 plugins/，脚本自动跳过并明说，不出假绿也不误红
+      - name: Shared-copy sync check
+        run: python scripts/check_dup_sync.py
 
   # 打包链路（评审 10）：源码跑得通 ≠ wheel 装得上。构建 wheel → 安装 →
   # CLI smoke（doctor --help 必须退出 0），把「pip 装完就坏」挡在 CI 里。

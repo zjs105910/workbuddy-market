@@ -4,6 +4,41 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.34.0 — 2026-10-13（工程质量轮：静态分析门禁 + 自检拆包 + 拷贝一致性）
+
+全仓审计（"有什么可以优化的"）驱动的工程整改，无产品行为变化：
+
+- **ruff 静态分析门禁**：`pyproject.toml` 的 `[tool.ruff.lint]` 钉死规则集
+  E4/E7/E9/F（未用导入/变量、未定义名、裸 except、分号语句、单字母变量名）。
+  刻意不收 I（机械排序会破坏 market_core 的迁移史排序与函数内懒加载分组）、
+  BLE001/S/PL（防御性宽捕获是本项目既定设计，豁免点已就地 noqa 声明）、
+  UP（显式 `encoding="utf-8"` 等是编码纪律）——理由写 in-config 防后来者
+  顺手扩大。ci.yml 新增独立 `lint` job（ruff==0.17.0 pin，路径与
+  py_compile 同口径）。同期修复 34 处存量问题：10 处死导入（含
+  application.py R6 收尾遗留的 prune_trash/register/unregister 死再导出名）、
+  5 处死变量/死代码（market_server 的 reg_ok 双份死赋值、record_demo 的
+  video_ref、ui_smoke 的 toasts2、selftest 的 r_up 与 `if False` 死行）、
+  3 处 E741 改名、14 处 E702 分号拆行、1 处 F541；每处改动前均人工核实。
+- **selftest.py 拆包**：5603 行单体 → `selftest.py` 薄入口（100 行，保留
+  全部节索引 docstring，补齐缺失的第 41 节索引）+ `selftest/` 包 14 个模块
+  （__init__ 共享设施 / runner 编排 / core_flow 第 1-15 节 / faults 第 16-18
+  节 / 9 个 roundNN 轮次模块，最大 669 行）。逐字搬迁 + 守恒校验（除
+  `__file__` 变换外零行丢失）。迁移陷阱：16 处
+  `Path(__file__).resolve().parent` 拆包后会指向 selftest/（round18 的
+  core shim 防膨胀检查等会全挂），统一改挂 kit 的 `REPO_ROOT = parents[1]`。
+  `python selftest.py` 与 `python -m selftest` 等价；789 项计数与逐项
+  结果不变。
+- **拷贝一致性门禁**：新增 `scripts/check_dup_sync.py`，管两组协议约束下的
+  必然重复——A 组 bundled 共享助手脚本（tracking_commit /
+  author_memory_commit / wordcount_core：安装粒度是 per-skill，SKILL.md
+  写的都是「本 skill 自带 scripts/」，跨技能共享目录不可行）；B 组
+  plugins/（个人编辑面）↔ bundled/（分发副本）三个自有插件。接入 ci.yml
+  的 lint job（B 组在干净 clone 无 plugins/ 时自动跳过并明说）。修复实测
+  漂移 1 处：test_ghpm.py 的 `# pa:allow` 回灌 plugins/ 侧，两棵树恢复一致。
+- 验证：selftest 789 项全绿 0 失败（拆分前后逐项一致）；pytest 80 全过；
+  ruff / privacy-audit / dup-sync 三门禁全绿；ADVANCED_GUIDE 目录树、
+  CONTRIBUTING 验证清单同步。
+
 ## 2.33.0 — 2026-10-12（改进：真实用户测试反馈三连修）
 
 用户端实测（docs/first-run-walkthrough.md）反馈的三处体验问题：
