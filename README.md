@@ -17,6 +17,17 @@
 - **安装过程更可追溯**：安装前有来源与风险预览；支持内容校验、事务恢复和回收站。
 - **本机优先**：网页服务只监听 `127.0.0.1`；你的私有市场配置和本机技能内容不随仓库提交。
 
+## 演示与下载
+
+先看约 80 秒的可复现产品演示，再选择适合你的安装方式。正式版 Release 会同时提供横屏与竖屏演示视频、字幕、manifest、Python 安装包和 SHA-256 校验文件。
+
+- **先看演示**：[横屏 MP4（16:9）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [竖屏 MP4（9:16）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo-vertical.mp4) · [中文字幕（SRT）](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
+- **安装完整版**：[最新版正式 Release](https://github.com/zjs105910/workbuddy-market/releases/latest)（含 Windows 安装器、wheel、sdist 和 `SHA256SUMS.txt`）；Windows 用户也可[直接下载 `install.cmd`](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)。
+- **只装精选技能**：继续看下方「只想装精选技能（zip 导入）」；这是轻量分发入口，不包含完整版的安装前安全预览与可恢复卸载。
+- **了解生成与安全边界**：[可复现演示的录制方法、字幕与隐私边界](docs/demo-video.md) · [正式 Release 发布流程](docs/release-process.md)
+
+> `registry-artifacts-*` 是每日生成的社区插件产物预发布条目，不是市场本体。请认准标题为 `WorkBuddy Market vX.Y.Z` 的正式 Release；校验附件时，可在同一页面下载 `SHA256SUMS.txt`。
+
 ## 快速上手（Windows）
 
 ### 只想下载一个文件？一键安装（推荐） ✅
@@ -170,19 +181,6 @@ cd workbuddy-market
 ![安装前详情预览](docs/screenshots/detail-four-questions.png)
 
 > 截图由项目脚本使用合成数据生成。实际可用操作会根据本机环境与插件来源有所不同。
-
-## 演示视频与下载入口
-
-v2.28.0 起正式 Release 随版本附带全部演示与安装资源。三种下载入口按需区分：
-
-- **演示视频**：在 [v2.28.0 Release](https://github.com/zjs105910/workbuddy-market/releases/tag/v2.28.0)（或最新一个 `WorkBuddy Market vX.Y.Z` 条目）下载 `workbuddy-market-demo.mp4`（约 80 秒）与 `workbuddy-market-demo.zh-CN.srt` 中文字幕，随正式版发布，无 30 天过期限制；
-- **完整市场本体**：对应版本的 `WorkBuddy Market vX.Y.Z` Release 条目（wheel / sdist / 源码 zip），或直接 `pipx install workbuddy-market`；
-- **精选市场 zip**（只装技能）：见上文「零安装直连市场」一节，由固定的 `marketplace` Release 每日重建。
-
-> 注意：`registry-artifacts-*` 是每日生成的社区插件产物 Release（已标记为 Pre-release），**不是**市场本体安装包。下载市场本体时认准标题为 `WorkBuddy Market vX.Y.Z` 的条目。
-
-- [可复现演示：录制方法、中文字幕与隐私边界](docs/demo-video.md)
-- [正式 Release 发布流程](docs/release-process.md)
 
 ## 安装前请知道
 

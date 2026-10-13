@@ -92,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg espeak-ng fonts-noto-cjk
-          python -m pip install --upgrade pip build pytest playwright
+          python -m pip install --upgrade pip build pytest playwright pillow
           python -m playwright install --with-deps chromium
 
       - name: Build Python distribution
@@ -110,6 +110,15 @@ jobs:
             --output dist/workbuddy-market-demo.mp4 \
             --subtitles dist/workbuddy-market-demo.zh-CN.srt \
             --manifest dist/demo-manifest.json
+
+      - name: Polish landscape and render vertical social cut
+        run: |
+          python scripts/package_demo_video.py \
+            --input dist/workbuddy-market-demo.mp4 \
+            --subtitles dist/workbuddy-market-demo.zh-CN.srt \
+            --manifest dist/demo-manifest.json \
+            --output dist/workbuddy-market-demo.mp4 \
+            --vertical-output dist/workbuddy-market-demo-vertical.mp4
 
       - name: Extract version-specific release notes
         env:
@@ -143,7 +152,7 @@ jobs:
       - name: Generate SHA-256 checksums
         run: |
           cd dist
-          sha256sum *.whl *.tar.gz install.cmd workbuddy-market-demo.mp4 workbuddy-market-demo.zh-CN.srt demo-manifest.json > SHA256SUMS.txt
+          sha256sum *.whl *.tar.gz install.cmd workbuddy-market-demo.mp4 workbuddy-market-demo-vertical.mp4 workbuddy-market-demo.zh-CN.srt demo-manifest.json > SHA256SUMS.txt
 
       - name: Publish versioned GitHub Release
         env:
@@ -155,6 +164,7 @@ jobs:
             dist/*.tar.gz
             dist/install.cmd
             dist/workbuddy-market-demo.mp4
+            dist/workbuddy-market-demo-vertical.mp4
             dist/workbuddy-market-demo.zh-CN.srt
             dist/demo-manifest.json
             dist/SHA256SUMS.txt
