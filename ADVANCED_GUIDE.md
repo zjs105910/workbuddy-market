@@ -87,8 +87,8 @@ WorkBuddy 宿主集成已验证**：
 | 平台 | CI 覆盖 | 实际验证 | 说明 |
 |---|---|---|---|
 | Windows 10/11 | 语法/隐私/契约 + **selftest 硬门槛** + wheel 构建 + 浏览器冒烟（本地） | ✅ 日常使用环境；WorkBuddy 5.7.6 面板实测（见 docs/WorkBuddy-5.7.6-面板实测.md） | 主战场，最可靠 |
-| Linux (Ubuntu) | 语法/隐私/契约 + POSIX 语义冒烟 + pytest + wheel 构建 + **ui-smoke 浏览器门禁** | ⚠️ 仅 CI runner 实测 | 未在真实 WorkBuddy 宿主集成验证 |
-| macOS | 语法/隐私/契约 + POSIX 语义冒烟 + pytest（v2.18 起槽位） | ❌ 未验证 | 真实 fcntl/symlink 语义从未人工跑过 |
+| Linux (Ubuntu) | 语法/隐私/契约 + POSIX 语义冒烟 + pytest + wheel 构建 + **ui-smoke 浏览器门禁** + **selftest 硬门槛**（v2.34 起） | ⚠️ 仅 CI runner 实测 | 未在真实 WorkBuddy 宿主集成验证 |
+| macOS | 语法/隐私/契约 + POSIX 语义冒烟 + pytest + **selftest 硬门槛**（v2.34 起） | ❌ 未验证 | 真实 fcntl/symlink 语义由 CI 每次实跑，从未人工跑过 |
 
 ### 参与
 

@@ -3,6 +3,8 @@
 **简体中文** · [English](README_EN.md)
 
 [![CI](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/workbuddy-market.svg)](https://pypi.org/project/workbuddy-market/)
+[![Downloads](https://img.shields.io/pypi/dm/workbuddy-market.svg)](https://pypi.org/project/workbuddy-market/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -193,8 +195,8 @@ cd workbuddy-market
 | 平台 | 当前状态 |
 | --- | --- |
 | Windows 10/11 | 主要使用与验证环境；仓库文档记录了 WorkBuddy 5.7.6 面板实测 |
-| Linux | 有 CI 与部分自动化检查；尚未验证真实 WorkBuddy 宿主集成 |
-| macOS | 尚未验证 |
+| Linux | CI 三平台硬门槛：完整隔离 selftest（789 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
+| macOS | CI 三平台硬门槛：完整隔离 selftest（789 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
 
 ## 文档与社区
 

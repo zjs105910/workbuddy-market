@@ -221,7 +221,9 @@ def core_flow() -> None:
                   for i in range(200_000)) + "\n", encoding="utf-8")
     t_start = time.time()
     core.tail_log(10)
-    ck("20 万行日志 tail 仍然很快", time.time() - t_start < 0.5, f"{time.time() - t_start:.3f}s")
+    # 2s 是「没卡死」界，不是性能指标——真正的守卫是旁边 19J 的 I/O 计数
+    # （反向分块读，不整文件扫）。CI 共享 runner 冷缓存下 0.5s 会偶发误红。
+    ck("20 万行日志 tail 仍然很快", time.time() - t_start < 2.0, f"{time.time() - t_start:.3f}s")
 
     core.LOG_PATH.write_text("x" * (core.LOG_MAX_BYTES + 1024), encoding="utf-8")
     core.log("info", "rotate", "should trigger")

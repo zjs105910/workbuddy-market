@@ -15,8 +15,8 @@ classifiers = [
     "Environment :: Console",
     "Environment :: Web Environment",
     "Operating System :: Microsoft :: Windows",
-    # POSIX 的真实 WorkBuddy 宿主集成仍未验证。CI 覆盖 POSIX 语义冒烟与 pytest；
-    # 完整隔离 selftest 硬门槛暂只在 Windows 跑（平台状态见 README / ADVANCED_GUIDE）。
+    # POSIX 的真实 WorkBuddy 宿主集成仍未验证（CI 覆盖三平台完整隔离
+    # selftest + pytest + POSIX 语义冒烟；平台状态见 README / ADVANCED_GUIDE）。
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",

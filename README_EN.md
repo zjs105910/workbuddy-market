@@ -3,6 +3,8 @@
 [简体中文](README.md) · **English**
 
 [![CI](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zjs105910/workbuddy-market/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/workbuddy-market.svg)](https://pypi.org/project/workbuddy-market/)
+[![Downloads](https://img.shields.io/pypi/dm/workbuddy-market.svg)](https://pypi.org/project/workbuddy-market/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -194,8 +196,8 @@ Permission and compatibility details shown before installation:
 | Platform | Status |
 | --- | --- |
 | Windows 10/11 | Primary development and use environment; the repository documents a WorkBuddy 5.7.6 panel test |
-| Linux | CI and partial automated checks; real WorkBuddy host integration is not verified |
-| macOS | Not verified |
+| Linux | CI hard gate on all three platforms: full isolated selftest (789 checks) + pytest + POSIX semantic smoke + wheel build + ui-smoke; real WorkBuddy host integration not yet verified |
+| macOS | CI hard gate on all three platforms: full isolated selftest (789 checks) + pytest; real fcntl/symlink semantics exercised by CI; real WorkBuddy host integration not yet verified |
 
 ## Documentation and community
 

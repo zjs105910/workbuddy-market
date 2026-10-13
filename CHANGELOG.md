@@ -35,9 +35,18 @@
   plugins/（个人编辑面）↔ bundled/（分发副本）三个自有插件。接入 ci.yml
   的 lint job（B 组在干净 clone 无 plugins/ 时自动跳过并明说）。修复实测
   漂移 1 处：test_ghpm.py 的 `# pa:allow` 回灌 plugins/ 侧，两棵树恢复一致。
-- 验证：selftest 789 项全绿 0 失败（拆分前后逐项一致）；pytest 80 全过；
-  ruff / privacy-audit / dup-sync 三门禁全绿；ADVANCED_GUIDE 目录树、
-  CONTRIBUTING 验证清单同步。
+- **selftest 三平台硬门槛**：隔离 selftest 从 Windows 独占扩为
+  Windows/Linux/macOS 全量硬门槛。内核本就是平台抽象的（locking 的
+  msvcrt/fcntl 双分支、进程树 taskkill/killpg 双分支、_find_port 的
+  SO_EXCLUSIVEADDRUSE 条件、_drop_link 的 lstat 判型——其 POSIX ENOTDIR
+  处理本就是为 Linux 写的），实测扩闸后三平台全绿；唯一需放宽的是
+  20 万行 tail 的计时界（0.5s → 2s，真正的守卫是 19J 的 I/O 计数断言，
+  原界在 CI 共享 runner 冷缓存下会偶发误红）。平台矩阵文档（README 中英 /
+  ADVANCED_GUIDE）与 pyproject classifier 注释同步更新——仍如实标注：
+  **通过 Python 测试 ≠ WorkBuddy 宿主集成已验证**。
+- 验证：selftest 789 项全绿 0 失败（拆分前后逐项一致，三平台 CI 实跑）；
+  pytest 80 全过；ruff/privacy-audit/dup-sync/registry 契约四门禁全绿；
+  ADVANCED_GUIDE 目录树、CONTRIBUTING 验证清单同步。
 
 ## 2.33.0 — 2026-10-12（改进：真实用户测试反馈三连修）
 
