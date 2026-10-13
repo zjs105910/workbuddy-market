@@ -264,7 +264,13 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 789 项自检（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 789 项自检入口（默认隔离模式，不碰真实环境）
+├── selftest/                         ← 自检实现（v2.34 从单体拆包，逐字搬迁）：
+│   ├── __init__.py                   ←   共享基础设施（隔离环境/ck·sk·section/夹具/链接助手）
+│   ├── runner.py                     ←   main + run 编排（轮次调度顺序即契约）
+│   ├── core_flow.py                  ←   第 1-15 节（打包/安装/卸载/锁/日志/回收站/注册）
+│   ├── faults.py                     ←   第 16-18 节（故障注入/异常状态安全/扫描次数）
+│   └── roundNN.py                    ←   第 19 节起各评审轮次（模块名 = 轮次函数名）
 ├── market.config.example.json        ← 配置模板（入库）；首次启动自动初始化私有配置
 ├── market.config.json                ← 唯一数据源（本机私有，已 gitignore）
 ├── .codebuddy-plugin/marketplace.json ← 市场索引（自动生成，WorkBuddy 读它）
