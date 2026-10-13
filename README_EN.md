@@ -16,6 +16,17 @@
 - **Recover from mistakes**: transaction recovery and a trash area help protect managed Skills during updates and uninstalls.
 - **Keep local data local**: the web UI binds to `127.0.0.1`; personal market configuration and local Skill contents are not meant to be committed to this repository.
 
+## Demo and downloads
+
+Watch the reproducible product demo (about 80 seconds) before choosing an installation path. Formal releases ship the video, subtitles, manifest, Python packages, and SHA-256 checksum file together.
+
+- **Watch first**: [MP4 video](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.mp4) · [Chinese subtitles (SRT)](https://github.com/zjs105910/workbuddy-market/releases/latest/download/workbuddy-market-demo.zh-CN.srt)
+- **Install the full app**: [latest formal release](https://github.com/zjs105910/workbuddy-market/releases/latest) (Windows installer, wheel, sdist, and `SHA256SUMS.txt`); Windows users can also [download `install.cmd` directly](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd).
+- **Curated skills only**: see “Curated skills only (zip import)” below. This lightweight distribution does not include the full app's pre-install safety review or recoverable uninstall.
+- **Recording and release details**: [reproducible demo and privacy boundaries](docs/demo-video.md) · [formal Release process](docs/release-process.md)
+
+> `registry-artifacts-*` are daily community-plugin artifact pre-releases, not the marketplace app. Look for a formal release titled `WorkBuddy Market vX.Y.Z`; download `SHA256SUMS.txt` from that same page to verify assets.
+
 ## Quick start (Windows)
 
 ### Just one file? One-click installer (recommended) ✅
@@ -171,19 +182,6 @@ Permission and compatibility details shown before installation:
 ![Pre-install details](docs/screenshots/detail-four-questions.png)
 
 > Screenshots are captured with synthetic data. Available actions and results depend on your local environment and the source plugin.
-
-## Demo video and download entries
-
-Since v2.28.0, each formal Release ships the demo and install assets together. Three download entries, pick by need:
-
-- **Demo video**: from the [v2.28.0 release](https://github.com/zjs105910/workbuddy-market/releases/tag/v2.28.0) (or the newest `WorkBuddy Market vX.Y.Z` entry) download `workbuddy-market-demo.mp4` (about 80 seconds) and `workbuddy-market-demo.zh-CN.srt` (Chinese subtitles); published with the release, no 30-day expiry;
-- **Full marketplace app**: the `WorkBuddy Market vX.Y.Z` release entry for the version you want (wheel / sdist / source zip), or simply `pipx install workbuddy-market`;
-- **Curated marketplace zip** (skills only): see the zero-install section above, rebuilt daily under the fixed `marketplace` release.
-
-> Note: `registry-artifacts-*` releases are daily community plugin artifacts (marked as Pre-release), **not** the marketplace app itself. For the app, look for the entry titled `WorkBuddy Market vX.Y.Z`.
-
-- [Reproducible demo: recording steps, subtitles, and privacy boundaries](docs/demo-video.md)
-- [Formal Release process](docs/release-process.md)
 
 ## Safety notes
 
