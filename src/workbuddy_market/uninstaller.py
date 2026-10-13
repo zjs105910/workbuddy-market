@@ -28,7 +28,6 @@ classify_skill ↔ plugin_uninstall_plan ↔ uninstall_local_plugin 的
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 from .config import (CLASSIFY_PURPOSES, ConfigError, ensure_child, load_config,
                      needs_exact)

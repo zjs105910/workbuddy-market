@@ -42,10 +42,28 @@ workbuddy-market = "workbuddy_market.cli:main"
 [project.optional-dependencies]
 # 开发者测试框架（v3-roadmap P1：pytest 承担日常回归，selftest 保留为
 # 零依赖一键环境诊断）。`pip install -e .[dev]` 或 CI 里单装 pytest。
-dev = ["pytest>=8.0"]
+# ruff 与 CI lint job 同版本 pin（规则集在 [tool.ruff.lint]）。
+dev = ["pytest>=8.0", "ruff==0.17.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# 静态分析（CI 门禁）。target 与 requires-python 对齐。
+target-version = "py310"
+
+[tool.ruff.lint]
+# 只收「真实缺陷类」：E4/E7/E9（pycodestyle 错误子集：E402 模块级导入位置、
+# E722 裸 except、E702 分号语句、E741 单字母变量名）+ F（Pyflakes：F401 未用
+# 导入、F841 未用变量、F541 无占位符 f-string、未定义名）。
+# 刻意不收（原因写清，避免后来者「顺手扩大」）：
+#   · I（import 排序）——market_core 的再导出块按模块迁移史排序、函数内懒加载
+#     按用途分组，机械排序会破坏文档意图；
+#   · BLE001 / S / PL（宽 except、try-except-pass 等）——防御性宽捕获是本项目
+#     既定设计（文件系统工具面对任意用户态），需要豁免的点已就地 noqa 声明；
+#   · UP（pyupgrade）——显式 encoding="utf-8"、% 格式化等是本项目编码/输出
+#     纪律，不追时尚；真要收的那天按文件渐进，别一刀切。
+select = ["E4", "E7", "E9", "F"]
 
 [tool.setuptools.dynamic]
 version = { attr = "workbuddy_market.version.MARKET_VERSION" }

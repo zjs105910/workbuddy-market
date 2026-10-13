@@ -26,12 +26,15 @@ python -m pip install -e ".[dev]"
 提交前，请在项目根目录、与你的改动相符的环境里运行：
 
 ```bash
-python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
+python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py scripts/*.py
+python -m ruff check market_core.py market_server.py launcher.py selftest.py src/ scripts/ tests/
 python selftest.py
 python -m pytest tests/ -q
 python scripts/validate_registry.py registry/plugins.json
 python scripts/privacy-audit.py
 ```
+
+其中 ruff 规则集钉死在 `pyproject.toml` 的 `[tool.ruff.lint]`（未用导入/变量、未定义名、裸 except、分号语句等真实缺陷类），CI 同款门禁见 `.github/workflows/ci.yml` 的 `lint` job；未安装时可 `python -m pip install ruff==0.17.0` 或 `pip install -e ".[dev]"`。
 
 其中 `selftest.py` 默认使用隔离临时目录；`--real` 是面向现有环境的只读检查，不应在普通回归中替代隔离自检。
 

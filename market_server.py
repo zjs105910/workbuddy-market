@@ -869,14 +869,14 @@ def _catalog_refresh_job():
             for repo, err in (rep["catalog"].get("errors") or {}).items():
                 _job_push(jid, f"! {repo}: {err}")
             # v2.11：目录顺手把社区注册表也刷了（同一个「联网取新数据」动作）
-            reg_ok, reg_note = True, ""
+            reg_note = ""
             try:
                 reg = core.get_registry(force=True)
                 reg_note = (f"社区注册表 {len(reg['plugins'])} 条 · 来源 {reg['source']}")
                 _job_push(jid, reg_note)
                 invalidate_registry_mem()
             except Exception as exc:  # noqa: BLE001 —— 注册表挂了不算目录刷新失败
-                reg_ok, reg_note = False, ""
+                reg_note = ""
                 _job_push(jid, f"! 社区注册表刷新失败：{exc}")
             ok = rep["failed"] == 0
             _job_finish(jid, ok, ("完成" if ok else "部分失败") + " · GitHub 目录")
@@ -1372,7 +1372,7 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
     url = f"http://{HOST}:{port}/"
     core.log("info", "serve", f"市场服务已启动 {url}")
     print(f"  市场已启动： {url}", flush=True)
-    print(f"  口令已注入页面（第三方网页无法调用本机 API）", flush=True)
+    print("  口令已注入页面（第三方网页无法调用本机 API）", flush=True)
     print("  按 Ctrl+C 停止\n", flush=True)
     if open_browser:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()

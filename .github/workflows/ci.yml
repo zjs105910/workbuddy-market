@@ -43,6 +43,23 @@ jobs:
         if: runner.os == 'Windows'
         run: python selftest.py
 
+  # 静态分析（v2.34 接入）：ruff 只查真实缺陷类（未用导入/变量、未定义名、
+  # 裸 except、分号语句、单字母变量名）。规则集钉死在 pyproject.toml
+  # [tool.ruff.lint]，不随 ruff 版本默认集漂移。独立 job 不进跨平台矩阵——
+  # 一次运行覆盖全仓库，版本 pin 死（升级时手动换号并同步此注释）。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Install ruff (pinned)
+        run: python -m pip install ruff==0.17.0
+      # 路径与 py_compile 同口径：bundled/ plugins/ 是技能内容，不进门禁
+      - name: Ruff check
+        run: python -m ruff check market_core.py market_server.py launcher.py selftest.py src/ scripts/ tests/
+
   # 打包链路（评审 10）：源码跑得通 ≠ wheel 装得上。构建 wheel → 安装 →
   # CLI smoke（doctor --help 必须退出 0），把「pip 装完就坏」挡在 CI 里。
   package:

@@ -21,7 +21,6 @@ cheap 指纹只影响性能语义，安全语义必须读内容（约定 2）。
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from .errors import ConfigError
 from .fsutil import atomic_write_text, read_json

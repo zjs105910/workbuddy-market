@@ -19,7 +19,6 @@ Ubuntu 槽位此前只做 py_compile + 隐私审计。本脚本把「POSIX 分�
 from __future__ import annotations
 
 import os
-import stat
 import sys
 import tempfile
 import zipfile
@@ -51,7 +50,6 @@ def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import market_core as core
     import workbuddy_market as wm
-    import workbuddy_market.artifact as ar
     import workbuddy_market.errors as werr
 
     # --- 1. fcntl 文件锁：**跨进程**独占 + 同线程重入

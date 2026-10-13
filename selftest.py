@@ -1675,7 +1675,7 @@ def round4():
     old_hash = core.load_ownership()["skills"]["alpha"]["hash"]
     wm.ownership.save_ownership = lambda _o: (_ for _ in ()).throw(OSError("模拟写失败"))
     try:
-        r_up = core.install_local_plugin("bundle-one", "update")
+        core.install_local_plugin("bundle-one", "update")
     finally:
         wm.ownership.save_ownership = real_save_own
     ck("★ 更新后本地内容已等于市场版本",
@@ -3354,7 +3354,7 @@ def round7():
     ck("★ ★ ghpm 失败事件（无 error 字段）不再抛 NameError",
        name_error is None and ok is False, str(name_error))
     ck("★ ★ 任务行里有可读的失败原因（兜底文案）",
-       any("✗" in l and "ghpm 执行失败" in l for l in lines7), str(lines7))
+       any("✗" in ln and "ghpm 执行失败" in ln for ln in lines7), str(lines7))
     srv7._job_finish(jid, ok, "失败")
     with srv7._jobs_lock:
         st = srv7._jobs[jid]["status"]
@@ -3369,7 +3369,7 @@ def round7():
     ok = srv7._run_ghpm(["add", "owner/repo"], jid)
     with srv7._jobs_lock:
         lines7 = list(srv7._jobs[jid]["lines"])
-    ck("★ ★ 优先展示 ghpm 给出的 error 原文", ok is False and any("✗ boom" in l for l in lines7),
+    ck("★ ★ 优先展示 ghpm 给出的 error 原文", ok is False and any("✗ boom" in ln for ln in lines7),
        str(lines7))
 
     # --- 22C. 取消发生在 Popen 之前：不该白白拉起进程
@@ -3382,7 +3382,7 @@ def round7():
     with srv7._jobs_lock:
         lines7 = list(srv7._jobs[jid]["lines"])
     ck("★ ★ Popen 之前已取消 → 直接返回，不启动子进程",
-       ok is False and not any(l.startswith("$ ") for l in lines7)
+       ok is False and not any(ln.startswith("$ ") for ln in lines7)
        and time.time() - t0 < 5, str(lines7))
 
     # --- 22D. 取消发生在运行中：整棵进程树真的被终止
@@ -3474,8 +3474,10 @@ def round8():
                               capture_output=True, text=True, timeout=60)
 
     # --- 23A. WBM_* 新变量：默认分桶 ~/.workbuddy-market/markets/<bucket>/
-    m8a = _TMP / "r1a" / "market"; wb8a = _TMP / "r1a" / "wb"
-    m8a.mkdir(parents=True); wb8a.mkdir(parents=True)
+    m8a = _TMP / "r1a" / "market"
+    wb8a = _TMP / "r1a" / "wb"
+    m8a.mkdir(parents=True)
+    wb8a.mkdir(parents=True)
     p = _run({"WBM_MARKET_ROOT": str(m8a), "WBM_HOME": str(wb8a)}, _CODE_PATHS)
     ck("23A 子进程正常退出", p.returncode == 0, p.stderr[-300:])
     if p.returncode != 0:
@@ -3498,8 +3500,10 @@ def round8():
     ck("纯新变量不打 deprecation 告警", "deprecated" not in p.stderr, p.stderr[-200:])
 
     # --- 23B. 显式 WBM_STATE_HOME：直接使用，不分桶
-    m8b = _TMP / "r1b" / "market"; s8b = _TMP / "r1b" / "state"
-    m8b.mkdir(parents=True); s8b.mkdir(parents=True)
+    m8b = _TMP / "r1b" / "market"
+    s8b = _TMP / "r1b" / "state"
+    m8b.mkdir(parents=True)
+    s8b.mkdir(parents=True)
     p = _run({"WBM_MARKET_ROOT": str(m8b), "WBM_STATE_HOME": str(s8b)}, _CODE_PATHS)
     ck("23B 子进程正常退出", p.returncode == 0, p.stderr[-300:])
     if p.returncode == 0:
@@ -3508,8 +3512,10 @@ def round8():
            Path(d["STATE_HOME"]) == s8b.resolve(), d["STATE_HOME"])
 
     # --- 23C. 旧变量：完全复刻 v2.6 布局（legacy 模式）
-    m8c = _TMP / "r1c" / "market"; wb8c = _TMP / "r1c" / "wb"
-    m8c.mkdir(parents=True); wb8c.mkdir(parents=True)
+    m8c = _TMP / "r1c" / "market"
+    wb8c = _TMP / "r1c" / "wb"
+    m8c.mkdir(parents=True)
+    wb8c.mkdir(parents=True)
     p = _run({"GHPM_MARKET_ROOT": str(m8c), "GHPM_HOME": str(wb8c)}, _CODE_PATHS)
     ck("23C 子进程正常退出", p.returncode == 0, p.stderr[-300:])
     if p.returncode == 0:
@@ -3524,9 +3530,12 @@ def round8():
         ck("旧变量打 deprecation 告警", "deprecated" in p.stderr, p.stderr[-200:])
 
     # --- 23D. 新旧混用：新名优先，旧名照常兼容
-    m8d = _TMP / "r1d" / "market"; s8d = _TMP / "r1d" / "state"
+    m8d = _TMP / "r1d" / "market"
+    s8d = _TMP / "r1d" / "state"
     wb8d = _TMP / "r1d" / "wb"
-    m8d.mkdir(parents=True); s8d.mkdir(parents=True); wb8d.mkdir(parents=True)
+    m8d.mkdir(parents=True)
+    s8d.mkdir(parents=True)
+    wb8d.mkdir(parents=True)
     p = _run({"WBM_MARKET_ROOT": str(m8d),
               "GHPM_MARKET_ROOT": str(_TMP / "r1d" / "ignored"),
               "WBM_STATE_HOME": str(s8d), "GHPM_HOME": str(wb8d)}, _CODE_PATHS)
@@ -3541,7 +3550,8 @@ def round8():
         ck("新旧混用也打 deprecation 告警", "deprecated" in p.stderr, p.stderr[-200:])
 
     # --- 23E. 迁移正向：6 类运行时文件搬进 STATE_HOME，锁不迁移
-    m8e = _TMP / "r1e" / "market"; s8e = _TMP / "r1e" / "state"
+    m8e = _TMP / "r1e" / "market"
+    s8e = _TMP / "r1e" / "state"
     m8e.mkdir(parents=True)
     (m8e / ".market-state.json").write_text('{"a":1}', encoding="utf-8")
     (m8e / ".ownership.json").write_text('{"plugins":{}}', encoding="utf-8")
@@ -3573,8 +3583,10 @@ def round8():
         ck("锁文件按设计不迁移（留在原地）", (m8e / ".market.lock").exists())
 
     # --- 23F. 目标已存在：以 STATE_HOME 为准，仓库侧原件保留（绝不删用户文件）
-    m8f = _TMP / "r1f" / "market"; s8f = _TMP / "r1f" / "state"
-    m8f.mkdir(parents=True); s8f.mkdir(parents=True)
+    m8f = _TMP / "r1f" / "market"
+    s8f = _TMP / "r1f" / "state"
+    m8f.mkdir(parents=True)
+    s8f.mkdir(parents=True)
     (m8f / ".market-state.json").write_text('{"old":1}', encoding="utf-8")
     (s8f / "state.json").write_text('{"new":1}', encoding="utf-8")
     p = _run({"WBM_MARKET_ROOT": str(m8f), "WBM_STATE_HOME": str(s8f)}, _CODE_MIGRATE)
@@ -3589,7 +3601,8 @@ def round8():
            (m8f / ".market-state.json").read_text(encoding="utf-8") == '{"old":1}')
 
     # --- 23G. 跨卷回退：os.replace 抛 EXDEV → shutil.move 兜底完成迁移
-    m8g = _TMP / "r1g" / "market"; s8g = _TMP / "r1g" / "state"
+    m8g = _TMP / "r1g" / "market"
+    s8g = _TMP / "r1g" / "state"
     m8g.mkdir(parents=True)
     (m8g / ".market-state.json").write_text('{"x":1}', encoding="utf-8")
     (m8g / ".market-tx").mkdir()
@@ -3841,8 +3854,10 @@ def round10():
 
     # --- 25D. 功能冒烟：scanner / sync（临时树上的增量同步闭环）
     d = _TMP / "r3d"
-    src = d / "src"; dst = d / "dst"
-    src.mkdir(parents=True); dst.mkdir(parents=True)
+    src = d / "src"
+    dst = d / "dst"
+    src.mkdir(parents=True)
+    dst.mkdir(parents=True)
     (src / "a.txt").write_text("A", encoding="utf-8")
     (src / "sub").mkdir()
     (src / "sub" / "b.txt").write_text("B", encoding="utf-8")
@@ -5436,9 +5451,7 @@ def round17():
        and (out_dir / r["asset"]).is_file()
        and _re17.fullmatch(r"\d{4}\.\d{2}\.\d{2}\.a{7}", r["version"])
        and r["asset"] == f"owner-repo-{r['version']}.zip", str(r)[:120])
-    v = pk2.verify_package(out_dir / r["asset"]) if False else None
     # zip 内容可直接被安装端校验：解包 → verify
-    import zipfile as _zf
     px = lab / "unpack-check"
     core.unpack_zip(out_dir / r["asset"], px)
     vv = pk2.verify_package(px / "pkg") if (px / "pkg").is_dir() else None

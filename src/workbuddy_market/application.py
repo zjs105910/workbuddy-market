@@ -42,11 +42,11 @@ from .version import STATE_VERSION, MARKET_VERSION
 from .config import load_config, validate_config, validate_id, ensure_child
 from .scanner import _make_excluder, _sub_index, parse_skill_meta
 from .sync import _sync_tree
-from .trash import (move_to_trash, prune_trash, TRASH_INDEX_PATH,
+from .trash import (move_to_trash, TRASH_INDEX_PATH,
                     _load_trash_index, _trash_entry)
 from .ownership import load_ownership
 from .transactions import tx_list
-from .adapters.workbuddy import register, unregister, known_health
+from .adapters.workbuddy import known_health
 
 
 def sync_packaging(quiet: bool = False) -> dict:

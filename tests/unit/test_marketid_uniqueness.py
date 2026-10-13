@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import hashlib
 
-import pytest
 
 from workbuddy_market.adapters.workbuddy import check_market_id_conflict
-from workbuddy_market.config import ConfigError
 from workbuddy_market.onboard import unique_market_id
 
 

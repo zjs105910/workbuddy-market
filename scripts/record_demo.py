@@ -348,7 +348,7 @@ def main() -> int:
             voice_seconds.append(synthesize(scene["narration"], wav_path, voice_bin))
             voice_files.append(wav_path)
 
-        events, errors, video_ref = [], [], None
+        events, errors = [], []
         recording_started = time.monotonic()
         try:
             with sync_playwright() as playwright:
@@ -358,7 +358,6 @@ def main() -> int:
                     record_video_dir=str(raw_dir),
                     record_video_size={"width": WIDTH, "height": HEIGHT})
                 page = context.new_page()
-                video_ref = page.video
                 page.on("pageerror", lambda error: errors.append(str(error)))
 
                 def narrate(index: int) -> None:

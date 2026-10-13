@@ -371,7 +371,7 @@ def main():
             cfg_path.write_text(json.dumps(empty_cfg, ensure_ascii=False),
                                 encoding="utf-8")
             pg2 = browser.new_page()
-            errs2, toasts2 = [], []
+            errs2 = []
             pg2.on("pageerror", lambda e: errs2.append(str(e)))
             pg2.goto(base, wait_until="domcontentloaded")
             try:
