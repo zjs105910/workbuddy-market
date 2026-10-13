@@ -84,3 +84,35 @@ class TestEmailUnchanged:
         # git@github.com 放行不得搭车放行真实个人地址（审计夹具）
         assert _kinds("git@my-github.com") == ["E-MAIL"]  # pa:allow
         assert _kinds("someone@gitee.com") == ["E-MAIL"]  # pa:allow
+
+
+class TestPhoneInsideHexDigest:
+    """PHONE 命中完整嵌在 ≥32 位十六进制摘要串内不算手机号（2026-10-13 实锤）。
+
+    PR #8 CI：registry/plugins.json 的 manifestHash（SHA-256）中段的连续
+    11 位数字被 PHONE 命中——数字界只看数字，摘要两侧的 a-f 字母拦不住。
+    修复：命中落在 ≥32 位 hex 长串内按摘要处理。
+    """
+
+    def test_sha256_manifest_hash_not_flagged(self):
+        # PR #8 CI 实锤的那一行（公开仓库里的注册表哈希，非隐私数据）
+        line = ('      "manifestHash": '
+                '"6c14201605144a53ec773f0513f2563504ea42ea0f696cacc7f29e3d3456ddb9",')
+        assert _kinds(line) == []
+
+    def test_md5_digest_with_phone_run_not_flagged(self):
+        # 32+ 位 hex 长串中段夹着 11 位连续数字，同样按摘要放行
+        assert _kinds("deadbeefdeadbeef13812345678cafebabecafebabe") == []
+
+    def test_short_hex_prefix_still_flagged(self):
+        # 豁免只针对 ≥32 位长串：短 hex 前缀（cafe，4 位）夹不住真手机号
+        assert _kinds("cafe13812345678") == ["PHONE"]  # pa:allow
+
+    def test_plain_phone_still_flagged(self):
+        # 常规上下文里的手机号照常报红（审计夹具：占位号段）
+        assert _kinds("联系电话 13812345678") == ["PHONE"]  # pa:allow
+
+    def test_timestamp_boundary_unchanged(self):
+        # 原有数字界行为不得被本次改动放松：10/13 位时间戳仍放行
+        assert _kinds("epoch 1791857799 end") == []
+        assert _kinds("ms 1791857799123 end") == []

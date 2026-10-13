@@ -85,7 +85,11 @@ jobs:
           git checkout -B "$BR"
           git add registry/plugins.json
           git commit -m "registry: artifact fields $(date -u +%F) ($RELEASE_TAG)"
-          git push -f origin "$BR"
+          # PAT push（2026-10-13 修复，与 registry.yml 同一批）：checkout 默认给 push
+          # 挂 GITHUB_TOKEN 凭据，GITHUB_TOKEN 推的分支更新同样拿不到 CI（PR #7
+          # 更新后 action_required 实锤）——push 必须和建 PR 同一 PAT 身份。
+          # 用 -c 一次性覆盖 checkout 持久化的 extraheader：token 不进 URL、不落配置。
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push -f origin "$BR"
           gh pr create --base main --head "$BR" \
             --title "$TITLE" \
             --body "回写每日构建的不可变产物字段（packageUrl / packageHash / manifestHash）。安装端会按 packageHash 逐包校验；合并前等 CI 通过。" \

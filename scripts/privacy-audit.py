@@ -14,7 +14,9 @@ CI（.github/workflows/ci.yml）每次 push / PR 自动跑一遍；本地发布�
 ------
 E-MAIL            邮箱。放行 @users.noreply.github.com 与 example.com 等占位域。
 PHONE             大陆手机号（1[3-9] + 9 位）。带前后数字界：10 位 epoch 秒不够长、
-                  13 位毫秒时间戳被 (?!\\d) 挡住，都不会误报。
+                  13 位毫秒时间戳被 (?!\\d) 挡住；命中完整嵌在 ≥32 位十六进制
+                  摘要串（MD5 / SHA-256）内也不算——2026-10-13 manifestHash
+                  中段的连续 11 位数字被误报（PR #8 CI 实锤）。
 PRIVATE-KEY       -----BEGIN ... PRIVATE KEY-----。
 CREDENTIAL        ghp_ / github_pat_ / AKIA / sk- / xox... 等已知凭据前缀。
 SECRET-KV         api_key|secret|token|password|authorization : <20+ 位疑似随机串>
@@ -63,6 +65,11 @@ _EMAIL_ALLOW_DOMAINS = {
 }
 
 _PHONE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+# ≥32 位的十六进制长串 = MD5 / SHA-256 等摘要（SHA-256 全长 64）。
+# 摘要中段的连续 11 位数字会被 PHONE 误报（数字界只看数字，摘要两侧的
+# a-f 字母拦不住）；命中完整落在摘要串内时按哈希处理。阈值 32 够紧：
+# 真手机号被 hex 字母前后夹住时（如 cafe 前缀 + 11 位号段，15 位）仍照常报红。pa:allow
+_HEX_DIGEST = re.compile(r"[0-9a-fA-F]{32,}")
 
 _PRIVATE_KEY = re.compile(
     r"-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----"
@@ -130,6 +137,12 @@ def _kv_allowed(value: str) -> bool:
     return any(c.isdigit() for c in value) and any(c.isalpha() for c in value)
 
 
+def _phone_inside_digest(line: str, start: int, end: int) -> bool:
+    """PHONE 命中是否完整嵌在一段 ≥32 位的十六进制摘要串内部。"""
+    return any(m.start() <= start and m.end() >= end
+               for m in _HEX_DIGEST.finditer(line))
+
+
 def scan_text(text: str, label: str, findings: list, skipped: list) -> None:
     for lineno, line in enumerate(text.splitlines(), 1):
         if ALLOW_MARKER in line:
@@ -139,6 +152,8 @@ def scan_text(text: str, label: str, findings: list, skipped: list) -> None:
             if not _email_allowed(m.group(0)):
                 findings.append((label, lineno, "E-MAIL", m.group(0)))
         for m in _PHONE.finditer(line):
+            if _phone_inside_digest(line, m.start(), m.end()):
+                continue  # SHA-256 / MD5 摘要中段的数字串，不是手机号
             findings.append((label, lineno, "PHONE", m.group(0)))
         for m in _PRIVATE_KEY.finditer(line):
             findings.append((label, lineno, "PRIVATE-KEY", m.group(0)))
