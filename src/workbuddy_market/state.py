@@ -179,6 +179,13 @@ def build_state(purpose: str = "ui") -> dict:
     local_names = {p["name"] for p in cfg.get("localPlugins", [])}
     local_declared = {s for p in cfg.get("localPlugins", []) for s in p.get("skills", [])}
     owned_names = set(own["skills"])          # 任何所有权记录 = 已有归属，不重复占版面
+    # v2.35 用户实测六报：社区安装卡片此前一律用仓库 id 当名字
+    # （anthropics/skills、obra/superpowers），而探索/精选页用的是收录源的
+    # 中文展示名（「Anthropic 官方技能集」「Superpowers 工程方法论」）——
+    # 用户在社区安装里按探索页看到的名字找，找不到（「这两个找不到」）。
+    # 显示名按 收录源 displayName → ghpm 记录名 → 仓库 id 兜底解析。
+    remote_display = {r.get("repo"): (r.get("displayName") or "")
+                      for r in cfg.get("remoteSources", [])}
     groups: dict = {}
     for sname, rec in own["skills"].items():
         plug = str(rec.get("plugin") or "")
@@ -232,11 +239,15 @@ def build_state(purpose: str = "ui") -> dict:
     for plug, g in sorted(groups.items()):
         want = sorted(g["skills"])
         have = [s for s in want if s in skills_here]
+        display = (remote_display.get(plug)
+                   or (repos.get(plug, {}) or {}).get("name")
+                   or plug)
         base = {
             "id": plug,
             "kind": "community",
-            "name": plug,
+            "name": display,
             "rawName": plug,
+            "repo": plug,
             "category": "社区安装",
             "via": g.get("via", "artifact"),
             "description": "通过精选市场安装：不可变工件 + SHA-256 校验 + 事务安装，可经市场卸载",

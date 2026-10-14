@@ -161,13 +161,19 @@ function cardCommunity(p){
   }).join("");
   const hash = p.packageHash ? String(p.packageHash).slice(0,12) : "";
   const overlapN = (p.skillDetail||[]).filter(d => d.kind === "local").length;
+  // v2.35 用户实测六报：name 是收录源的中文展示名（探索/精选页同款），
+  // rawName 是仓库 id——两者都摆出来，跨页对得上。
+  const repoTag = (p.rawName && p.rawName !== p.name)
+    ? '<code style="font-size:11px">'+esc(p.rawName)+'</code>' : '';
   const meta = ghpm
-    ? '<span>ghpm 源码安装</span>'+
+    ? repoTag+
+      '<span>ghpm 源码安装</span>'+
       (p.shaShort ? '<code style="font-size:11px">sha '+esc(p.shaShort)+'</code>' : '')+
       (p.installedAt ? '<span>更新于 '+esc(String(p.installedAt).slice(0,16).replace("T"," "))+'</span>' : '')+
       '<span>'+p.skills.length+' skill</span>'+
       (overlapN ? '<span>其中 '+overlapN+' 个已收录为本机插件</span>' : '')
-    : '<span>社区安装</span>'+
+    : repoTag+
+      '<span>社区安装</span>'+
       (p.version ? '<span>工件 '+esc(p.version)+'</span>' : '')+
       (hash ? '<code style="font-size:11px">sha '+esc(hash)+'…</code>' : '')+
       '<span>'+p.skills.length+' skill</span>';
