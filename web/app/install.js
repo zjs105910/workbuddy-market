@@ -131,6 +131,15 @@ export async function handleDataAction(t){
           + '（与收录审核时固定的哈希比对，不符即整包拒绝），再进事务安装。'
           + '<b>卸载提示：</b>此来源的技能不由本市场的卸载管理（避免误删），'
           + '移除时请用命令 <code>ghpm remove 项目名</code>。';
+      } else if (regKnown){
+        // v2.35 NEXT_STEPS 任务5：收录在册但**没有固定产物**的条目（14 个
+        // pkg=N 条目）——安装前就把「为什么走 ghpm、代价是什么」说清，
+        // 与 artifact.install_from_entry 的 ConfigError 人话同口径
+        // （绝不静默降级，也绝不事后才说）。
+        routeNote = '此收录条目<b>没有固定产物</b>（缺 packageUrl + packageHash）→ '
+          + '走 <b>ghpm 源码路线</b>：联网下载<b>当前上游版本</b>，ghpm 自带事务与回滚，'
+          + '但<b>无法逐包 SHA-256 对账</b>（装的不一定是收录审核那一份）。'
+          + '<b>卸载提示：</b>移除时请用命令 <code>ghpm remove 项目名</code>。';
       }
       // 2026-10-14 用户实测 P0 修复：这里原是 const，随后 135/139 两行
       // `note +=`（ES Modules 恒为严格模式）直接抛

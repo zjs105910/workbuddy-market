@@ -5,7 +5,7 @@
 import { STATE, REG, cat, tab, setState, setCatalog, setReg, setCat, setTab, setFilter } from "./state.js";
 import { api } from "./api.js";
 import { $, esc, attr, mb, toast, confirmBox, infoBox, errorBox } from "./utils.js";
-import { renderCards } from "./plugins.js";
+import { renderCards, ghMore } from "./plugins.js";
 import { regUpdatable, showUpdateCenter } from "./update.js";
 import { regDetailHtml } from "./details.js";
 import { isFav } from "./favorites.js";
@@ -132,7 +132,7 @@ async function loadLog(){
 // v2.35 用户实测二修：data-rremove = 社区安装分区里 ghpm 链卡片的「移除…」
 // （走 /api/remote/remove → ghpm remove，市场不拥有这些技能的所有权）。
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter],[data-rremove]");
+  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter],[data-rremove],[data-ghmore]");
   if(!t) return;
 
   // v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
@@ -188,6 +188,12 @@ document.addEventListener("click", async (e) => {
     document.querySelectorAll("#filters .chip").forEach(c=>c.classList.toggle("on", c.dataset.f===t.dataset.f));
     renderCards(); return;
   }
+  if(t.dataset.ghmore){
+    // v2.35 任务5：GitHub 全网搜索「加载更多」（翻页追加）
+    await ghMore();
+    return;
+  }
+
   if(t.dataset.toggle){
     const el = $("#sk-"+t.dataset.toggle);
     const open = el.classList.toggle("open");

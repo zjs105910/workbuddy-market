@@ -43,6 +43,9 @@ GH_TIMEOUT = 10.0                   # 单次请求超时（秒）
 CATALOG_TTL = 24 * 3600.0           # 目录元数据的保鲜期（秒）
 SEARCH_LIMIT_DEFAULT = 8
 SEARCH_LIMIT_MAX = 20
+# v2.35 NEXT_STEPS 任务5：GitHub 搜索翻页。search API 最多可取前 1000 条
+# （page × per_page ≤ 1000），per_page 上限 20 → 页数上限 50。
+SEARCH_PAGE_MAX = 50
 MAX_QUERY = 200                     # 搜索词长度上限
 CATALOG_SCHEMA = 1
 
@@ -109,12 +112,23 @@ def fetch_meta(repo: str) -> dict:
     return normalize_repo_payload(_gh_request(f"/repos/{validate_repo(repo)}"))
 
 
-def search_repos(query: str, limit: int = SEARCH_LIMIT_DEFAULT) -> list:
-    """GitHub 全网搜索。只做展示与「一键安装」入口，安装仍走 ghpm 老路。"""
+def search_repos(query: str, limit: int = SEARCH_LIMIT_DEFAULT,
+                 page: int = 1) -> list:
+    """GitHub 全网搜索。只做展示与「一键安装」入口，安装仍走 ghpm 老路。
+
+    v2.35 NEXT_STEPS 任务5：page 翻页参数（前端「加载更多」按页追加）。
+    每页 per_page 上限仍 20（SEARCH_LIMIT_MAX 纪律不变）；页数上限
+    SEARCH_PAGE_MAX（GitHub 搜索 1000 条天花板 / 20）。坏值回退第 1 页，
+    绝不把异常页号透传给上游。
+    """
     q = validate_query(query)
     lim = max(1, min(int(limit), SEARCH_LIMIT_MAX))
+    try:
+        pg = max(1, min(int(page), SEARCH_PAGE_MAX))
+    except (TypeError, ValueError):
+        pg = 1
     data = _gh_request("/search/repositories",
-                       {"q": q, "per_page": lim, "order": "desc"})
+                       {"q": q, "per_page": lim, "page": pg, "order": "desc"})
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
         raise ConfigError("GitHub 搜索返回缺 items 数组。")
     out = []

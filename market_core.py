@@ -87,7 +87,8 @@ from workbuddy_market.scanner import (        # noqa: E402,F401
 from workbuddy_market.sync import _sync_tree  # noqa: E402,F401
 from workbuddy_market.catalog import (        # noqa: E402,F401  （v2.10 新增）
     GH_API, CATALOG_TTL, GH_TIMEOUT,
-    SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, MAX_QUERY, CATALOG_SCHEMA,
+    SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_PAGE_MAX,
+    MAX_QUERY, CATALOG_SCHEMA,
     _gh_request, normalize_repo_payload, validate_query,
     fetch_meta, search_repos, catalog_path,
     load_catalog, save_catalog, is_stale, refresh_catalog,

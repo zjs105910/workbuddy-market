@@ -160,6 +160,24 @@ def round11():
             ck("搜索拒绝空词", False)
         except core.ConfigError:
             ck("搜索拒绝空词", True)
+
+        # --- 26E-2. 搜索翻页（v2.35 NEXT_STEPS 任务5）：page 透传 /
+        #      坏值回退 / 上限截断（前端「加载更多」依赖）
+        calls.clear()
+        core.search_repos("skills", limit=20, page=3)
+        ck("★ 搜索翻页：page 透传上游（per_page 上限纪律不变）",
+           calls[-1][1].get("page") == 3 and calls[-1][1].get("per_page") == 20,
+           str(calls[-1][1]))
+        core.search_repos("skills", limit=20, page=0)
+        ck("搜索翻页：0 / 负页号回退第 1 页",
+           calls[-1][1].get("page") == 1)
+        core.search_repos("skills", limit=20, page=99999)
+        ck("搜索翻页：超上限截到 SEARCH_PAGE_MAX",
+           calls[-1][1].get("page") == core.SEARCH_PAGE_MAX,
+           str(core.SEARCH_PAGE_MAX))
+        core.search_repos("skills", limit=20, page="abc")
+        ck("搜索翻页：非数字页号回退第 1 页（不透传异常）",
+           calls[-1][1].get("page") == 1)
     finally:
         cat._gh_request = real_gh
         catlog.unlink(missing_ok=True)      # 给后面的用例留干净环境
@@ -205,7 +223,12 @@ def round11():
             ck("搜索接口返回条目（畸形条目被跳过）",
                st == 200 and js.get("ok") and len(js.get("items", [])) == 3,
                f"{st} {str(js)[:80]}")
-            srv._search_cache.update(at=0.0, q=None, items=None)   # 别把缓存漏进下一用例
+            # v2.35 任务5：page 参数端到端（「加载更多」翻页）
+            st, js = hit2("/api/gh/search?q=agent&page=2", headers=AUTHC)
+            ck("★ 搜索接口接受 page 翻页参数",
+               st == 200 and js.get("ok") and len(js.get("items", [])) == 3,
+               f"{st} {str(js)[:80]}")
+            srv._search_cache.update(at=0.0, key=None, items=None)   # 别把缓存漏进下一用例
 
             st, js = hit2("/api/catalog/refresh", {}, AUTHC)
             ck("POST /api/catalog/refresh 起任务", st == 200 and js.get("ok")
@@ -226,7 +249,7 @@ def round11():
                .get("stars") == 7)
         finally:
             cat._gh_request = real_gh
-            srv._search_cache.update(at=0.0, q=None, items=None)
+            srv._search_cache.update(at=0.0, key=None, items=None)
     finally:
         httpd2.shutdown()
         httpd2.server_close()

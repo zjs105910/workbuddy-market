@@ -21,8 +21,13 @@ function pass(p){
   return hay.includes(q);
 }
 
-/* ---------------- GitHub 全网搜索（v2.10） ---------------- */
-let GH = {q:null, items:null, state:"idle", error:""}, ghTimer = null;
+/* ---------------- GitHub 全网搜索（v2.10；v2.35 任务5 翻页） ---------------- */
+let GH = {q:null, items:null, state:"idle", error:"", page:1, loadingMore:false}, ghTimer = null;
+
+async function ghFetch(q, page){
+  const r = await api("/api/gh/search?q=" + encodeURIComponent(q) + "&limit=20&page=" + page);
+  return r.items || [];
+}
 
 function cardGh(r){
   const okLink = String(r.htmlUrl||"").indexOf("https://github.com/") === 0;
@@ -50,29 +55,52 @@ function cardGh(r){
 function ghEnsure(q){
   if(GH.q === q && (GH.state === "loading" || GH.state === "done")){ ghPaint(); return; }
   clearTimeout(ghTimer);
-  GH = {q, items:null, state:"pending", error:""};
+  GH = {q, items:null, state:"pending", error:"", page:1, loadingMore:false};
   ghPaint();
   ghTimer = setTimeout(async () => {
     GH.state = "loading"; ghPaint();
     try{
-      const r = await api("/api/gh/search?q=" + encodeURIComponent(GH.q) + "&limit=20");
-      if($("#q").value.trim() !== GH.q) return;   // 用户已改词，丢弃过期结果
-      GH.items = r.items || []; GH.state = "done";
+      const items = await ghFetch(q, 1);
+      if($("#q").value.trim() !== q) return;   // 用户已改词，丢弃过期结果
+      GH.items = items; GH.page = 1; GH.state = "done";
     }catch(err){ GH.error = err.message; GH.state = "error"; }
     ghPaint();
   }, 550);
 }
 
+/* 加载更多（v2.35 NEXT_STEPS 任务5）：按页追加 GitHub 搜索结果。
+   每页满 20 条才认为可能有下一页（不满就是最后一页）。 */
+export async function ghMore(){
+  if(GH.state !== "done" || GH.loadingMore) return;
+  GH.loadingMore = true; ghPaint();
+  try{
+    const items = await ghFetch(GH.q, GH.page + 1);
+    if($("#q").value.trim() !== GH.q){ GH.loadingMore = false; return; }   // 已改词
+    GH.items = (GH.items || []).concat(items);
+    GH.page += 1;
+  }catch(err){ GH.error = err.message; }
+  GH.loadingMore = false;
+  ghPaint();
+}
+
 function ghPaint(){
-  const box = $("#ghGrid"), st = $("#ghState");
+  const box = $("#ghGrid"), st = $("#ghState"), more = $("#ghMore");
   if(!box) return;
   if(GH.state === "pending"){ st.textContent = "即将搜索 GitHub…"; box.innerHTML = ""; return; }
   if(GH.state === "loading"){ st.textContent = "正在搜索 GitHub…"; box.innerHTML = ""; return; }
   if(GH.state === "error"){ st.textContent = "搜索失败：" + GH.error; box.innerHTML = ""; return; }
   st.textContent = GH.items.length
-    ? GH.items.length + " 个结果 · 确认来源后可一键安装"
+    ? GH.items.length + " 个结果 · 确认来源后可一键安装" + (GH.error ? "（加载更多失败："+GH.error+"）" : "")
     : "GitHub 上也没有匹配的仓库";
   box.innerHTML = GH.items.map(cardGh).join("");
+  if(more){
+    // 每页满 20 才有下一页；不满 = 最后一页，如实说「没有更多了」
+    const full = GH.items.length >= 20 * GH.page;
+    more.innerHTML = GH.items.length === 0 ? ""
+      : full ? '<button class="tiny" data-ghmore="1"'+(GH.loadingMore?' disabled':'')+'>'+
+                (GH.loadingMore ? '正在加载…' : '加载更多（第 '+(GH.page+1)+' 页）')+'</button>'
+            : '<span style="color:var(--faint);font-size:12px">— 没有更多了 —</span>';
+  }
 }
 
 /* ---------------- 卡片 ---------------- */
@@ -267,7 +295,10 @@ function cardRegistry(e){
   const hasPkg = !!(e.packageUrl && e.packageHash);
   const instLabel = hasPkg ? "安装固定产物" : "一键安装";
   const instTitle = hasPkg ? "下载后按收录时固定的 SHA-256 逐包校验，不符即拒绝"
-                           : "走 ghpm 源码安装（自带事务与回滚）";
+                           : "走 ghpm 源码安装（自带事务与回滚，无逐包哈希对账）";
+  // v2.35 任务5：收录在册但无固定产物的条目，卡片上先摆出来
+  // （14 个 pkg=N 条目）——别等用户点了安装才知道走的是源码路线。
+  const noPkgTag = hasPkg ? "" : '<span class="tag grey">无固定产物</span>';
   return '<div class="card">'+
     '<div class="card-head">'+
       '<div class="icon">'+iconOf(e.category)+'</div>'+
@@ -278,6 +309,7 @@ function cardRegistry(e){
           (e.license ? '<span>'+esc(e.license)+'</span>' : '')+
           (e.qualityScore ? '<span>质 '+e.qualityScore+'</span>' : '')+
           '<code style="font-size:11px">'+esc(e.repo)+'</code>'+
+          noPkgTag+
           (e.stars ? '<span>★ '+fmtNum(e.stars)+'</span>' : '')+
           (e.pushedAt ? '<span>更新于 '+esc(e.pushedAt)+'</span>' : '')+
         '</div></div>'+
@@ -390,7 +422,8 @@ export function renderCards(){
     // 本地（含收录源）零匹配且关键词够长 → 兜底全网搜索（结果一律未审核）
     if(!remote.length && q.length >= 2){
       h += '<div class="sec-title">GitHub 全网搜索 <span class="n" id="ghState"></span></div>'+
-           '<div class="grid" id="ghGrid"></div>';
+           '<div class="grid" id="ghGrid"></div>'+
+           '<div id="ghMore" style="text-align:center;margin:10px 0"></div>';
     }
   }
 

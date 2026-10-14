@@ -843,24 +843,29 @@ SEARCH_TTL = 120.0                 # GitHub 搜索的进程内缓存（秒）
 CATALOG_CHECK_INTERVAL = 15 * 60   # 自动刷新循环的检查间隔（秒）
 
 _search_lock = threading.Lock()
-_search_cache: dict = {"at": 0.0, "q": None, "items": None}
+_search_cache: dict = {"at": 0.0, "key": None, "items": None}
 
 
-def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT) -> list:
+def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT,
+              page: int = 1) -> list:
     """GitHub 搜索：TTL 缓存 + single-flight。
 
     未登录的 search API 限流是 10 次/分钟；前端 600ms 防抖 + 这里的
-    「同词 120 秒直返」足够把误触挡住。结果只进内存不落盘 —— 搜索是
+    「同词同页 120 秒直返」足够把误触挡住。结果只进内存不落盘 —— 搜索是
     「现在 GitHub 上有什么」的问题，落盘就变成目录了。
+
+    v2.35 NEXT_STEPS 任务5：page 翻页（前端「加载更多」）；缓存键带上
+    limit/page，同词不同页各算一份，不互相污染。
     """
+    key = (query, int(limit), int(page))
     with _search_lock:
-        if (_search_cache["items"] is not None and _search_cache["q"] == query
+        if (_search_cache["items"] is not None and _search_cache["key"] == key
                 and time.time() - _search_cache["at"] < SEARCH_TTL):
             return _search_cache["items"]
-    items = _flight.run(("ghsearch", query),
-                        lambda: core.search_repos(query, limit))
+    items = _flight.run(("ghsearch",) + key,
+                        lambda: core.search_repos(query, limit, page))
     with _search_lock:
-        _search_cache.update(at=time.time(), q=query, items=items)
+        _search_cache.update(at=time.time(), key=key, items=items)
     return items
 
 
@@ -1215,8 +1220,16 @@ class Handler(BaseHTTPRequestHandler):
                         limit = max(1, min(int(raw_lim), core.SEARCH_LIMIT_MAX))
                     except ValueError:
                         pass
+                # v2.35 任务5：可选 page 参数（「加载更多」翻页；坏值回退第 1 页）
+                raw_pg = (qs.get("page") or [""])[0]
+                page = 1
+                if raw_pg:
+                    try:
+                        page = max(1, min(int(raw_pg), core.SEARCH_PAGE_MAX))
+                    except ValueError:
+                        pass
                 try:
-                    items = gh_search(q, limit=limit)
+                    items = gh_search(q, limit=limit, page=page)
                 except core.ConfigError as exc:
                     return self._json({"ok": False, "error": str(exc)}, 400)
                 except Exception as exc:  # 网络 / 限流 / DNS 都算上游失败

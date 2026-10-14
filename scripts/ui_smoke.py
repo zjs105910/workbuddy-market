@@ -207,6 +207,54 @@ def main():
             page.wait_for_timeout(400)
             ck("清空搜索 → 卡片恢复", page.locator("#content .card").count() >= 1)
 
+            # ---- v2.35 NEXT_STEPS 任务5：GitHub 全网搜索「加载更多」翻页。
+            # 页面内桩掉 fetch（只拦 /api/gh/search，其余透传）——不依赖
+            # 真实 GitHub（匿名 API 限流 + 代理抖动会让这检查变flake）。
+            page.click("#tab-explore")
+            page.fill("#q", "zzz-不存在的词-zzz")   # 收录源零命中 → 触发全网搜索
+            page.evaluate("""
+(() => {
+  const real = window.fetch;
+  window.__realFetch = real;
+  window.fetch = (path, opt) => {
+    if (String(path).indexOf('/api/gh/search') === 0) {
+      const page = Number(new URLSearchParams(String(path).split('?')[1])
+                            .get('page') || 1);
+      const items = [];
+      for (let i = 0; i < 20; i++) {
+        items.push({repo: 'fake/repo-p' + page + '-' + i, description: 'stub',
+                    htmlUrl: 'https://github.com/fake/repo', stars: 1,
+                    pushedAt: '2026-10-01', language: 'Python', archived: false});
+      }
+      return Promise.resolve({ok: true, status: 200,
+        json: () => Promise.resolve({ok: true, items})});
+    }
+    return real(path, opt);
+  };
+})()
+""")
+            page.wait_for_timeout(1200)   # 防抖 550ms + 渲染
+            n1 = page.locator("#ghGrid .card").count()
+            more_n = page.locator("[data-ghmore]").count()
+            ck("★ 全网搜索渲染 + 满页出现「加载更多」（任务5）",
+               n1 == 20 and more_n == 1, f"cards={n1} more={more_n}")
+            if more_n:
+                page.locator("[data-ghmore]").click()
+                page.wait_for_timeout(800)
+                n2 = page.locator("#ghGrid .card").count()
+                ck("★ 「加载更多」翻页追加（20 → 40，任务5）",
+                   n2 == 40, f"cards={n2}")
+            # 恢复 fetch。**表达式不能返回 fetch 函数本身** —— Playwright 的
+            # evaluate 结果序列化会调用它（传 null），产生一个 fetch(null)
+            # → GET /null 404，污染「同源请求全通过」门禁（实锤：最小复现
+            # page.evaluate("window.fetch = window.fetch") 即触发）。
+            # void 掉，返回值 undefined，安全。
+            page.evaluate("void (window.fetch = window.__realFetch)")
+            page.fill("#q", "")
+            page.wait_for_timeout(400)
+            page.click("#tab-local")
+            page.wait_for_timeout(300)
+
             # ---- 分类切换（点「全部」以外第一枚 chip，再切回）
             chips = page.locator("#cats .chip")
             if chips.count() > 1:
