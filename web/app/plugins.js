@@ -349,15 +349,26 @@ export function renderCards(){
 
   if(tab === "explore"){
     // ---- 入口三：探索 GitHub（收录源 + 全网搜索，明确标注未审核来源）
-    let sub = remote.length+' 个 · 由 ghpm 下载安装，联网可用';
+    // v2.35 用户实测三修：已装的收录源「移到」本机技能页的社区安装分区统一
+    // 管理（探索页 = 发现新源，不再和已装卡片混在一起）；想回看已装的，
+    // 选「已装好」筛选即可在这里看到。更新入口不丢：更新中心与本机
+    // 社区安装卡片的「检查更新」都照常工作。
+    const showR = remote.filter(r => filter === "done" || !r.installed);
+    const moved = remote.length - showR.length;
+    let sub = showR.length+' 个 · 由 ghpm 下载安装，联网可用';
     if(CATALOG && CATALOG.refreshedAt){
       sub += ' · 目录数据 '+esc(String(CATALOG.refreshedAt).slice(0,16).replace("T"," "))+
              (CATALOG_STALE ? '（已过期）' : '')+'（每日自动刷新）';
     }
     sub += ' <button class="tiny" data-crefresh="1">刷新目录</button>';
     h += '<div class="sec-title">GitHub 收录源 <span class="n">'+sub+'</span></div>';
-    h += remote.length ? '<div class="grid">'+remote.map(cardRemote).join("")+'</div>'
-                       : '<div class="empty">没有符合条件的 GitHub 源</div>';
+    h += showR.length ? '<div class="grid">'+showR.map(cardRemote).join("")+'</div>'
+                      : '<div class="empty">没有符合条件的 GitHub 源</div>';
+    if(moved > 0 && filter !== "done"){
+      h += '<div class="empty">已装 '+moved+' 个收录源已移至「本机技能」页的社区安装分区统一管理 '+
+           '<button class="tiny" data-tab="local">前往本机技能页</button>'+
+           '<span style="margin-left:8px;color:var(--muted)">（选「已装好」筛选可在这里回看）</span></div>';
+    }
     // 本地（含收录源）零匹配且关键词够长 → 兜底全网搜索（结果一律未审核）
     if(!remote.length && q.length >= 2){
       h += '<div class="sec-title">GitHub 全网搜索 <span class="n" id="ghState"></span></div>'+

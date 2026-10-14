@@ -39,9 +39,20 @@ function render(){
   const updChip = updCount
     ? '<button class="metric metric-btn upd" data-updatecenter="1" title="点击打开更新中心，一键更新">可更新 <b>'+updCount+'</b></button>'
     : '<span class="metric">可更新 <b>0</b></span>';
+  // v2.35 用户实测三修：社区安装（精选市场工件链 / GitHub ghpm 链装进来的）
+  // 同样如实进顶部统计——「装了的插件能够如实反馈在上面的统计」。
+  // 本机收录与社区安装分开说清，数字来自 STATE.community（后端 build_state）。
+  const comm = STATE.community || [];
+  const commSkills = comm.reduce((a, p) => a + ((p.skills || []).length), 0);
+  const commInstalled = comm.reduce((a, p) => a + ((p.installedSkills || []).length), 0);
+  const commChip = comm.length
+    ? '<span class="metric">社区安装 <b>'+comm.length+'</b> 个 · 已装 <b>'+commInstalled+
+      '</b> / '+commSkills+' skill</span>'
+    : '';
   $("#metrics").innerHTML =
     '<span class="metric"><b>'+st.stats.localPlugins+'</b> 个本机插件</span>'+
     '<span class="metric">已装 <b>'+st.stats.installedLocalSkills+'</b> / '+st.stats.localSkills+' skill</span>'+
+    commChip +
     updChip + svc;
 
   // ---- 高级信息（v2.23 折叠区）：低频诊断字段一律收进来

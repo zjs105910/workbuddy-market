@@ -412,11 +412,15 @@ def main():
                 except Exception:  # noqa: BLE001 —— 弹窗已关就不必再关
                     pass
                 page.wait_for_timeout(300)
-                # 社区安装分区 + 卡片可见（修复前：装完哪里都看不到）
+                # 社区安装分区 + 卡片可见（修复前：装完哪里都看不到）。
+                # 断言口径 = 卡片真实渲染文案：工件链描述是「通过精选市场安装：
+                # 不可变工件 …」（state.py build_state）。此前写的是
+                # 「精选市场工件安装」——UI 里不存在这个字符串，断言恒假
+                # （下面对应的「卸载后消失」则恒真），属于测试自身缺陷。
                 page.click("#tab-local")
                 page.wait_for_timeout(600)
                 sec_seen = page.evaluate(
-                    "document.body.innerText.indexOf('精选市场工件安装') >= 0")
+                    "document.body.innerText.indexOf('通过精选市场安装') >= 0")
                 card_seen = page.locator(
                     '[data-uninstall="obra/superpowers"]').count() > 0
                 ck("★ 安装后「社区安装」分区与卡片可见（本机技能页）",
@@ -424,6 +428,25 @@ def main():
                 inv_seen = page.evaluate(
                     "document.body.innerText.indexOf('本机 WorkBuddy 技能一览') >= 0")
                 ck("★ 本机技能只读清单渲染（全部本机技能 + 来源标注）", bool(inv_seen))
+                # v2.35 用户实测三修回归：顶部统计如实纳入社区安装
+                # （去空白比对：innerText 可能带回不换行空格等不可见变体）
+                metric_txt = page.locator("#metrics").inner_text()
+                metric_norm = "".join(metric_txt.split())
+                ck("★ 顶部统计纳入社区安装（社区安装 N 个 · 已装 X/Y skill）",
+                   ("社区安装1个" in metric_norm) and ("15/15" in metric_norm),
+                   ascii(metric_txt)[:120])
+                # v2.35 用户实测三修回归：已装收录源移出探索页（提示 + 跳转）
+                page.click("#tab-explore")
+                page.wait_for_timeout(400)
+                exp_gone = page.locator(
+                    '[data-rupdate="obra/superpowers"]').count() == 0
+                hint_seen = page.evaluate(
+                    "document.body.innerText.indexOf('已移至「本机技能」页') >= 0")
+                ck("★ 探索页已装收录源移管（卡片消失 + 提示出现）",
+                   bool(exp_gone) and bool(hint_seen),
+                   f"卡片隐藏={exp_gone} 提示={hint_seen}")
+                page.click("#tab-local")
+                page.wait_for_timeout(300)
                 # 市场内卸载：确认弹窗列出将移除的 skill → 回收站。
                 # 卸载是同步 POST（响应回来即 toast），同样用「可见 + 关键词」
                 # 轮询，避开 toast 元素残留旧文本与 3.4s 自动隐藏的竞争。
@@ -456,8 +479,15 @@ def main():
                     page.click("#tab-local")
                     page.wait_for_timeout(500)
                     gone = page.evaluate(
-                        "document.body.innerText.indexOf('精选市场工件安装') < 0")
+                        "document.body.innerText.indexOf('通过精选市场安装') < 0")
                     ck("★ 卸载后社区分区消失（状态闭环）", bool(gone))
+                    # v2.35 用户实测三修回归：卸载后探索页恢复安装入口
+                    page.click("#tab-explore")
+                    page.wait_for_timeout(400)
+                    back = page.locator(
+                        '[data-radd="obra/superpowers"]').count() > 0
+                    ck("★ 卸载后探索页恢复「一键安装」入口（状态闭环）",
+                       bool(back))
                 else:
                     CI_GATE["skipped_core"].append("市场内卸载工件安装")
                     ck("★ 市场内卸载工件安装（社区卡片无卸载按钮）", False,
