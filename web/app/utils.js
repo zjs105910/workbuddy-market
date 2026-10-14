@@ -25,7 +25,8 @@ export function confirmBox(title, html, yesLabel){
     $("#cfmYes").textContent = yesLabel || "确定";
     $("#cfmNo").style.display = "";
     $("#cfm").classList.add("show");
-    const done = v => { $("#cfm").classList.remove("show"); resolve(v); };
+    _dialogFocusIn();
+    const done = v => { $("#cfm").classList.remove("show"); _dialogFocusBack(); resolve(v); };
     $("#cfmYes").onclick = () => done(true);
     $("#cfmNo").onclick = () => done(false);
     $("#cfm").onclick = e => { if(e.target.id === "cfm") done(false); };
@@ -40,11 +41,32 @@ export function infoBox(title, html){
     $("#cfmYes").textContent = "关闭";
     $("#cfmNo").style.display = "none";
     $("#cfm").classList.add("show");
-    const done = v => { $("#cfm").classList.remove("show"); $("#cfmNo").style.display = ""; resolve(v); };
+    _dialogFocusIn();
+    const done = v => {
+      $("#cfm").classList.remove("show"); $("#cfmNo").style.display = "";
+      _dialogFocusBack(); resolve(v);
+    };
     $("#cfmYes").onclick = () => done(true);
     $("#cfmNo").onclick = () => done(false);
     $("#cfm").onclick = e => { if(e.target.id === "cfm") done(false); };
   });
+}
+
+/* ---- v2.35 任务6：弹窗焦点管理（可访问性） ----
+   打开时把焦点移进弹窗（主按钮），关闭时归还给触发者；Tab 循环锁在
+   弹窗内，键盘用户不会被 Tab 出背板。三个弹窗入口（confirmBox /
+   infoBox / errorBox）共用这一对助手。 */
+let _lastFocus = null;
+function _dialogFocusIn(){
+  _lastFocus = document.activeElement;
+  const yes = $("#cfmYes");
+  if(yes && !yes.disabled) yes.focus();
+}
+function _dialogFocusBack(){
+  if(_lastFocus && typeof _lastFocus.focus === "function"){
+    try{ _lastFocus.focus(); }catch(e){ /* 触发者可能已被重渲染移除 */ }
+  }
+  _lastFocus = null;
 }
 
 /* ---- v2.24：结构化错误弹窗（四段式人话 + 重试/日志/诊断三按钮） ----
@@ -91,6 +113,7 @@ export function errorBox(title, err, retry){
     // 全部静默挂起：无弹窗、无 toast、无控制台错误，用户点完没反应。
     // v2.24 的结构化错误弹窗自此形同虚设，ui_smoke 也只断言了 toast 路径。
     $("#cfm").classList.add("show");
+    _dialogFocusIn();
     // 按钮排布：cfmNo = 次要动作区（重试 / 日志 / 诊断 塞进来），cfmYes = 关闭
     const noBtn = $("#cfmNo");
     noBtn.style.display = "";
@@ -105,6 +128,7 @@ export function errorBox(title, err, retry){
     const cleanup = () => {
       extra.remove();
       $("#cfm").classList.remove("show");
+      _dialogFocusBack();
     };
     $("#cfmYes").onclick = () => { cleanup(); resolve("close"); };
     noBtn.onclick = () => { cleanup(); resolve("close"); };
@@ -131,13 +155,23 @@ export function errorBox(title, err, retry){
   });
 }
 
-/* ---- v2.24：Escape 关弹窗（可访问性） ---- */
+/* ---- v2.24：Escape 关弹窗（可访问性）；v2.35 任务6：Tab 焦点锁 ---- */
 document.addEventListener("keydown", (e) => {
-  if(e.key !== "Escape") return;
   const box = document.getElementById("cfm");
-  if(box && box.classList.contains("show")){
+  if(!(box && box.classList.contains("show"))) return;
+  if(e.key === "Escape"){
     const no = document.getElementById("cfmNo");
     const yes = document.getElementById("cfmYes");
     (no.style.display === "none" ? yes : no).click();
+    return;
+  }
+  if(e.key === "Tab"){
+    // 焦点锁：Tab 循环限制在弹窗内的可聚焦元素里
+    const items = box.querySelectorAll(
+      "button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+    if(!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
   }
 });

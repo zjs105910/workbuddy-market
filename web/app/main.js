@@ -185,7 +185,11 @@ document.addEventListener("click", async (e) => {
   }
   if(t.dataset.f){
     setFilter(t.dataset.f);
-    document.querySelectorAll("#filters .chip").forEach(c=>c.classList.toggle("on", c.dataset.f===t.dataset.f));
+    document.querySelectorAll("#filters .chip").forEach(c=>{
+      const on = c.dataset.f===t.dataset.f;
+      c.classList.toggle("on", on);
+      c.setAttribute("aria-pressed", on ? "true" : "false");   // v2.35 任务6
+    });
     renderCards(); return;
   }
   if(t.dataset.ghmore){

@@ -48,10 +48,10 @@
     <div class="search"><input id="q" placeholder="搜索插件、关键词、GitHub 仓库…" autocomplete="off" aria-label="搜索插件"></div>
     <div class="chips" id="cats"></div>
     <div class="chips" id="filters" role="group" aria-label="筛选">
-      <button class="chip on" data-f="all">全部</button>
-      <button class="chip" data-f="todo">未装完</button>
-      <button class="chip" data-f="done">已装好</button>
-      <button class="chip" data-f="fav">♥ 我的收藏</button>
+      <button class="chip on" data-f="all" aria-pressed="true">全部</button>
+      <button class="chip" data-f="todo" aria-pressed="false">未装完</button>
+      <button class="chip" data-f="done" aria-pressed="false">已装好</button>
+      <button class="chip" data-f="fav" aria-pressed="false">♥ 我的收藏</button>
     </div>
   </div>
 
@@ -78,7 +78,7 @@
   </div>
 </div>
 
-<div class="veil" id="cfm">
+<div class="veil" id="cfm" role="dialog" aria-modal="true" aria-labelledby="cfmTitle">
   <div class="modal">
     <h4 id="cfmTitle">确认</h4>
     <div class="body" id="cfmBody"></div>

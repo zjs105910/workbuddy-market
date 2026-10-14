@@ -277,6 +277,17 @@ def main():
             page.locator('[data-f="all"]').click()
             page.wait_for_timeout(200)
 
+            # ---- v2.35 NEXT_STEPS 任务6：筛选 chip aria-pressed 同步
+            page.locator('[data-f="todo"]').click()
+            page.wait_for_timeout(250)
+            ap_todo = page.locator('[data-f="todo"]').get_attribute("aria-pressed")
+            ap_all = page.locator('[data-f="all"]').get_attribute("aria-pressed")
+            ck("★ 筛选 chip aria-pressed 同步（任务6）",
+               ap_todo == "true" and ap_all == "false",
+               f"todo={ap_todo} all={ap_all}")
+            page.locator('[data-f="all"]').click()
+            page.wait_for_timeout(200)
+
             # ---- v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
             page.click("#tab-curated")
             page.wait_for_timeout(400)
@@ -411,10 +422,29 @@ def main():
                     ck("★ 一键安装确认弹窗（radd 链路不再静默死亡）",
                        ("安装" in rtitle) and ("不可变产物" in rbody or "ghpm" in rbody),
                        rtitle[:60])
+                    # ---- v2.35 NEXT_STEPS 任务6：弹窗 ARIA + 焦点管理
+                    dia_role = page.locator("#cfm").get_attribute("role")
+                    dia_modal = page.locator("#cfm").get_attribute("aria-modal")
+                    focus_in = page.evaluate(
+                        "document.activeElement ? document.activeElement.id : ''")
+                    ck("★ 弹窗 ARIA 语义 + 焦点进主按钮（任务6）",
+                       dia_role == "dialog" and dia_modal == "true"
+                       and focus_in == "cfmYes",
+                       f"role={dia_role} modal={dia_modal} focus={focus_in}")
+                    page.keyboard.press("Tab")
+                    tab_in = page.evaluate(
+                        "!!(document.activeElement && document.activeElement.closest('#cfm'))")
+                    ck("★ Tab 焦点锁在弹窗内（任务6）", tab_in)
                     page.locator("#cfmNo").click()      # 取消，不真装
-                    page.wait_for_timeout(500)
+                    page.wait_for_function(
+                        "!document.querySelector('#cfm').classList.contains('show')",
+                        timeout=5000)
                     ck("★ 取消安装不起任务（veil 不出现）",
                        "show" not in (page.locator("#veil").get_attribute("class") or ""))
+                    focus_back = page.evaluate(
+                        "document.activeElement ? (document.activeElement.dataset"
+                        ".radd || document.activeElement.dataset.rupdate || '') : ''")
+                    ck("★ 关闭后焦点归还触发者（任务6）", focus_back != "", focus_back)
                 except Exception as exc:  # noqa: BLE001 —— 弹窗不出现本身就是失败
                     ck("★ 一键安装确认弹窗（radd 链路不再静默死亡）", False, str(exc)[:80])
             else:
