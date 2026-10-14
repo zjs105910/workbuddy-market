@@ -259,6 +259,12 @@ def invalidate_state() -> None:
     with _state_lock:
         _state_cache["data"] = None
         _state_cache["at"] = 0.0
+    # v2.35 任务4/CI 实锤：state 与 registry 的数据源（配置/所有权）总是
+    # 同变 —— 装完工件后 installedRepos 合并变了，但 /api/registry 的
+    # 600 秒内存缓存还在捂旧数据 → 精选市场卡片不翻转「已装」（CI
+    # fresh-clone 形态首跑实锤）。一并清掉，多清无害。
+    with _registry_mem_lock:
+        _registry_mem.update(at=0.0, force=None, data=None)
 
 
 def _read_state_cache(key: bool):
