@@ -18,16 +18,16 @@
 - 演示数据包括脚本现场生成的两个合成 Skill，以及当前提交中 `registry/plugins.json` 的精选条目快照；动态星数、更新时间和远程截图会被去掉以减少漂移。
 - 脚本绝不复制开发者本机的 `market.config.json` 或 `plugins/`，安装目录指向临时 `WBM_HOME`；结束后自动清理整个临时环境。
 - 合成数据会被标明为演示用途。社区条目详情只用于真实详情 UI 展示，视频不会下载或安装远端第三方 Skill。
-- 普通话旁白由 espeak-ng/espeak 生成；背景音乐由 FFmpeg 生成，不下载第三方音乐资产。
+- 普通话旁白由 edge-tts（微软 Edge 神经网络语音，默认 `zh-CN-XiaoxiaoNeural`）生成；`--tts espeak` 可回退到 espeak-ng/espeak 离线机械音（仅作无网络兜底）。背景音乐由 FFmpeg 生成，不下载第三方音乐资产。
 - 后期处理只调整取景、章节/字幕样式和响度；竖屏版本把同一段真实界面演示放在可读区域，上下区域用于项目定位、合成数据/隐私说明与社区入口。
 - `demo-manifest.json` 记录版本、源 commit、镜头时间，以及横屏/竖屏 MP4 与 SRT 的 SHA-256。
 
 ## 本地生成
 
-依赖：Python 3.10+、FFmpeg/ffprobe、espeak-ng（含普通话语音）、Playwright、Chromium、Pillow 和 Noto CJK 字体。
+依赖：Python 3.10+、FFmpeg/ffprobe、edge-tts（普通话神经网络语音；需联网，`--tts espeak` 时改用 espeak-ng 离线兜底）、Playwright、Chromium、Pillow 和 Noto CJK 字体。
 
 ```bash
-python -m pip install playwright pillow
+python -m pip install playwright pillow edge-tts
 python -m playwright install chromium
 # Ubuntu/Debian
 sudo apt-get install ffmpeg espeak-ng fonts-noto-cjk

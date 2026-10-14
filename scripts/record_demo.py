@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Record a reproducible WorkBuddy Market demo using the real app and isolated synthetic data.
 
-Dependencies: Playwright + Chromium, ffmpeg/ffprobe, and espeak-ng (Mandarin voice).
+Dependencies: Playwright + Chromium, ffmpeg/ffprobe, and edge-tts (clear Mandarin
+neural voice; espeak-ng/espeak remains an offline fallback via --tts espeak).
 This script never copies a developer's market.config.json or local plugins directory.
 """
 from __future__ import annotations
@@ -129,12 +130,79 @@ def copy_demo_runtime(market_root: Path, state_root: Path) -> None:
     (market_root / ".codebuddy-plugin").mkdir(exist_ok=True)
 
 
-def synthesize(text: str, path: Path, voice_bin: str) -> float:
+EDGE_VOICE_DEFAULT = "zh-CN-XiaoxiaoNeural"
+
+
+def synthesize_edgetts(text: str, path: Path, voice: str, rate: str, ffmpeg: str) -> float:
+    """Synthesize Mandarin narration with Microsoft Edge neural TTS (edge-tts).
+
+    Writes a mono 24 kHz WAV and returns its duration in seconds.
+    """
+    import asyncio
+
+    import edge_tts
+
+    mp3_path = path.with_suffix(".mp3")
+
+    async def _save() -> None:
+        communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate)
+        await communicate.save(str(mp3_path))
+
+    try:
+        asyncio.run(_save())
+    except Exception as exc:  # network hiccup or service rejection
+        raise RuntimeError(f"edge-tts synthesis failed for voice {voice!r}: {exc}") from exc
+    if not mp3_path.exists() or mp3_path.stat().st_size == 0:
+        raise RuntimeError("edge-tts produced an empty audio file")
+
+    subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-i", str(mp3_path), "-ac", "1", "-ar", "24000", str(path)],
+        check=True)
+    with wave.open(str(path), "rb") as audio:
+        return audio.getnframes() / audio.getframerate()
+
+
+def synthesize_espeak(text: str, path: Path, voice_bin: str) -> float:
+    """Legacy offline fallback: robotic espeak-ng/espeak Mandarin voice."""
     subprocess.run(
         [voice_bin, "-v", "zh", "-s", "190", "-p", "45", "-w", str(path), text],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     with wave.open(str(path), "rb") as audio:
         return audio.getnframes() / audio.getframerate()
+
+
+def make_synthesizer(engine: str, voice: str, rate: str, ffmpeg: str,
+                     voice_bin: str | None):
+    """Return (callable(text, path) -> duration_seconds, narration_description)."""
+    if engine == "espeak":
+        if not voice_bin:
+            raise RuntimeError("espeak-ng/espeak not found; install it or use --tts edge")
+        print("NOTE: using legacy espeak-ng voice; --tts edge gives far clearer Mandarin.")
+        return (lambda text, path: synthesize_espeak(text, path, voice_bin),
+                "Mandarin TTS generated with espeak-ng/espeak (legacy robotic voice)")
+
+    def _edge_ready() -> bool:
+        try:
+            import edge_tts  # noqa: F401
+        except ImportError:
+            return False
+        return True
+
+    if engine == "edge" and not _edge_ready():
+        raise RuntimeError("edge-tts is not installed: python -m pip install edge-tts")
+
+    if engine == "auto" and not _edge_ready():
+        if not voice_bin:
+            raise RuntimeError(
+                "Neither edge-tts nor espeak-ng is available; install edge-tts "
+                "(python -m pip install edge-tts) or espeak-ng")
+        print("NOTE: edge-tts not installed, falling back to espeak-ng voice.")
+        return (lambda text, path: synthesize_espeak(text, path, voice_bin),
+                "Mandarin TTS generated with espeak-ng/espeak (legacy robotic voice)")
+
+    return (lambda text, path: synthesize_edgetts(text, path, voice, rate, ffmpeg),
+            f"Mandarin TTS generated with Microsoft Edge neural voice (edge-tts): {voice}")
 
 
 def fmt_srt(seconds: float) -> str:
@@ -297,11 +365,20 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "workbuddy-market-demo.mp4")
     parser.add_argument("--subtitles", type=Path, default=None)
     parser.add_argument("--manifest", type=Path, default=None)
+    parser.add_argument("--tts", choices=["auto", "edge", "espeak"], default="auto",
+                        help="narration engine: edge = edge-tts neural voice (default), "
+                             "espeak = legacy offline robotic voice")
+    parser.add_argument("--voice", default=EDGE_VOICE_DEFAULT,
+                        help=f"edge-tts voice name (default: {EDGE_VOICE_DEFAULT})")
+    parser.add_argument("--rate", default="+0%",
+                        help="edge-tts speaking rate, e.g. '+10%%' faster or '-10%%' slower")
     args = parser.parse_args()
 
     ffmpeg = require_binary("ffmpeg")
     ffprobe = require_binary("ffprobe")
-    voice_bin = require_binary("espeak-ng", "espeak")
+    voice_bin = shutil.which("espeak-ng") or shutil.which("espeak")
+    synthesize, narration_desc = make_synthesizer(args.tts, args.voice, args.rate,
+                                                  ffmpeg, voice_bin)
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -345,7 +422,7 @@ def main() -> int:
         voice_files, voice_seconds = [], []
         for index, scene in enumerate(SCENES):
             wav_path = voice_dir / f"{index:02d}-{scene['key']}.wav"
-            voice_seconds.append(synthesize(scene["narration"], wav_path, voice_bin))
+            voice_seconds.append(synthesize(scene["narration"], wav_path))
             voice_files.append(wav_path)
 
         events, errors = [], []
@@ -496,7 +573,7 @@ def main() -> int:
         "videoSha256": sha256(output),
         "subtitles": subtitles.name,
         "subtitlesSha256": sha256(subtitles),
-        "narration": "Mandarin TTS generated with espeak-ng/espeak",
+        "narration": narration_desc,
         "backgroundMusic": "Original low-volume procedural ambient synth bed",
         "dataSource": (
             "Checked-in community registry snapshot with volatile metrics removed; "

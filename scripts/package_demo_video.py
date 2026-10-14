@@ -10,8 +10,40 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-FONT = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-BOLD = Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc")
+
+def resolve_cjk_fonts() -> tuple[Path, Path, str]:
+    """Locate a regular/bold CJK sans font pair and its family name (cross-platform)."""
+    candidates = [
+        (Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+         Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"), "Noto Sans CJK SC"),
+        (Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"),
+         Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"), "Noto Sans SC"),
+        (Path("C:/Windows/Fonts/msyh.ttc"),
+         Path("C:/Windows/Fonts/msyhbd.ttc"), "Microsoft YaHei"),
+        (Path("C:/Windows/Fonts/simhei.ttf"),
+         Path("C:/Windows/Fonts/simhei.ttf"), "SimHei"),
+        (Path("/System/Library/Fonts/Supplemental/Songti.ttc"),
+         Path("/System/Library/Fonts/Supplemental/Songti.ttc"), "Songti SC"),
+        (Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+         Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"), "WenQuanYi Zen Hei"),
+        (Path("/usr/share/fonts/truetype/arphic/uming.ttc"),
+         Path("/usr/share/fonts/truetype/arphic/uming.ttc"), "AR PL UMing"),
+    ]
+    for regular, bold, family in candidates:
+        if regular.exists() and bold.exists():
+            return regular, bold, family
+    raise RuntimeError(
+        "No CJK font found; install fonts-noto-cjk (Linux) or a CJK font such as "
+        "Noto Sans SC / Microsoft YaHei (Windows)")
+
+
+def filter_path(path: Path) -> str:
+    """Absolute path with an escaped drive colon for ffmpeg filter arguments.
+
+    Windows drive-letter colons must be escaped and the value single-quoted
+    inside filter arguments; POSIX paths pass through unchanged.
+    """
+    return str(path.resolve()).replace("\\", "/").replace(":", "\\:")
 
 def need(name: str) -> str:
     found = shutil.which(name)
@@ -52,15 +84,15 @@ def read_srt(path: Path) -> list[dict]:
         raise RuntimeError(f"No valid subtitles in {path}")
     return events
 
-def write_ass(path: Path, events: list[dict], manifest: dict) -> None:
+def write_ass(path: Path, events: list[dict], manifest: dict, font_family: str) -> None:
     lines = [
         "[Script Info]", "ScriptType: v4.00+", "WrapStyle: 2",
         "ScaledBorderAndShadow: yes", "YCbCr Matrix: TV.709",
         "PlayResX: 1280", "PlayResY: 720", "",
         "[V4+ Styles]",
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-        "Style: Title,Noto Sans CJK SC,18,&H00FFDC70,&H000000FF,&H80302010,&H00000000,-1,0,0,0,100,100,0,0,1,1,0,1,54,54,92,1",
-        "Style: Subtitle,Noto Sans CJK SC,27,&H00F6F9FF,&H000000FF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,1.2,0.6,2,72,72,17,1",
+        f"Style: Title,{font_family},18,&H00FFDC70,&H000000FF,&H80302010,&H00000000,-1,0,0,0,100,100,0,0,1,1,0,1,54,54,92,1",
+        f"Style: Subtitle,{font_family},27,&H00F6F9FF,&H000000FF,&H90000000,&H00000000,0,0,0,0,100,100,0,0,1,1.2,0.6,2,72,72,17,1",
         "", "[Events]",
         "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
     ]
@@ -82,12 +114,13 @@ def duration(ffprobe: str, path: Path) -> float:
          "-of", "default=noprint_wrappers=1:nokey=1", str(path)], text=True)
     return float(value.strip())
 
-def polish_landscape(ffmpeg: str, source: Path, output: Path, ass: Path) -> None:
+def polish_landscape(ffmpeg: str, source: Path, output: Path, ass: Path,
+                     font_family: str, fonts_dir: Path) -> None:
     filters = (
         "scale=1365:768:flags=lanczos,crop=1280:720:(in_w-out_w)/2:(in_h-out_h)/2,"
         "drawbox=x=0:y=586:w=iw:h=134:color=0x071321@0.98:t=fill,"
         "drawbox=x=0:y=586:w=iw:h=3:color=0x4fdcff@0.98:t=fill,"
-        f"subtitles=filename='{ass}':fontsdir='/usr/share/fonts/opentype/noto':charenc=UTF-8"
+        f"subtitles=filename='{filter_path(ass)}':fontsdir='{filter_path(fonts_dir)}':charenc=UTF-8"
     )
     temp_output = output.with_name(output.stem + ".rendering.mp4")
     try:
@@ -102,7 +135,7 @@ def polish_landscape(ffmpeg: str, source: Path, output: Path, ass: Path) -> None
         if temp_output.exists():
             temp_output.unlink()
 
-def make_portrait_overlay(path: Path) -> None:
+def make_portrait_overlay(path: Path, font: Path, bold_font: Path) -> None:
     from PIL import Image, ImageDraw, ImageFont
     image = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -112,8 +145,15 @@ def make_portrait_overlay(path: Path) -> None:
     draw.rounded_rectangle((48, 64, 60, 494), radius=5, fill=cyan)
     draw.rounded_rectangle((48, 1280, 1032, 1828), radius=34, fill=dark, outline=(76, 126, 166, 160), width=2)
     draw.rounded_rectangle((48, 1280, 60, 1828), radius=5, fill=cyan)
+    def load(size: int, bold: bool) -> ImageFont.FreeTypeFont:
+        loaded = ImageFont.truetype(str(bold_font if bold else font), size)
+        try:  # variable fonts: pick the named weight instance
+            loaded.set_variation_by_name("Bold" if bold else "Regular")
+        except Exception:
+            pass  # static font or unsupported build: keep the default instance
+        return loaded
     def text(x: int, y: int, value: str, size: int, color, bold: bool = False) -> None:
-        draw.text((x, y), value, font=ImageFont.truetype(str(BOLD if bold else FONT), size), fill=color)
+        draw.text((x, y), value, font=load(size, bold), fill=color)
     text(92, 112, "WORKBUDDY  ·  LOCAL FIRST", 22, cyan, True)
     text(92, 174, "WorkBuddy Market", 59, white, True)
     text(92, 276, "把本机 Skills 变成可发现、可管理的插件市场", 28, pale)
@@ -127,13 +167,14 @@ def make_portrait_overlay(path: Path) -> None:
     text(92, 1710, "Windows 快速上手、安装说明与安全边界见项目 README", 21, muted)
     image.save(path)
 
-def render_portrait(ffmpeg: str, ffprobe: str, source: Path, output: Path, temp: Path) -> None:
+def render_portrait(ffmpeg: str, ffprobe: str, source: Path, output: Path, temp: Path,
+                    font: Path, bold_font: Path) -> None:
     background, overlay = temp / "portrait-background.png", temp / "portrait-overlay.png"
     run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", "4", "-i", str(source),
          "-vf", "scale=720:1280:force_original_aspect_ratio=increase:flags=lanczos,"
                 "crop=720:1280,boxblur=18:5,eq=brightness=-0.23:saturation=0.72",
          "-frames:v", "1", str(background)])
-    make_portrait_overlay(overlay)
+    make_portrait_overlay(overlay, font, bold_font)
     temp_output = output.with_name(output.stem + ".rendering.mp4")
     try:
         run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -168,8 +209,8 @@ def main() -> int:
     for path in (args.input, args.subtitles, args.manifest):
         if not path.is_file():
             raise FileNotFoundError(path)
-    if not FONT.exists() or not BOLD.exists():
-        raise RuntimeError("Noto Sans CJK not found; install fonts-noto-cjk.")
+    font, bold_font, font_family = resolve_cjk_fonts()
+    print(f"NOTE: CJK font -> {font_family} ({font})")
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     events = read_srt(args.subtitles)
     original_hash = sha256(args.input)
@@ -178,11 +219,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="workbuddy-demo-polish-") as folder:
         temp = Path(folder)
         ass = temp / "captions.ass"
-        write_ass(ass, events, manifest)
+        write_ass(ass, events, manifest, font_family)
         rendered = temp / "landscape-polished.mp4"
-        polish_landscape(ffmpeg, args.input, rendered, ass)
-        rendered.replace(args.output)
-        render_portrait(ffmpeg, ffprobe, args.output, args.vertical_output, temp)
+        polish_landscape(ffmpeg, args.input, rendered, ass, font_family, font.parent)
+        # shutil.move (not Path.replace) so cross-drive temp/output dirs work on Windows
+        shutil.move(str(rendered), str(args.output))
+        render_portrait(ffmpeg, ffprobe, args.output, args.vertical_output, temp,
+                        font, bold_font)
     manifest["originalVideoSha256"] = original_hash
     manifest["video"] = args.output.name
     manifest["videoSha256"] = sha256(args.output)
