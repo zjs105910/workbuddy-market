@@ -153,17 +153,20 @@ function cardCommunity(p){
     const tag = k === "safe" ? '<span class="tag ok">可卸载</span>'
               : k === "modified" ? '<span class="tag warn">被改过</span>'
               : k === "ghpm" ? '<span class="tag">ghpm 管理</span>'
+              : k === "local" ? '<span class="tag">已收录为本机插件</span>'
               : k === "foreign" ? '<span class="tag grey">非本市场</span>'
               : k === "other_plugin" ? '<span class="tag grey">别的插件</span>'
               : '<span class="tag grey">未装</span>';
     return '<div class="row"><code>'+esc(d.skill)+'</code>'+tag+'</div>';
   }).join("");
   const hash = p.packageHash ? String(p.packageHash).slice(0,12) : "";
+  const overlapN = (p.skillDetail||[]).filter(d => d.kind === "local").length;
   const meta = ghpm
     ? '<span>ghpm 源码安装</span>'+
       (p.shaShort ? '<code style="font-size:11px">sha '+esc(p.shaShort)+'</code>' : '')+
       (p.installedAt ? '<span>更新于 '+esc(String(p.installedAt).slice(0,16).replace("T"," "))+'</span>' : '')+
-      '<span>'+p.skills.length+' skill</span>'
+      '<span>'+p.skills.length+' skill</span>'+
+      (overlapN ? '<span>其中 '+overlapN+' 个已收录为本机插件</span>' : '')
     : '<span>社区安装</span>'+
       (p.version ? '<span>工件 '+esc(p.version)+'</span>' : '')+
       (hash ? '<code style="font-size:11px">sha '+esc(hash)+'…</code>' : '')+

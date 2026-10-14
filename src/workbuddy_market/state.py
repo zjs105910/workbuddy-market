@@ -210,14 +210,23 @@ def build_state(purpose: str = "ui") -> dict:
     for repo, rec in repos.items():
         if not repo or repo in groups:
             continue
-        names = [s for s in (rec.get("skill_names") or [])
-                 if s not in local_declared and s not in owned_names]
-        if not names:
+        # v2.35 用户实测四修：ghpm 仓库**全量**展示——不再因技能与
+        # localPlugins / 其他所有权记录重叠而整卡去重。用户实测：
+        # zenstory-ai/oh-story-claudecode 的 13 个技能全部与收录的本机
+        # 插件（网页创作套件 + 浏览器自动化）是同一批文件，整卡在社区
+        # 安装里隐形，「我从 GitHub 下载过的仓库看不到了」。重叠的技能
+        # 在卡片上如实标注「已收录为本机插件」；管理归属不变（ghpm 链
+        # 市场不卸载，fail-closed 语义不变）。
+        all_names = sorted({s for s in (rec.get("skill_names") or []) if s})
+        if not all_names:
             continue
-        groups[repo] = {"skills": names, "packageHash": "", "version": "",
+        overlap = sorted(s for s in all_names
+                         if s in local_declared or s in owned_names)
+        groups[repo] = {"skills": all_names, "packageHash": "", "version": "",
                         "installedAt": rec.get("updated_at", "") or "",
                         "via": "ghpm",
-                        "shaShort": str(rec.get("sha_short") or "")[:7]}
+                        "shaShort": str(rec.get("sha_short") or "")[:7],
+                        "overlap": overlap}
 
     community = []
     for plug, g in sorted(groups.items()):
@@ -245,6 +254,9 @@ def build_state(purpose: str = "ui") -> dict:
             # （fail-closed：没有所有权记录的技能一律不代删，卸载对话框
             # 也不会为它出现）。检查更新 / 移除走 ghpm 自己的命令
             # （remove 自带备份与事务回滚），由前端 /api/remote/remove 触发。
+            # 四修：与本机插件重叠的技能标注 kind="local"（同一批文件，
+            # ghpm 与本机插件共用），不再从卡片上消失。
+            overlap = set(g.get("overlap") or [])
             base.update({
                 "description": "通过 ghpm 源码安装：联网下载 + ghpm 事务与回滚，"
                                "由 ghpm 管理（可检查更新 / 移除）",
@@ -259,9 +271,14 @@ def build_state(purpose: str = "ui") -> dict:
                 },
                 "skillDetail": [
                     {"skill": s,
-                     "kind": "ghpm" if s in skills_here else "absent",
-                     "label": ("ghpm 安装，市场不卸载（移除走 ghpm）"
-                               if s in skills_here else "未安装")}
+                     "kind": ("local" if s in overlap
+                              else "ghpm" if s in skills_here
+                              else "absent"),
+                     "label": ("已收录为本机插件（同一批文件，ghpm 与本机插件共用）"
+                               if s in overlap
+                               else "ghpm 安装，市场不卸载（移除走 ghpm）"
+                               if s in skills_here
+                               else "未安装")}
                     for s in want],
             })
         else:
