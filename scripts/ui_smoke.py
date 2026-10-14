@@ -441,10 +441,23 @@ def main():
                 exp_gone = page.locator(
                     '[data-rupdate="obra/superpowers"]').count() == 0
                 hint_seen = page.evaluate(
-                    "document.body.innerText.indexOf('已移至「本机技能」页') >= 0")
+                    "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
                 ck("★ 探索页已装收录源移管（卡片消失 + 提示出现）",
                    bool(exp_gone) and bool(hint_seen),
                    f"卡片隐藏={exp_gone} 提示={hint_seen}")
+                # v2.35 四修回归：「已装好」筛选在探索页也不显示已装源
+                # （用户实测：选已装好又看到它们，不符合「只在社区安装页」预期）
+                page.locator('[data-f="done"]').click()
+                page.wait_for_timeout(400)
+                done_gone = page.locator(
+                    '[data-rupdate="obra/superpowers"]').count() == 0
+                done_hint = page.evaluate(
+                    "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
+                ck("★ 探索页「已装好」筛选也不再显示已装源（四修，只留提示）",
+                   bool(done_gone) and bool(done_hint),
+                   f"卡片隐藏={done_gone} 提示={done_hint}")
+                page.locator('[data-f="all"]').click()
+                page.wait_for_timeout(200)
                 page.click("#tab-local")
                 page.wait_for_timeout(300)
                 # 市场内卸载：确认弹窗列出将移除的 skill → 回收站。
