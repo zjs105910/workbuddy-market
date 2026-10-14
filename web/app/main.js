@@ -282,8 +282,9 @@ async function loadDoctor(){
   catch(err){ await errorBox("体检失败", err); return; }
   const d = r.doctor || {};
   const rows = '<div class="doctor">' + (d.checks || []).map(c => {
-    const mark = c.ok && !c.warn ? "✓" : (c.ok ? "!" : "✗");
-    const cls = c.ok ? (c.warn ? "warn" : "ok") : "bad";
+    // v2.35 三态：✗ 错误 / △ 待初始化（未初始化不算故障）/ ! 警告 / ✓ 通过
+    const mark = !c.ok ? "✗" : (c.pending ? "△" : (c.warn ? "!" : "✓"));
+    const cls = c.ok ? (c.pending ? "pend" : (c.warn ? "warn" : "ok")) : "bad";
     return '<div class="row"><span class="tag '+cls+'">'+mark+' '+esc(c.name)+'</span>'+
            '<span style="color:var(--muted);font-size:12px">'+esc(c.detail||"")+'</span></div>';
   }).join("") + '</div>';
@@ -293,7 +294,7 @@ async function loadDoctor(){
   if(!ok2) return;
   const now = new Date().toISOString();
   const text = "WorkBuddy Market 诊断报告\n生成时间：" + now + "\n" +
-    (d.checks || []).map(c => (c.ok ? (c.warn ? "[警告] " : "[通过] ") : "[错误] ") + c.name +
+    (d.checks || []).map(c => (c.ok ? (c.pending ? "[待初始化] " : (c.warn ? "[警告] " : "[通过] ")) : "[错误] ") + c.name +
       (c.detail ? " — " + c.detail : "")).join("\n") +
     "\n（用户主目录已脱敏为 ~；本报告不含口令与令牌）\n";
   try{

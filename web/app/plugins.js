@@ -313,8 +313,12 @@ export function renderCards(){
     // ---- 入口一：本机技能（管理自己的 Skills）
     h += '<div class="sec-title">本机插件 <span class="n">'+local.length+' 个 · 内容就在本市场里，装到 ~/.workbuddy/skills</span></div>';
     h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
-                      : '<div class="empty">没有符合条件的本机插件（首次安装默认收录 0 个，这是安全设计——你的 skills 都完好保存在 ~/.workbuddy/skills，一个没动）。'+
-                        '想收录：编辑 market.config.json 的 localPlugins 后点「重新打包」。</div>';
+                      : (q ? '<div class="empty">没有符合条件的本机插件（换个关键词或分类试试）。</div>'
+                      : '<div class="empty" style="text-align:left;line-height:2">'+
+                        '<b>未收录 ≠ 已删除</b> —— 你的 skills 都完好保存在 '+
+                        '~/.workbuddy/skills，一个都没动；市场默认收录 0 个是安全设计。'+
+                        '<br>想收录两步走：① 编辑 market.config.json 的 '+
+                        '<code>localPlugins</code> 把插件加进去 → ② 点右上角「重新打包」。</div>');
 
     // ---- 社区安装（2026-10-14 P1 修复，审计 D1；v2.35 二修纳入 ghpm 链）：
     // 精选市场工件 / GitHub 收录源装进来的技能，按来源仓库分组。
@@ -352,8 +356,14 @@ export function renderCards(){
     if(REG.source && REG.source !== "cache" && REG.source.indexOf("github.com") < 0)
       rsub += '（'+esc(REG.source)+'）';
     h += '<div class="sec-title">精选市场（社区目录） <span class="n">'+rsub+'</span></div>';
-    h += comm.length ? '<div class="grid">'+comm.map(cardRegistry).join("")+'</div>'
-                     : '<div class="empty">社区目录没有匹配的条目</div>';
+    if(comm.length){
+      h += '<div class="grid">'+comm.map(cardRegistry).join("")+'</div>';
+    } else if(!(REG.plugins && REG.plugins.length)){
+      h += '<div class="empty">社区目录还没有数据：联网后点右上角「刷新目录」自动拉取；'+
+           '离线时用仓库内 <code>registry/plugins.json</code> 的兜底副本。</div>';
+    } else {
+      h += '<div class="empty">社区目录没有匹配的条目（换个关键词或分类试试）。</div>';
+    }
   }
 
   if(tab === "explore"){

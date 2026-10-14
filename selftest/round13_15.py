@@ -190,6 +190,41 @@ def round13():
         os.environ["GHPM_MARKET_ROOT"] = str(_TMP / "market")
         os.environ.pop("WBM_MARKET_ROOT", None)
 
+    # --- 28G. doctor 三态（v2.35 任务2）：未初始化 △ / 已初始化 ✓ / 损坏 ✗
+    # 首装向导跑之前的「未初始化」不是故障 —— 报 △ 待初始化、ok 不挂；
+    # JSON 坏掉才是 ✗。真实环境其余项须健康，故沿用上面的 fake ghpm 接缝。
+    # 注意 load_config 读的是 config.CONFIG_PATH（import 期常量），与
+    # doctor 用的 MARKET_ROOT 在真实环境永远一致；测试里两个都要patch。
+    import workbuddy_market.config as wmcfg            # noqa: E402
+    doc.GHPM_PY = fake_ghpm
+    empty_root = _TMP / "r13-doctor-uninit"
+    shutil.rmtree(empty_root, ignore_errors=True)
+    empty_root.mkdir(parents=True)
+    real_doc_root = doc.MARKET_ROOT
+    real_cfg_path = wmcfg.CONFIG_PATH
+    doc.MARKET_ROOT = empty_root
+    wmcfg.CONFIG_PATH = empty_root / "market.config.json"
+    try:
+        r2 = doc.run_doctor()
+        root_chk = next(c for c in r2["checks"]
+                        if c["name"].startswith("市场根"))
+        ck("doctor 未初始化：市场根报 △ 待初始化且不算错误（首装前正常态）",
+           r2["ok"] is True and root_chk.get("pending") is True,
+           root_chk["detail"][:60])
+        text2 = doc.render(r2)
+        ck("doctor 未初始化：渲染含 △ 标记与一键启动引导",
+           "△" in text2 and "一键启动" in text2, text2[-80:])
+        (empty_root / "market.config.json").write_text("{broken,,,",
+                                                       encoding="utf-8")
+        r3 = doc.run_doctor()
+        ck("doctor 损坏：ok=False 且配置项如实报 ✗（与未初始化区分）",
+           r3["ok"] is False
+           and any((not c["ok"]) and "配置" in c["name"] for c in r3["checks"]))
+    finally:
+        doc.MARKET_ROOT = real_doc_root
+        wmcfg.CONFIG_PATH = real_cfg_path
+        doc.GHPM_PY = real_doc_ghpm
+
 
 def round14():
     """v2.14 / R5：installer / uninstaller 迁包（逐字搬迁，行为零变化）。

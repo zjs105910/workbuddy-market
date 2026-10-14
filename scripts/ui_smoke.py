@@ -568,6 +568,10 @@ def main():
                 ck("★ 空市场状态：界面骨架正常（tab 就位、无 pageerror）",
                    not errs2 and pg2.locator("#tab-curated").count() == 1,
                    "; ".join(errs2[:2]))
+                # v2.35 任务2：空态明示「未收录 ≠ 已删除」+ 两步引导
+                t2 = pg2.locator("#content").inner_text()
+                ck("★ 空本机插件态：「未收录 ≠ 已删除」+ 两步引导（任务2）",
+                   ("未收录" in t2) and ("重新打包" in t2), t2[:80])
             finally:
                 pg2.close()
 
@@ -600,6 +604,13 @@ def main():
                 t4 = pg4.locator("#toast").inner_text()
                 ck("★ 配置缺失状态：结构化人话报错（界面照常可打开）",
                    not errs4 and ("配置" in t4), t4[:80])
+                # v2.35 任务2：未初始化态 doctor 报 △ 待初始化（不是 ✗）
+                pg4.click("#btnDoctor")
+                pg4.wait_for_selector("#cfm.show", timeout=10000)
+                body4 = pg4.locator("#cfmBody").inner_text()
+                ck("★ 未初始化 doctor：△ 待初始化而非 ✗（任务2）",
+                   ("△" in body4) and ("待初始化" in body4), body4[:80])
+                pg4.locator("#cfmYes").click()
             finally:
                 pg4.close()
             cfg_path.write_bytes(cfg_backup)   # 还原，别污染后续

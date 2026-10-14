@@ -33,8 +33,12 @@ from .transactions import tx_list
 from .trash import _TRASH_NAME_BAD, _load_trash_index, trash_stats
 
 
-def _check(name: str, ok: bool, detail: str = "", warn: bool = False) -> dict:
-    return {"name": name, "ok": ok, "warn": warn and ok, "detail": detail}
+def _check(name: str, ok: bool, detail: str = "", warn: bool = False,
+           pending: bool = False) -> dict:
+    # v2.35 三态：ok=True + pending=True = 「待初始化」——渲染为 △，不算
+    # 错误（首装向导跑之前就是这个状态，不是故障）。损坏仍是 ok=False/✗。
+    return {"name": name, "ok": ok, "detail": detail,
+            "warn": warn and ok, "pending": pending and ok}
 
 
 def run_doctor(fix: bool = False) -> dict:
@@ -53,13 +57,18 @@ def run_doctor(fix: bool = False) -> dict:
     config_ok = False
     cfg = None
     has_config = (MARKET_ROOT / "market.config.json").is_file()
-    checks.append(_check(
-        "市场根（MARKET_ROOT）",
-        has_config,
-        f"{MARKET_ROOT}"
-        + ("" if has_config else
-           "（没有 market.config.json —— 请在仓库 clone 内运行，"
-           "或设置 WBM_MARKET_ROOT 指向市场根）")))
+    if has_config:
+        checks.append(_check(
+            "市场根（MARKET_ROOT）", True, f"{MARKET_ROOT}"))
+    else:
+        # v2.35 三态：未初始化 ≠ 损坏 —— 首装向导跑之前就该是这样，
+        # 报 △ 待初始化并给出下一步（与首次启动向导话术对齐）。
+        checks.append(_check(
+            "市场根（MARKET_ROOT）", True,
+            "待初始化：还没有 market.config.json —— 运行「一键启动」进入"
+            "初始化向导（直接回车 = 只浏览，不注册；输入 2 才注册到 WorkBuddy），"
+            "或手动把 market.config.example.json 复制为 market.config.json",
+            pending=True))
 
     # --- 配置
     if has_config:
@@ -70,14 +79,19 @@ def run_doctor(fix: bool = False) -> dict:
             for w in warns:
                 checks.append(_check(f"配置警告：{w[:60]}", True, "", warn=True))
         except ConfigError as exc:
-            checks.append(_check("配置（market.config.json）", False, str(exc)))
+            checks.append(_check(
+                "配置（market.config.json）", False,
+                f"配置损坏：{exc} —— 修复 JSON，或删掉它后重跑「一键启动」"
+                "按向导重建（从 market.config.example.json 复制一份改起最稳）"))
         if config_ok:
             n_local = len(cfg.get("localPlugins", []))
             n_remote = len(cfg.get("remoteSources", []))
             checks.append(_check("配置", True,
                                  f"本机插件 {n_local} 个 / GitHub 源 {n_remote} 个"))
     else:
-        checks.append(_check("配置（market.config.json）", False, "市场根里没有配置文件"))
+        checks.append(_check("配置（market.config.json）", True,
+                             "待初始化：配置文件未创建（首次运行「一键启动」即可生成）",
+                             pending=True))
 
     # --- WorkBuddy 家目录 / skills
     checks.append(_check(
@@ -189,12 +203,24 @@ def _bad_entry_name(name) -> bool:
 
 
 def render(result: dict) -> str:
-    """把 run_doctor 的结果渲染成终端友好的文本。"""
+    """把 run_doctor 的结果渲染成终端友好的文本。标记四态：
+    ✓ 通过 / ! 警告（不挡门）/ △ 待初始化（不算错）/ ✗ 错误。"""
     lines = ["WorkBuddy Market Doctor", "─" * 40]
     for c in result["checks"]:
-        mark = "✓" if c["ok"] and not c["warn"] else ("!" if c["ok"] else "✗")
+        if not c["ok"]:
+            mark = "✗"
+        elif c.get("pending"):
+            mark = "△"
+        elif c["warn"]:
+            mark = "!"
+        else:
+            mark = "✓"
         detail = f" — {c['detail']}" if c["detail"] else ""
         lines.append(f"{mark} {c['name']}{detail}")
+    if any(c.get("pending") for c in result["checks"]):
+        lines.append("")
+        lines.append("△ 待初始化不是故障：运行「一键启动」按向导初始化"
+                     "（直接回车 = 只浏览；输入 2 = 注册到 WorkBuddy）")
     if not result["ok"]:
         lines.append("")
         lines.append("存在错误项；提示：市场根内的常规入口是 一键启动.cmd / python launcher.py")
