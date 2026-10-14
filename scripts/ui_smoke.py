@@ -472,11 +472,18 @@ def main():
             # 已安装里都没有显示」。验收：UI 点安装 → 完成 toast 说清装去哪 →
             # 社区安装分区可见 → 市场内卸载 → 回收站 → 磁盘落账。
             # 走真实点击流（不裸 fetch）：watchJob 的完成回调才会刷新 STATE。
-            # obra/superpowers 是隔离配置里的收录源之一（去重后只在探索页），
-            # 安装入口在「探索 GitHub」tab 的收录源卡片上。
+            # v2.35 修正：obra 的安装入口位置取决于隔离配置——**收录源配置**
+            # （本机 market.config.json）在探索页；**fresh-clone 配置**
+            # （example 无收录源，CI 就是这样）在精选页的注册表卡片上。
+            # 两处都试 —— CI 首跑实锤：把「配置形态」误判成「链路坏了」。
             page.click("#tab-explore")
             page.wait_for_timeout(500)
             art_btn = page.locator('[data-radd="obra/superpowers"]')
+            on_explore = art_btn.count() > 0
+            if not on_explore:
+                page.click("#tab-curated")
+                page.wait_for_timeout(400)
+                art_btn = page.locator('[data-radd="obra/superpowers"]')
             if art_btn.count():
                 art_btn.click()
                 page.wait_for_selector("#cfm.show", timeout=5000)
@@ -535,29 +542,42 @@ def main():
                 ck("★ 顶部统计纳入社区安装（社区安装 N 个 · 已装 X/Y skill）",
                    ("社区安装1个" in metric_norm) and ("15/15" in metric_norm),
                    ascii(metric_txt)[:120])
-                # v2.35 用户实测三修回归：已装收录源移出探索页（提示 + 跳转）
-                page.click("#tab-explore")
-                page.wait_for_timeout(400)
-                exp_gone = page.locator(
-                    '[data-rupdate="obra/superpowers"]').count() == 0
-                hint_seen = page.evaluate(
-                    "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
-                ck("★ 探索页已装收录源移管（卡片消失 + 提示出现）",
-                   bool(exp_gone) and bool(hint_seen),
-                   f"卡片隐藏={exp_gone} 提示={hint_seen}")
-                # v2.35 四修回归：「已装好」筛选在探索页也不显示已装源
-                # （用户实测：选已装好又看到它们，不符合「只在社区安装页」预期）
-                page.locator('[data-f="done"]').click()
-                page.wait_for_timeout(400)
-                done_gone = page.locator(
-                    '[data-rupdate="obra/superpowers"]').count() == 0
-                done_hint = page.evaluate(
-                    "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
-                ck("★ 探索页「已装好」筛选也不再显示已装源（四修，只留提示）",
-                   bool(done_gone) and bool(done_hint),
-                   f"卡片隐藏={done_gone} 提示={done_hint}")
-                page.locator('[data-f="all"]').click()
-                page.wait_for_timeout(200)
+                # v2.35 用户实测三修回归：已装收录源移出探索页（提示 + 跳转）。
+                # 只在「obra 是收录源」的配置形态下断言；fresh-clone 形态
+                # （无收录源）改看精选页的入口翻转（radd → 本机技能页查看）。
+                if on_explore:
+                    page.click("#tab-explore")
+                    page.wait_for_timeout(400)
+                    exp_gone = page.locator(
+                        '[data-rupdate="obra/superpowers"]').count() == 0
+                    hint_seen = page.evaluate(
+                        "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
+                    ck("★ 探索页已装收录源移管（卡片消失 + 提示出现）",
+                       bool(exp_gone) and bool(hint_seen),
+                       f"卡片隐藏={exp_gone} 提示={hint_seen}")
+                    # v2.35 四修回归：「已装好」筛选在探索页也不显示已装源
+                    # （用户实测：选已装好又看到它们，不符合「只在社区安装页」预期）
+                    page.locator('[data-f="done"]').click()
+                    page.wait_for_timeout(400)
+                    done_gone = page.locator(
+                        '[data-rupdate="obra/superpowers"]').count() == 0
+                    done_hint = page.evaluate(
+                        "document.body.innerText.indexOf('社区安装分区统一管理') >= 0")
+                    ck("★ 探索页「已装好」筛选也不再显示已装源（四修，只留提示）",
+                       bool(done_gone) and bool(done_hint),
+                       f"卡片隐藏={done_gone} 提示={done_hint}")
+                    page.locator('[data-f="all"]').click()
+                    page.wait_for_timeout(200)
+                else:
+                    page.click("#tab-curated")
+                    page.wait_for_timeout(400)
+                    cur_gone = page.locator(
+                        '[data-radd="obra/superpowers"]').count() == 0
+                    cur_seen = page.locator(
+                        '[data-regdetail="obra/superpowers"]').count() > 0
+                    ck("★ 安装后精选页入口翻转（工件 → 本机技能页查看，任务5 口径）",
+                       bool(cur_gone) and bool(cur_seen),
+                       f"入口消失={cur_gone} 卡片在={cur_seen}")
                 page.click("#tab-local")
                 page.wait_for_timeout(300)
                 # 市场内卸载：确认弹窗列出将移除的 skill → 回收站。
@@ -594,12 +614,18 @@ def main():
                     gone = page.evaluate(
                         "document.body.innerText.indexOf('通过精选市场安装') < 0")
                     ck("★ 卸载后社区分区消失（状态闭环）", bool(gone))
-                    # v2.35 用户实测三修回归：卸载后探索页恢复安装入口
+                    # v2.35 用户实测三修回归：卸载后安装入口恢复（状态闭环）。
+                    # 收录源形态在探索页恢复；fresh-clone 形态在精选页恢复。
                     page.click("#tab-explore")
                     page.wait_for_timeout(400)
                     back = page.locator(
                         '[data-radd="obra/superpowers"]').count() > 0
-                    ck("★ 卸载后探索页恢复「一键安装」入口（状态闭环）",
+                    if not back:
+                        page.click("#tab-curated")
+                        page.wait_for_timeout(400)
+                        back = page.locator(
+                            '[data-radd="obra/superpowers"]').count() > 0
+                    ck("★ 卸载后安装入口恢复（探索页或精选页，状态闭环）",
                        bool(back))
                 else:
                     CI_GATE["skipped_core"].append("市场内卸载工件安装")
