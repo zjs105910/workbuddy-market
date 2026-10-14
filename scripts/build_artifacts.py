@@ -23,6 +23,17 @@ registry/plugins.json（走 PR，不直推 main）。
     失败清理无半截）；单个条目失败只记录失败，不拖垮整批；
   · 回写一律走 PR —— 注册表的静态 / 产物字段永远人工可审。
 
+v2.35 NEXT_STEPS 任务4（打包瘦身，影响评估见 CHANGELOG 2.35.0）：
+
+  · 瘦身暂存（stage_clean）：只带 manifest 声明的 skills，剔除 VCS 元数据 /
+    语言与测试缓存 / 系统垃圾（``_JUNK_*``）—— 不参与 skill 运行时的内容
+    不进产物；node_modules/.venv 刻意不剔（vendor 依赖是内容，剔了即破坏），
+    真大到离谱交给体积闸门；
+  · 体积闸门（ARTIFACT_MAX_BYTES=64MB）：超限条目拒发固定工件
+    （report.excluded，非失败），--patch-registry 拔掉其工件指针字段，
+    安装回落 ghpm 源码路线（与 pkg=N 条目同路径）；闸门下的旧制品
+    安装行为逐字节不变。
+
 网络接缝只有一个：``_tarball_fetch(url)``（自检 monkeypatch 它离线测）。
 """
 from __future__ import annotations
@@ -52,6 +63,84 @@ DEFAULT_REGISTRY_FILE = REPO_ROOT / "registry" / "plugins.json"
 TARBALL_TIMEOUT = 120.0
 DOWNLOAD_CHUNK = 1024 * 1024
 MAX_TARBALL_BYTES = 256 * 1024 * 1024        # 与 artifact.py 同一量级上限
+
+# ---------------------------------------------------------------- 打包瘦身
+# v2.35 NEXT_STEPS 任务4（影响评估实锤：21 个制品共 585MB，两个巨头
+# K-Dense-AI/scientific-agent-skills 246MB、nexu-io/open-design 179MB；
+# 拆包分析显示重量几乎全在 skill 目录内的图片等**内容资产**里）。
+#
+# 两层策略，都不动「装什么」：
+#   ① 垃圾剔除（_JUNK_*）：VCS 元数据 / 语言缓存 / 测试缓存 / 系统垃圾
+#      文件一律不进产物。这些**永远不参与 skill 运行时**，剔除零风险。
+#      node_modules / .venv **刻意不剔**——skill 若 vendor 了依赖，
+#      剔了就是破坏内容；真大到离谱交给 ② 的体积闸门说话。
+#   ② 体积闸门（ARTIFACT_MAX_BYTES）：产物超限的条目**拒绝发布固定
+#      工件**（记进 report.excluded，不是失败），注册表拔掉工件指针，
+#      安装回落 ghpm 源码路线（与 14 个 pkg=N 条目同一路径，UI 已有
+#      「无固定产物」引导，任务5）。旧制品（低于闸门）安装行为不变。
+_JUNK_DIRS = {".git", ".hg", ".svn",
+              "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+              ".tox", ".ipynb_checkpoints", "coverage"}
+_JUNK_FILES = {".ds_store", "thumbs.db", "desktop.ini"}
+_JUNK_SUFFIXES = (".pyc", ".pyo", ".log", ".tmp")
+
+ARTIFACT_MAX_BYTES = 64 * 1024 * 1024        # 工件体积上限（超过走 ghpm 路线）
+
+
+class ArtifactOversized(Exception):
+    """产物超过体积闸门（任务4）：策略性拒发，不是构建失败。"""
+
+
+def _junk_ignore(src, names: list):
+    """shutil.copytree 的 ignore 回调（签名 (src, names)）：返回要剔除的名字集合。"""
+    drop = set()
+    for n in names:
+        low = n.lower()
+        if n in _JUNK_DIRS or low in _JUNK_DIRS:
+            drop.add(n)
+        elif n in _JUNK_FILES or low in _JUNK_FILES:
+            drop.add(n)
+        elif low.endswith(_JUNK_SUFFIXES):
+            drop.add(n)
+    return drop
+
+
+def _tree_bytes(path) -> int:
+    return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
+
+
+def stage_clean(src, skills, dest) -> dict:
+    """瘦身暂存（任务4）：``src/skills/<name>`` → ``dest/skills/<name>``。
+
+    只带声明的 skills（manifest 之外的非 skill 内容——仓库级 README、
+    示例、宣传图——本来就不会被安装端解包，不进产物），并剔除
+    ``_JUNK_*`` 垃圾。剔除量如实返回，由 build_one 记进 report。
+    """
+    import shutil
+    from workbuddy_market.errors import ConfigError
+    src, dest = Path(src), Path(dest)
+    shutil.rmtree(dest, ignore_errors=True)
+    (dest / "skills").mkdir(parents=True)
+    stats = {"excludedFiles": 0, "excludedBytes": 0}
+    for name in skills:
+        s = src / "skills" / name
+        if not s.is_dir():
+            raise ConfigError(f"skill {name!r} 在 {s} 不存在，拒绝打包")
+        # 先按同一把尺算出顶层要剔的名字，用于如实统计 —— copytree 只
+        # 返回目标路径，拿不到剔除清单，只能自己算（递归层由 ignore 兜底）。
+        for ig in _junk_ignore(s, [p.name for p in s.iterdir()]):
+            junk = s / ig
+            if junk.is_file():
+                stats["excludedFiles"] += 1
+                stats["excludedBytes"] += junk.stat().st_size
+            else:
+                for p in junk.rglob("*"):
+                    if p.is_file():
+                        stats["excludedFiles"] += 1
+                        stats["excludedBytes"] += p.stat().st_size
+        shutil.copytree(s, dest / "skills" / name, symlinks=True,
+                        ignore=_junk_ignore)
+    return stats
 
 _SKILL_MD = "SKILL.md"
 
@@ -230,11 +319,16 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
         tar_path.write_bytes(fetch(f"https://codeload.github.com/{repo}/tar.gz/{ref}"))
         root = safe_extract_tar(tar_path, tmp / "src")
         src, skills = choose_skills_root(root, slug)
+        # v2.35 任务4：瘦身暂存后再 pack —— 只带声明的 skills + 剔除垃圾。
+        # pack_package 对 src 是全量复制，不先瘦身的话仓库级非 skill 内容
+        # （README / 示例 / 宣传图）也会进 zip 和 manifest 的 files 表。
+        clean = tmp / "clean"
+        excluded = stage_clean(src, skills, clean)
         pkg_dir = tmp / "pkg"
         # 收录条目若人工审核过 permissions（静态字段），打包时固化进
         # manifest —— 从此它受 manifestHash 保护，改一个字都过不了 verify。
         entry_perms = entry.get("permissions")
-        packed = pack_package(src, pkg_dir, pid=slug, name=entry.get("displayName") or slug,
+        packed = pack_package(clean, pkg_dir, pid=slug, name=entry.get("displayName") or slug,
                               version=version,
                               description=entry.get("description", ""),
                               license=str(entry.get("license") or ""),
@@ -244,6 +338,17 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
         asset = f"{slug}-{version}.zip"
         zip_path = out_dir / asset
         zip_dir(pkg_dir, zip_path)
+        # v2.35 任务4：体积闸门。超限条目**不发布固定工件**——抛
+        # ArtifactOversized（main 记进 report.excluded，注册表拔指针，
+        # 安装回落 ghpm 源码路线）。已落盘的 zip 必须删掉，否则会被
+        # workflow 的 artifacts/*.zip 通配上传（拒发 ≠ 留在发布清单里）。
+        zip_bytes = zip_path.stat().st_size
+        if zip_bytes > ARTIFACT_MAX_BYTES:
+            zip_path.unlink(missing_ok=True)
+            raise ArtifactOversized(
+                f"{repo}: 产物 {zip_bytes / 1048576:.1f} MB 超过上限 "
+                f"{ARTIFACT_MAX_BYTES / 1048576:.0f} MB，拒绝发布固定工件"
+                "（安装走 ghpm 源码路线）")
         # 构建证明（v2.20 / plugin-spec v0.3）：把「谁、按哪份 commit、
         # 构建出了哪个哈希」钉成随 Release 分发的 JSON 记录。v0.1 不带
         # 签名（冻结决定 #3 的 signature 位预留）—— 防篡改仍由安装端
@@ -274,7 +379,9 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
                 "platforms": manifest.get("platforms") or [],
                 "minWorkBuddyVersion": manifest.get("minWorkBuddyVersion") or "",
                 "skills": skills,
-                "bytes": zip_path.stat().st_size}
+                "bytes": zip_path.stat().st_size,
+                # v2.35 任务4：瘦身剔除量如实记进 report（剔了什么、多少字节）
+                "excluded": excluded}
     finally:
         import shutil
         if work_root is None:
@@ -310,11 +417,22 @@ def main(argv: list | None = None) -> int:
             return 2
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {"built": []}
         built = {b["repo"]: b for b in report.get("built", [])}
+        # v2.35 任务4：体积超限拒发的条目（report.excluded）拔掉工件指针
+        # 字段 —— 注册表不再指认超大工件，安装回落 ghpm 源码路线（与
+        # pkg=N 条目同一路径，UI 有「无固定产物」引导）。旧制品资产
+        # 仍留在 Release 里可下载，只是不再被注册表指认。
+        oversized = {x["repo"] for x in report.get("excluded", [])}
         reg_path = Path(args.registry)
         doc = json.loads(reg_path.read_text(encoding="utf-8"))
-        patched = 0
+        patched = stripped = 0
         for entry in doc.get("plugins", []):
-            b = built.get(entry.get("repo", ""))
+            repo = entry.get("repo", "")
+            if repo in oversized:
+                for k in ("packageUrl", "packageHash", "manifestHash", "attestationUrl"):
+                    entry.pop(k, None)
+                stripped += 1
+                continue
+            b = built.get(repo)
             if not b:
                 continue
             entry["packageUrl"] = (f"https://github.com/{REGISTRY_REPO}"
@@ -333,14 +451,15 @@ def main(argv: list | None = None) -> int:
             if b.get("minWorkBuddyVersion"):
                 entry["minWorkBuddyVersion"] = b["minWorkBuddyVersion"]
             patched += 1
-        if patched == 0:
+        if patched == 0 and stripped == 0:
             print("没有可回写的条目（report 里没有成功构建的产物）。", file=sys.stderr)
             return 1
         text = json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
         tmp = reg_path.with_suffix(".json.tmp")
         tmp.write_text(text, encoding="utf-8", newline="\n")
         os.replace(tmp, reg_path)
-        print(f"已回写 {patched} 条 artifact 字段 → {reg_path}")
+        print(f"已回写 {patched} 条 artifact 字段 → {reg_path}"
+              + (f"；拔除 {stripped} 条超大工件指针（安装走 ghpm 路线）" if stripped else ""))
         return 0
 
     doc = json.loads(Path(args.registry).read_text(encoding="utf-8"))
@@ -348,7 +467,7 @@ def main(argv: list | None = None) -> int:
     if args.repo:
         wanted = {r.strip() for r in args.repo}
         entries = [e for e in entries if e.get("repo") in wanted]
-    built, failed = [], []
+    built, failed, excluded = [], [], []
     for entry in entries:
         repo = entry.get("repo", "?")
         if args.only_missing and entry.get("packageHash"):
@@ -357,17 +476,26 @@ def main(argv: list | None = None) -> int:
         try:
             info = build_one(entry, out_dir)
             built.append(info)
+            ex = info.get("excluded") or {}
             print(f"  ok    {repo}: {info['asset']}  packageHash {info['packageHash'][:12]}…"
-                  f"  skills {len(info['skills'])}")
+                  f"  skills {len(info['skills'])}"
+                  + (f"  (瘦身剔除 {ex.get('excludedFiles', 0)} 个文件 / "
+                     f"{ex.get('excludedBytes', 0) / 1024:.0f} KB)"
+                     if ex.get("excludedFiles") else ""))
+        except ArtifactOversized as exc:
+            # v2.35 任务4：体积超限是**策略性拒发**，记 excluded 不算失败。
+            excluded.append({"repo": repo, "reason": str(exc)})
+            print(f"  --    {repo}: {exc}")
         except Exception as exc:  # noqa: BLE001 —— 单条失败记录，不拖垮整批
             failed.append({"repo": repo, "error": f"{type(exc).__name__}: {exc}"})
             print(f"  !!    {repo}: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     report = {"builtAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "built": built, "failed": failed}
+              "built": built, "failed": failed, "excluded": excluded}
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                            encoding="utf-8", newline="\n")
-    print(f"\n构建 {len(built)} 个 / 失败 {len(failed)} 个；report → {report_path}")
+    print(f"\n构建 {len(built)} 个 / 失败 {len(failed)} 个 / 超限拒发 {len(excluded)} 个；"
+          f"report → {report_path}")
     return 1 if (built == [] and failed) else 0
 
 

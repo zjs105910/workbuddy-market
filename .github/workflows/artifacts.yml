@@ -8,6 +8,15 @@ name: Artifacts
 # 哈希的稳定性是设计出来的：tarball 固定 sourceCommit + pack 规范化
 # JSON + 重打包哈希稳定（v2.15 第 30 节盯防），同一天重跑得到同一份
 # packageHash，--clobber 覆盖上传是安全的。
+# v2.35 修订（原措辞把两件事混为一谈）：稳定的是**内容哈希**
+# （packageHash/manifestHash，装的是什么）——zip 容器字节跨日并不同
+# （时间戳等元数据，实测差几个字节）。别对 zip 字节哈希做 CI 盯防，
+# 会误红；要复验就复验内容哈希（workbuddy-market verify）。
+#
+# v2.35 打包瘦身（NEXT_STEPS 任务4）：stage_clean 只带声明的 skills 并
+# 剔除 VCS/缓存/系统垃圾；产物超过 64MB 的条目拒发固定工件（report.json
+# 的 excluded 段），--patch-registry 拔掉其工件指针，安装回落 ghpm 源码
+# 路线。阈值与理由见 scripts/build_artifacts.py 的 ARTIFACT_MAX_BYTES。
 on:
   schedule:
     - cron: "43 20 * * *"     # 每天 20:43 UTC（与 registry 的 21:21 错开）

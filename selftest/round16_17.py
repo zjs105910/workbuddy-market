@@ -594,6 +594,71 @@ def round17():
     ck("回写：无产物的条目不被触碰",
        "packageHash" not in doc_after["plugins"][1])
 
+    # --- 32D-2. 打包瘦身（v2.35 NEXT_STEPS 任务4）：垃圾剔除 + 体积闸门
+    # ① stage_clean：只带声明的 skills；VCS/缓存/系统垃圾剔除（零运行时
+    #    影响）；仓库级非 skill 内容（README/示例/宣传图）本就不进产物。
+    root_j = lab / "xj"
+    (root_j / "skills" / "alpha").mkdir(parents=True)
+    (root_j / "skills" / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\n---\n", encoding="utf-8")
+    (root_j / "skills" / "alpha" / "tool.py").write_text("print(1)\n", encoding="utf-8")
+    (root_j / "skills" / "alpha" / "__pycache__").mkdir()
+    (root_j / "skills" / "alpha" / "__pycache__" / "t.cpython-311.pyc").write_bytes(b"x" * 100)
+    (root_j / "skills" / "alpha" / ".git").mkdir()
+    (root_j / "skills" / "alpha" / ".git" / "config").write_bytes(b"[core]\n")
+    (root_j / "skills" / "alpha" / ".DS_Store").write_bytes(b"y" * 50)
+    (root_j / "README.md").write_text("# repo readme\n", encoding="utf-8")
+    (root_j / "huge-demo.png").write_bytes(b"z" * 4096)
+    clean_j = lab / "clean-j"
+    st_j = bld.stage_clean(root_j, ["alpha"], clean_j)
+    kept_j = sorted(p.relative_to(clean_j).as_posix()
+                    for p in clean_j.rglob("*") if p.is_file())
+    ck("★ stage_clean：只留 skill 内容，垃圾剔除且不计入产物",
+       kept_j == ["skills/alpha/SKILL.md", "skills/alpha/tool.py"]
+       and st_j["excludedFiles"] == 3
+       and st_j["excludedBytes"] == 100 + 7 + 50,
+       f"kept={kept_j} excluded={st_j}")
+
+    # ② 体积闸门：超限产物拒发（ArtifactOversized 是策略拒发，非构建失败）。
+    #    闸门压到 1 字节（任何 zip 都超），顺带断言超限 zip 不留在产物目录
+    #    （否则 workflow 的 artifacts/*.zip 通配会把它传上去）。
+    real_max = bld.ARTIFACT_MAX_BYTES
+    bld.ARTIFACT_MAX_BYTES = 1
+    try:
+        bld.build_one(entry, out_dir,
+                      fetch=lambda url: (tar_bytes if url.endswith("a" * 40)
+                                         else (_ for _ in ()).throw(OSError(url))),
+                      work_root=lab / "w2")
+        ck("★ 体积闸门：超限产物拒发（ArtifactOversized）", False)
+    except bld.ArtifactOversized:
+        ck("★ 体积闸门：超限产物拒发（ArtifactOversized）", True)
+    finally:
+        bld.ARTIFACT_MAX_BYTES = real_max
+    ck("★ 超限 zip 不留在产物目录（不会被通配上传）",
+       not any(p.name.startswith("owner-repo-") for p in out_dir.glob("*.zip")),
+       str([p.name for p in out_dir.glob("*.zip")]))
+
+    # ③ --patch-registry：report.excluded 的条目拔掉工件指针字段
+    #    （安装回落 ghpm 源码路线，与 pkg=N 条目同路径）
+    (out_dir / "report.json").write_text(json.dumps(
+        {"built": [], "failed": [],
+         "excluded": [{"repo": "big/one", "reason": "超过上限"}]},
+        ensure_ascii=False), encoding="utf-8")
+    reg_file2 = lab / "plugins2.json"
+    reg_file2.write_text(json.dumps({"schema": 1, "plugins": [
+        {"repo": "big/one", "trust": "reviewed",
+         "packageUrl": "https://old/x.zip", "packageHash": "0" * 64,
+         "manifestHash": "1" * 64, "attestationUrl": "https://old/a.json"}]},
+        ensure_ascii=False), encoding="utf-8")
+    rc2 = bld.main(["--patch-registry", "--out", str(out_dir),
+                    "--registry", str(reg_file2),
+                    "--release-tag", "registry-artifacts-2026-10-08"])
+    e_big = json.loads(reg_file2.read_text(encoding="utf-8"))["plugins"][0]
+    ck("★ 超限条目拔掉工件指针（安装回落 ghpm 路线）",
+       rc2 == 0 and not any(k in e_big for k in
+                            ("packageUrl", "packageHash", "manifestHash", "attestationUrl")),
+       str(e_big)[:100])
+
     shutil.rmtree(lab, ignore_errors=True)
 
 
