@@ -13,6 +13,17 @@ import { bindRefresh } from "./jobs.js";
 import { handleDataAction } from "./install.js";
 
 /* ---------------- 顶部与骨架渲染 ---------------- */
+/* v2.35：切 tab 的公共路径（tab 按钮态 + setTab 一次到位）。
+   分类 chip 的「社区安装」也要复用它 —— 见下方 chip 分支。 */
+function switchTab(name){
+  setTab(name);
+  document.querySelectorAll("#tabs .tab").forEach(b => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+
 function render(){
   const st = STATE;
   $("#mName").textContent = st.marketName || "本机插件市场";
@@ -107,18 +118,15 @@ async function loadLog(){
 }
 
 /* ---------------- 事件委托（点击） ---------------- */
+// v2.35 用户实测二修：data-rremove = 社区安装分区里 ghpm 链卡片的「移除…」
+// （走 /api/remote/remove → ghpm remove，市场不拥有这些技能的所有权）。
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter]");
+  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter],[data-rremove]");
   if(!t) return;
 
   // v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
   if(t.dataset.tab){
-    setTab(t.dataset.tab);
-    document.querySelectorAll("#tabs .tab").forEach(b => {
-      const on = b.dataset.tab === t.dataset.tab;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-selected", on ? "true" : "false");
-    });
+    switchTab(t.dataset.tab);
     renderCards();
     return;
   }
@@ -155,7 +163,15 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
-  if(t.dataset.c !== undefined && t.classList.contains("chip")){ setCat(t.dataset.c); render(); return; }
+  if(t.dataset.c !== undefined && t.classList.contains("chip")){
+    // v2.35 用户实测二修：「社区安装」不是注册表 / 收录源的分类，而是本机
+    // 社区安装视图的入口。在精选市场 / 探索 GitHub tab 点它，按各自的分类
+    // 过滤必然得到「社区目录没有匹配的条目」（注册表里没有这个分类）——
+    // 用户实测报障：「社区安装之后没有显示」。无论当前在哪个 tab，点它都
+    // 落到「本机技能」页的社区安装分区（用户建议：都显示在本机社区安装界面）。
+    if(t.dataset.c === "社区安装" && tab !== "local") switchTab("local");
+    setCat(t.dataset.c); render(); return;
+  }
   if(t.dataset.f){
     setFilter(t.dataset.f);
     document.querySelectorAll("#filters .chip").forEach(c=>c.classList.toggle("on", c.dataset.f===t.dataset.f));

@@ -106,12 +106,17 @@ export async function handleDataAction(t){
     const repo = t.dataset.radd || t.dataset.rupdate;
     const isAdd = !!t.dataset.radd;
     let allowNs = false;
+    // 2026-10-14 用户实测 P0 修复（二）：这四条判定原先缩在 if(isAdd) 块内，
+    // 而块外的路由选择（ep/body）引用 usePkg —— 块级 const 出了块即
+    // ReferenceError，被下方 try/catch 吞掉后转 errorBox，而 errorBox 又
+    // 不显示（见 utils.js 的修复三）→ 用户点完「安装」界面零反应、零日志。
+    // 提升到分支级作用域，安装 / 更新两条路径都看得见。
+    const known = (STATE.remotes||[]).some(r => r.rawName === repo);
+    const regEntry = (REG.plugins||[]).find(p => p.repo === repo);
+    const regKnown = !!regEntry;
+    // v2.16：注册表条目带成套 artifact 字段 → 走不可变包安装链路
+    const usePkg = !!(regEntry && regEntry.packageUrl && regEntry.packageHash);
     if(isAdd){
-      const known = (STATE.remotes||[]).some(r => r.rawName === repo);
-      const regEntry = (REG.plugins||[]).find(p => p.repo === repo);
-      const regKnown = !!regEntry;
-      // v2.16：注册表条目带成套 artifact 字段 → 走不可变包安装链路
-      const usePkg = !!(regEntry && regEntry.packageUrl && regEntry.packageHash);
       // v2.23 fail-closed：信任说明以条目真实 trust 为准（缺失/未知 = 未审核），
       // 不再用「在注册表里」反推「已人工审核」。
       const trust = regEntry ? (regEntry.trust || "external") : "external";
@@ -127,7 +132,12 @@ export async function handleDataAction(t){
           + '<b>卸载提示：</b>此来源的技能不由本市场的卸载管理（避免误删），'
           + '移除时请用命令 <code>ghpm remove 项目名</code>。';
       }
-      const note = known
+      // 2026-10-14 用户实测 P0 修复：这里原是 const，随后 135/139 两行
+      // `note +=`（ES Modules 恒为严格模式）直接抛
+      // 「Assignment to constant variable」——点击处理器静默死亡，
+      // 确认弹窗不出现、安装任务不创建（复现与证据见审计报告）。
+      // 所有走 data-radd 的安装（GitHub 搜索结果 / 注册表卡片）全中招。
+      let note = known
         ? '<div class="note">会联网下载，并写入 <code>~/.workbuddy/skills</code>。<br>'+routeNote+'</div>'
         : '<div class="note">来源：'+trustNote+'。会联网下载并写入 <code>~/.workbuddy/skills</code>，'+routeNote+'</div>';
       // v2.20 风险预览：包声明的权限在**下载之前**就摆出来 ——
@@ -169,6 +179,30 @@ export async function handleDataAction(t){
         // v2.24：非 409 的失败走结构化错误弹窗
         await errorBox((isAdd?"安装 ":"更新 ")+repo+" 失败", err);
       }
+    }
+    return true;
+  }
+
+  /* ---- ghpm 源码链：移除（v2.35 用户实测二修）----
+     社区安装分区里 via=ghpm 的卡片用。这些技能的所有权不在本市场（ghpm
+     才是管理者，市场代记所有权等于替别人认领文件），市场卸载通路不覆盖
+     它们；移除经 ghpm remove —— ghpm 先自动备份再删，失败自动回滚，
+     与 add / update 同一套后台任务与进度弹窗。 */
+  if(t.dataset.rremove){
+    const repo = t.dataset.rremove;
+    const ok = await confirmBox("经 ghpm 移除 "+repo+"？",
+      '<div class="note">将执行 <code>ghpm remove '+esc(repo)+'</code>：'+
+      '把该仓库装进 <code>~/.workbuddy/skills</code> 的技能移除。'+
+      '<b>ghpm 会先自动备份</b>（之后可用 <code>ghpm rollback</code> 恢复），'+
+      '删除失败会自动还原。<br>'+
+      '这些技能不由本市场的卸载管理（避免误删），所以移除走 ghpm 自己的命令。</div>',
+      "移除");
+    if(!ok) return true;
+    try{
+      const r = await api("/api/remote/remove", {repo});
+      watchJob(r.jobId, "移除 "+repo);
+    }catch(err){
+      await errorBox("移除 "+repo+" 失败", err, () => t.click());
     }
     return true;
   }

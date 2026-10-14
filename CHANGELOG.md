@@ -4,6 +4,39 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.35.0 — 2026-10-14（修复：真实用户反馈安装链路 P0 三连坑 + 社区安装可见性 P1）
+
+用户实测两轮反馈驱动的修复轮：
+
+- **P0「点一键安装零反应」**（探索 GitHub / 精选市场全中招）：同链路堆叠
+  三个前端 bug —— ① `install.js` 的 `const note` 后两处 `note +=`，
+  ES Modules 严格模式下点即 TypeError，确认弹窗都不出现；②
+  `usePkg/known/regEntry` 缩在 `if(isAdd){}` 块内，块外路由选择引用 →
+  ReferenceError 被 try/catch 吞掉；③ `utils.js` 的 `errorBox` 从来没有
+  `classList.add("show")` —— 错误弹窗从不显示，await 它的调用方全部静默
+  挂起，v2.24 的结构化错误自此形同虚设。三处修复 + ui_smoke 三条回归。
+- **P1「装完看不到装在哪」**（审计缺口 D1）：精选市场工件链 / 探索
+  GitHub ghpm 链装进来的技能此前无任何 UI 出口。修复五件套：
+  ① `uninstaller.py` 卸载计划按所有权回退（pid 不在 localPlugins 时还原
+  虚拟插件；classify_skill 逐项校验 owner/哈希，fail-closed 不放宽）；
+  ② `state.py` 本机技能页新增「社区安装」分区（按来源仓库分组，两条链路
+  同框）+「本机技能一览（只读）」全量清单（来源标注）+ 收录源 via=artifact；
+  ③ `market_server.py` 把工件安装记录合并进 `installedRepos` —— 精选市场
+  的「已装 / 已装好筛选」对工件安装同样如实（用户实测二报的根因之一，
+  后端字段需重启服务才生效）；④ 新增 `POST /api/remote/remove`：ghpm 源码
+  链装的仓库经 ghpm remove 移除（自带备份与回滚；所有权不在本市场，
+  市场卸载不代删，fail-closed）；⑤ `jobs.js` 安装完成 toast 说明落盘位置。
+- **「社区安装」分类 chip**：在任何 tab 点击都落到本机技能页的社区安装
+  分区（原先在精选/探索页按分类过滤必然空结果）。
+- **状态检查告警修正**：`application.py` 所有权残留检查把仓库形态 pid
+  （含「/」且 owner=本市场）的社区安装误报为「指向已不存在的插件」；
+  现按社区安装口径豁免，其余形态照旧报。
+
+验证：selftest 789 项全绿；pytest 80 全过；ui_smoke **35 项**（26→35，
+新增 radd 确认弹窗 / errorBox 可见性 / 工件安装全旅程等 9 条回归）；
+ruff / privacy-audit / dup-sync 门禁全绿。前端 `/static` 逐请求读盘刷新
+即生效；后端字段需重启市场服务。
+
 ## 2.34.0 — 2026-10-13（工程质量轮：静态分析门禁 + 自检拆包 + 拷贝一致性）
 
 全仓审计（"有什么可以优化的"）驱动的工程整改，无产品行为变化：

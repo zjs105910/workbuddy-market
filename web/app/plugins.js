@@ -81,6 +81,7 @@ function safetyBar(u){
   const out = [];
   if(c.safe) out.push('<span class="sf ok">可安全卸载 '+c.safe+'</span>');
   if(c.modified) out.push('<span class="sf warn">被改过 '+c.modified+'</span>');
+  if(c.ghpm) out.push('<span class="sf">ghpm 管理 '+c.ghpm+' · 市场不卸载，移除走 ghpm</span>');
   const foreign = (c.foreign||0) + (c.other_plugin||0);
   if(foreign) out.push('<span class="sf">非本市场 '+foreign+' · 不会动</span>');
   if(c.absent) out.push('<span class="sf">未安装 '+c.absent+'</span>');
@@ -132,9 +133,76 @@ function cardLocal(p){
   '</div>';
 }
 
+/* 社区安装卡片（2026-10-14 P1 修复，审计 D1；v2.35 用户实测二修：
+   ghpm 源码链装进来的也同框显示——「安装完成之后都显示在本机社区安装页面」）。
+   两条链路装进来的技能，装过都看得见（本机技能页）、卸得掉：
+     · via=artifact：精选市场不可变工件装进来，本市场拥有所有权 → 可经
+       市场卸载（走回收站）。没有「定位 / 补齐 / 更新」（没有本市场打包
+       目录，内容由不可变工件钉死），多一行工件哈希；
+     · via=ghpm：探索 GitHub「一键安装」走 ghpm 源码链装进来，所有权不在
+       本市场（ghpm 才是管理者，市场代记所有权等于替别人认领文件）→ 市场
+       卸载通路**不**覆盖（fail-closed：没有所有权记录的技能一律不代删），
+       检查更新 / 移除改走 ghpm 自己的命令（remove 自带备份与回滚）。
+   DOM id sanitize（仓库名带斜杠，querySelector 会炸）。 */
+function cardCommunity(p){
+  const u = p.uninstall || {counts:{}};
+  const domId = String(p.id).replace(/\//g, "__");
+  const ghpm = p.via === "ghpm";
+  const rows = (p.skillDetail||[]).map(d => {
+    const k = d.kind;
+    const tag = k === "safe" ? '<span class="tag ok">可卸载</span>'
+              : k === "modified" ? '<span class="tag warn">被改过</span>'
+              : k === "ghpm" ? '<span class="tag">ghpm 管理</span>'
+              : k === "foreign" ? '<span class="tag grey">非本市场</span>'
+              : k === "other_plugin" ? '<span class="tag grey">别的插件</span>'
+              : '<span class="tag grey">未装</span>';
+    return '<div class="row"><code>'+esc(d.skill)+'</code>'+tag+'</div>';
+  }).join("");
+  const hash = p.packageHash ? String(p.packageHash).slice(0,12) : "";
+  const meta = ghpm
+    ? '<span>ghpm 源码安装</span>'+
+      (p.shaShort ? '<code style="font-size:11px">sha '+esc(p.shaShort)+'</code>' : '')+
+      (p.installedAt ? '<span>更新于 '+esc(String(p.installedAt).slice(0,16).replace("T"," "))+'</span>' : '')+
+      '<span>'+p.skills.length+' skill</span>'
+    : '<span>社区安装</span>'+
+      (p.version ? '<span>工件 '+esc(p.version)+'</span>' : '')+
+      (hash ? '<code style="font-size:11px">sha '+esc(hash)+'…</code>' : '')+
+      '<span>'+p.skills.length+' skill</span>';
+  const stTxt = p.installed ? '<span class="state ok">● 已装好 '+esc(p.installedRatio)+'</span>'
+              : p.partial   ? '<span class="state warn">● 装了 '+esc(p.installedRatio)+'</span>'
+              : '<span class="state">○ 未安装</span>';
+  let btns = "";
+  if(ghpm){
+    // ghpm 链：更新 / 移除都走 ghpm 自己的命令（市场不拥有这些技能，
+    // 市场卸载对话框不会为它出现 —— 没有所有权记录的一律不代删）。
+    btns += '<button class="tiny" data-rupdate="'+attr(p.id)+'">检查更新</button>';
+    btns += '<button class="tiny danger" data-rremove="'+attr(p.id)+'">移除…</button>';
+  } else if((u.counts.safe||0) > 0 || (u.counts.modified||0) > 0){
+    btns += '<button class="tiny danger" data-uninstall="'+attr(p.id)+'">卸载…</button>';
+  }
+  const where = ghpm ? ' · 由 ghpm 管理' : '';
+  return '<div class="card '+(p.installed?"on":"")+'">'+
+    '<div class="card-head">'+
+      '<div class="icon">◆</div>'+
+      '<div style="flex:1"><h3>'+esc(p.name)+'</h3>'+
+        '<div class="meta">'+meta+'</div></div>'+
+    '</div>'+
+    '<p class="desc">'+esc(p.description)+'</p>'+
+    safetyBar(u)+
+    '<div><button class="toggle" data-toggle="'+attr(domId)+'">▾ 看 '+p.skills.length+' 个 skill 的状态</button></div>'+
+    '<div class="sk" id="sk-'+domId+'">'+rows+'</div>'+
+    '<div class="card-foot">'+stTxt+' · 位于本机 WorkBuddy 技能目录'+esc(where)+btns+'</div>'+
+  '</div>';
+}
+
 function cardRemote(r){
+  // 2026-10-14 P1 修复（审计 D1）：工件安装的收录源同样如实显示「已装」，
+  // 但不塞进 ghpm 的「检查更新」（工件按 packageHash 钉死，更新语义不同，
+  // 未实现前不装能更新）——引导去本机技能页查看/卸载。
+  const viaArtifact = r.via === "artifact";
   const stTxt = r.installed
-    ? '<span class="state ok">● 已装 '+r.installedSkills+' 个 skill · '+esc(r.installedSha)+'</span>'
+    ? '<span class="state ok">● 已装 '+r.installedSkills+' 个 skill · '+esc(r.installedSha||"")+
+      (viaArtifact ? '（工件）' : '')+'</span>'
     : '<span class="state">○ 未安装</span>';
   const lv = liveOf(r.rawName);
   const stars = (lv && lv.stars) ? lv.stars : r.stars;
@@ -154,7 +222,9 @@ function cardRemote(r){
       (r.keywords||[]).map(k=>'<i>'+esc(k)+'</i>').join("")+'</div>'+
     '<div class="card-foot">'+stTxt+
       (r.installed
-        ? '<button class="tiny" data-rupdate="'+attr(r.rawName)+'">检查更新</button>'
+        ? (viaArtifact
+            ? '<button class="tiny" data-tab="local">本机技能页查看</button>'
+            : '<button class="tiny" data-rupdate="'+attr(r.rawName)+'">检查更新</button>')
         : '<button class="tiny primary" data-radd="'+attr(r.rawName)+'">一键安装</button>')+
     '</div></div>';
 }
@@ -162,9 +232,15 @@ function cardRemote(r){
 function cardRegistry(e){
   const inst = isRegInstalled(e.repo);
   const info = inst ? REG.installedRepos[e.repo] : null;
+  // 2026-10-14 P1 修复（审计 D1）：工件安装（via=artifact）已装事实要如实，
+  // 但不该把它塞进 ghpm 的「检查更新」——工件是按 packageHash 钉死的，
+  // 更新语义不同（未实现前不装能更新）。引导去本机技能页查看/卸载。
+  const viaArtifact = !!(info && info.via === "artifact");
   const fav = isFav(e.repo);
   const stTxt = inst
-    ? '<span class="state ok">● 已装 '+esc(info.name||"")+(info.sha_short? ' · '+esc(info.sha_short):"")+'</span>'
+    ? '<span class="state ok">● 已装 '+esc(info.name||"")+
+      (info.sha_short? ' · '+esc(info.sha_short):'')+
+      (viaArtifact ? '（工件）' : '')+'</span>'
     : '<span class="state">○ 未安装</span>';
   const okLink = String(e.homepage||"").indexOf("https://") === 0
     || String(e.repo||"").indexOf("/") > 0;
@@ -205,7 +281,9 @@ function cardRegistry(e){
       '<button class="tiny fav'+(fav?" on":"")+'" data-fav="'+attr(e.repo)+'" title="收藏">'+(fav?"♥ 已收藏":"♡ 收藏")+'</button>'+
       '<button class="tiny" data-regdetail="'+attr(e.repo)+'">详情</button>'+
       (inst
-        ? '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>'
+        ? (viaArtifact
+            ? '<button class="tiny" data-tab="local">本机技能页查看</button>'
+            : '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>')
         : '<button class="tiny primary" data-radd="'+attr(e.repo)+'" title="'+attr(instTitle)+'">'+instLabel+'</button>')+
     '</div>'+
   '</div>';
@@ -228,6 +306,33 @@ export function renderCards(){
     h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
                       : '<div class="empty">没有符合条件的本机插件（首次安装默认收录 0 个，这是安全设计——你的 skills 都完好保存在 ~/.workbuddy/skills，一个没动）。'+
                         '想收录：编辑 market.config.json 的 localPlugins 后点「重新打包」。</div>';
+
+    // ---- 社区安装（2026-10-14 P1 修复，审计 D1；v2.35 二修纳入 ghpm 链）：
+    // 精选市场工件 / GitHub 收录源装进来的技能，按来源仓库分组。
+    // 工件安装可经市场卸载；ghpm 源码安装由 ghpm 管理（检查更新 / 移除）。
+    const commAll = STATE.community||[];
+    const comm = commAll.filter(pass);
+    if(commAll.length){
+      h += '<div class="sec-title">社区安装 <span class="n">'+comm.length+' / '+commAll.length+
+           ' 个 · 从精选市场与 GitHub 装进来的技能（工件安装可经市场卸载；ghpm 安装由 ghpm 管理）</span></div>';
+      h += comm.length ? '<div class="grid">'+comm.map(cardCommunity).join("")+'</div>'
+                       : '<div class="empty">没有符合条件的社区安装</div>';
+    }
+
+    // ---- 本机技能只读清单（用户实测反馈：「本机技能应该显示本机 WorkBuddy
+    // 的所有技能」）：SKILLS_DIR 全量快照 + 来源标注，纯展示——
+    // 打包/注册仍只认 localPlugins，安全设计不变。
+    const all = STATE.allSkills||[];
+    if(all.length){
+      h += '<div class="sec-title">本机 WorkBuddy 技能一览（只读） <span class="n">'+all.length+
+           ' 个 · 全部位于 '+esc(STATE.wbHome||"~/.workbuddy")+'/skills，WorkBuddy 直接可用</span></div>';
+      h += '<div class="empty" style="text-align:left;line-height:2.1">'+
+        all.map(s => '<code style="margin-right:4px">'+esc(s.name)+'</code>'+
+          (s.source==="market" ? '<span class="tag ok" style="margin-right:8px">市场插件</span>'
+           : s.source==="community" ? '<span class="tag" style="margin-right:8px">社区安装</span>'
+           : '<span class="tag grey" style="margin-right:8px">其他来源</span>')
+        ).join("")+'</div>';
+    }
   }
 
   if(tab === "curated"){

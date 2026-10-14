@@ -31,6 +31,11 @@
                               为兼容模式（用户显式确认，记 warn 日志）；
                               注册表收录仓库上游漂移时回 409（force=true 放行）
   POST /api/remote/update     {repo} ghpm update（后台任务）
+  POST /api/remote/remove     {repo} ghpm remove（后台任务）：ghpm 源码链装的
+                              仓库经 ghpm 移除（ghpm 自带备份与事务回滚）。
+                              这些技能的所有权不在本市场（ghpm 才是管理者），
+                              市场卸载通路不覆盖它们 —— fail-closed，详见
+                              state.py 社区安装分组的注释。
   POST /api/job/<id>/cancel   终止一个后台任务
   POST /api/open/path         {target, id?} 在资源管理器中打开市场内的目录
 
@@ -151,6 +156,10 @@ class JobLimiter:
 
 
 _RUNNER = JobLimiter(MAX_RUNNING_JOBS)
+
+# 后台任务标题里的人话（action → 标题词）。新增 action 必须在这里登记，
+# 否则任务弹窗会露出英文 action 名。
+_ACTION_TITLES = {"add": "安装", "update": "更新", "remove": "移除"}
 
 _state_lock = threading.RLock()
 _state_cache: dict = {"at": 0.0, "key": None, "data": None}
@@ -314,6 +323,7 @@ _STAGE_NAMES = {
     "/api/unregister": "撤销注册", "/api/install": "本机安装",
     "/api/uninstall": "卸载", "/api/trash/purge": "清空回收站",
     "/api/remote/add": "GitHub 安装", "/api/remote/update": "GitHub 更新",
+    "/api/remote/remove": "GitHub 移除",
     "/api/registry/install": "固定产物安装", "/api/catalog/refresh": "刷新目录",
     "/api/favorites": "收藏", "/api/open/path": "打开目录",
 }
@@ -684,12 +694,16 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
     allow_non_skill 仅对 add 生效：默认**不带** --allow-non-skill（供应链
     收紧，v2.12）—— 安装链路默认只接受符合 Skill 协议的仓库；只有前端
     确认框里用户显式勾选「兼容模式」时才放行，且必须留下日志。
+
+    action=remove（v2.35）：ghpm 源码链装的仓库经 ghpm 移除 —— 这些技能的
+    所有权不在本市场（见 state.py 社区安装分组注释），市场自己的卸载通路
+    不覆盖它们，移除必须经 ghpm（自带备份与事务回滚）。
     """
     if not _RUNNER.acquire():
         core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝 {action} {repo}")
         return None
     try:
-        jid = _new_job(f"{'安装' if action == 'add' else '更新'} {repo}")
+        jid = _new_job(f"{_ACTION_TITLES.get(action, action)} {repo}")
     except BaseException:
         _RUNNER.release()                 # 建任务都失败了，令牌必须还回去
         raise
@@ -967,7 +981,24 @@ def registry_data(force: bool = False) -> dict:
 
 def _registry_fresh(force: bool) -> dict:
     reg = core.get_registry(force=force)
-    reg["installedRepos"] = core.installed_repos()
+    installed = core.installed_repos()
+    # 2026-10-14 用户实测 P1 修复（审计缺口 D1）：artifact 链安装的记录只在
+    # 所有权里（pid=来源仓库名，含斜杠），ghpm 的 projects registry 看不到——
+    # 并进来，让精选市场卡片的「已安装 / 已装好筛选 / 检查更新」对工件安装
+    # 同样如实（用户实测：装完在精选页仍显示「未安装」）。
+    own = core.load_ownership()
+    for sname, rec in own["skills"].items():
+        plug = str(rec.get("plugin") or "")
+        if "/" not in plug:
+            continue                      # 本地插件名没有斜杠，不是仓库来源
+        entry = installed.setdefault(plug, {"name": plug, "sha_short": "",
+                                            "skill_names": [], "updated_at": "",
+                                            "via": "artifact"})
+        if sname not in entry["skill_names"]:
+            entry["skill_names"].append(sname)
+        if not entry.get("updated_at"):
+            entry["updated_at"] = rec.get("installedAt", "")
+    reg["installedRepos"] = installed
     reg["favorites"] = core.load_favorites()      # 本机收藏（v2.21，评审 #13）
     reg["ttlHours"] = int(core.REGISTRY_TTL // 3600)
     reg["ok"] = True
@@ -1289,6 +1320,19 @@ class Handler(BaseHTTPRequestHandler):
                 if err2:
                     return self._json({"ok": False, "error": err2}, 400)
                 jid = _remote_job(repo, "update")
+                if jid is None:
+                    return self._json({"ok": False, "error":
+                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
+                                       "请等当前任务完成或取消它"}, 429)
+                return self._json({"ok": True, "jobId": jid})
+            if path == "/api/remote/remove":
+                # ghpm remove（v2.35）：ghpm 源码链装的仓库经 ghpm 移除。
+                # 不走 _registry_drift / allow_non_skill —— 那是 add 的闸门；
+                # ghpm remove 自带备份与事务回滚（删失败自动还原）。
+                repo, err2 = _repo_arg(body)
+                if err2:
+                    return self._json({"ok": False, "error": err2}, 400)
+                jid = _remote_job(repo, "remove")
                 if jid is None:
                     return self._json({"ok": False, "error":
                                        f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"

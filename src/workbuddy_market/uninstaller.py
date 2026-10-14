@@ -132,6 +132,18 @@ def plugin_uninstall_plan(plugin_id: str, cfg: dict | None = None,
     cfg = cfg or load_config()
     spec = next((p for p in cfg.get("localPlugins", []) if p["name"] == plugin_id), None)
     if not spec:
+        # 2026-10-14 用户实测 P1 修复（审计缺口 D1）：artifact 链安装的社区技能
+        # （pid=来源仓库名，如 obra/superpowers）不在 localPlugins 里，但所有权
+        # 记录在案 —— 按所有权还原「虚拟插件」，市场内卸载通路由此覆盖这条
+        # 安装来源（安装成功 ≠ 卸得掉，用户实测「装完找不到、卸不掉」）。
+        # 安全语义不变：classify_skill 仍逐项校验 owner 与内容哈希，
+        # 对不上的一律进 kept，绝不为了卸得掉而放宽判定。
+        own_lookup = load_ownership()
+        owned = sorted(s for s, rec in own_lookup["skills"].items()
+                       if rec.get("plugin") == plugin_id)
+        if owned:
+            spec = {"name": plugin_id, "skills": owned}
+    if not spec:
         return {"ok": False, "error": f"市场里没有插件 {plugin_id}"}
     own = load_ownership()          # 只读一次，别在循环里反复读文件
     items = [classify_skill(plugin_id, s, cfg, own, purpose=purpose,

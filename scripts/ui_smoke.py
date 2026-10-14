@@ -322,6 +322,151 @@ def main():
             else:
                 ck("卸载旅程（无可卸载项，跳过）", True)
 
+            # ==== 2026-10-14 用户实测 P0 回归：data-radd 安装链路三连坑 ====
+            # ① const note +=：点「一键安装」即 TypeError，确认弹窗都不出现；
+            # ② usePkg 块级作用域：确认后 ReferenceError，被 try/catch 吞掉；
+            # ③ errorBox 不 add("show")：错误弹窗从不显示，await 它的调用方
+            #    全部静默挂起（v2.24 结构化错误自此形同虚设）。
+            # 回归口径：确认弹窗必须出现且含路由说明；取消后不得起任务；
+            # errorBox 必须真的进入 .show。三项任一静默即 FAIL。
+            page.click("#tab-curated")
+            page.wait_for_timeout(500)
+            radd_btn = page.locator("[data-radd]").first
+            if radd_btn.count():
+                radd_btn.click()
+                try:
+                    page.wait_for_selector("#cfm.show", timeout=5000)
+                    rtitle = page.locator("#cfmTitle").inner_text()
+                    rbody = page.locator("#cfmBody").inner_text()
+                    ck("★ 一键安装确认弹窗（radd 链路不再静默死亡）",
+                       ("安装" in rtitle) and ("不可变产物" in rbody or "ghpm" in rbody),
+                       rtitle[:60])
+                    page.locator("#cfmNo").click()      # 取消，不真装
+                    page.wait_for_timeout(500)
+                    ck("★ 取消安装不起任务（veil 不出现）",
+                       "show" not in (page.locator("#veil").get_attribute("class") or ""))
+                except Exception as exc:  # noqa: BLE001 —— 弹窗不出现本身就是失败
+                    ck("★ 一键安装确认弹窗（radd 链路不再静默死亡）", False, str(exc)[:80])
+            else:
+                ck("★ 一键安装确认弹窗（隔离区无 radd 入口）", False, "注册表卡片未渲染")
+            # errorBox 可见性：直接调模块函数（静态白名单可达），断言 #cfm 真的显示。
+            # 修复前这个函数从不 add("show")——所有错误弹窗路径静默挂起。
+            page.evaluate(
+                "(async () => { const m = await import('/static/app/utils.js');"
+                " window.__eb = m.errorBox; return typeof window.__eb; })()")
+            page.evaluate("void window.__eb('errorBox 可见性回归', new Error('boom'))")
+            try:
+                page.wait_for_selector("#cfm.show", timeout=5000)
+                eb_title = page.locator("#cfmTitle").inner_text()
+                ck("★ errorBox 真的可见（结构化错误弹窗回归）",
+                   "errorBox" in eb_title, eb_title[:60])
+                page.locator("#cfmYes").click()         # 关闭
+                page.wait_for_timeout(300)
+            except Exception as exc:  # noqa: BLE001
+                ck("★ errorBox 真的可见（结构化错误弹窗回归）", False, str(exc)[:80])
+            page.click("#tab-local")
+            page.wait_for_timeout(300)
+
+            # ==== 2026-10-14 用户实测 P1 回归（审计 D1）：工件安装全旅程 ====
+            # 用户实测原话：「安装完成之后看不到它安装在了哪里，在本机技能和
+            # 已安装里都没有显示」。验收：UI 点安装 → 完成 toast 说清装去哪 →
+            # 社区安装分区可见 → 市场内卸载 → 回收站 → 磁盘落账。
+            # 走真实点击流（不裸 fetch）：watchJob 的完成回调才会刷新 STATE。
+            # obra/superpowers 是隔离配置里的收录源之一（去重后只在探索页），
+            # 安装入口在「探索 GitHub」tab 的收录源卡片上。
+            page.click("#tab-explore")
+            page.wait_for_timeout(500)
+            art_btn = page.locator('[data-radd="obra/superpowers"]')
+            if art_btn.count():
+                art_btn.click()
+                page.wait_for_selector("#cfm.show", timeout=5000)
+                route_txt = page.locator("#cfmBody").inner_text()
+                ck("★ 工件安装确认框说明固定产物链路（哈希校验先行）",
+                   ("产物" in route_txt) and ("SHA" in route_txt or "哈希" in route_txt),
+                   route_txt[:60])
+                page.locator("#cfmYes").click()
+                # 任务弹窗起来 → 等完成 toast（artifact 下载+校验+事务安装）。
+                # 轮询口径：toast 正在显示且文本含「已装入」——不看「从隐藏到
+                # 显示」的边沿（旧 toast 的 3.4s 自动隐藏会制造假竞争），
+                # toast 元素的 textContent 在隐藏后仍残留旧文本，必须同时判可见。
+                done_toast = ""
+                try:
+                    for _ in range(180):
+                        page.wait_for_timeout(1000)
+                        showing = page.evaluate(
+                            "document.querySelector('#toast')"
+                            ".classList.contains('show')")
+                        if showing:
+                            done_toast = page.locator("#toast").inner_text()
+                            if "已装入" in done_toast:
+                                break
+                    ck("★ 工件安装完成 toast 说明落盘位置（修复「看不到装在哪」）",
+                       "已装入" in done_toast, done_toast[:80])
+                except Exception as exc:  # noqa: BLE001
+                    ck("★ 工件安装完成 toast 说明落盘位置（修复「看不到装在哪」）",
+                       False, str(exc)[:80])
+                # 任务弹窗完成后仍开着（watchJob 语义：后台继续），
+                # 先关掉否则 #veil 会挡住后续所有点击。
+                try:
+                    page.locator("#jobClose").click(timeout=5000)
+                except Exception:  # noqa: BLE001 —— 弹窗已关就不必再关
+                    pass
+                page.wait_for_timeout(300)
+                # 社区安装分区 + 卡片可见（修复前：装完哪里都看不到）
+                page.click("#tab-local")
+                page.wait_for_timeout(600)
+                sec_seen = page.evaluate(
+                    "document.body.innerText.indexOf('精选市场工件安装') >= 0")
+                card_seen = page.locator(
+                    '[data-uninstall="obra/superpowers"]').count() > 0
+                ck("★ 安装后「社区安装」分区与卡片可见（本机技能页）",
+                   bool(sec_seen) and bool(card_seen), "obra/superpowers")
+                inv_seen = page.evaluate(
+                    "document.body.innerText.indexOf('本机 WorkBuddy 技能一览') >= 0")
+                ck("★ 本机技能只读清单渲染（全部本机技能 + 来源标注）", bool(inv_seen))
+                # 市场内卸载：确认弹窗列出将移除的 skill → 回收站。
+                # 卸载是同步 POST（响应回来即 toast），同样用「可见 + 关键词」
+                # 轮询，避开 toast 元素残留旧文本与 3.4s 自动隐藏的竞争。
+                un = page.locator('[data-uninstall="obra/superpowers"]')
+                if un.count():
+                    un.click()
+                    page.wait_for_selector("#cfm.show", timeout=5000)
+                    plan_txt = page.locator("#cfmBody").inner_text()
+                    page.locator("#cfmYes").click()
+                    un_toast = ""
+                    try:
+                        for _ in range(60):
+                            page.wait_for_timeout(500)
+                            showing = page.evaluate(
+                                "document.querySelector('#toast')"
+                                ".classList.contains('show')")
+                            if showing:
+                                un_toast = page.locator("#toast").inner_text()
+                                if "回收站" in un_toast or "移除" in un_toast:
+                                    break
+                        ck("★ 市场内卸载工件安装（确认 → 回收站 toast）",
+                           ("回收站" in un_toast or "移除" in un_toast)
+                           and ("将移入回收站" in plan_txt), un_toast[:60])
+                    except Exception as exc:  # noqa: BLE001
+                        ck("★ 市场内卸载工件安装（确认 → 回收站 toast）",
+                           False, str(exc)[:80])
+                    wb_skills = tmp / "wb-home" / "skills"
+                    ck("★ 卸载后磁盘落账（隔离 WBM_HOME 技能已移走）",
+                       wb_skills.is_dir() and not (wb_skills / "brainstorming").exists())
+                    page.click("#tab-local")
+                    page.wait_for_timeout(500)
+                    gone = page.evaluate(
+                        "document.body.innerText.indexOf('精选市场工件安装') < 0")
+                    ck("★ 卸载后社区分区消失（状态闭环）", bool(gone))
+                else:
+                    CI_GATE["skipped_core"].append("市场内卸载工件安装")
+                    ck("★ 市场内卸载工件安装（社区卡片无卸载按钮）", False,
+                       "安装成功但卡片没有卸载入口")
+            else:
+                CI_GATE["skipped_core"].append("工件安装全旅程")
+                ck("★ 工件安装全旅程（精选页无 obra/superpowers 安装入口）", False,
+                   "隔离区注册表没有该条目或已被收录源去重")
+
             # Escape 关弹窗（可访问性）
             page.click("#tab-curated")
             page.wait_for_timeout(300)

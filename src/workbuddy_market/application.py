@@ -380,7 +380,15 @@ def deep_check() -> tuple:
             warnings.append(f"所有权记录里的 {s} 在本机已不存在（残留记录）")
             continue
         if rec.get("plugin") not in local:
-            warnings.append(f"所有权记录里的 {s} 指向已不存在的插件 {rec.get('plugin')}")
+            # 2026-10-14 用户实测二修同步：仓库形态的插件 id（含「/」）且归属
+            # 本市场的是**社区安装**（精选市场工件链，pid=来源仓库名）——
+            # v2.35 起 plugin_uninstall_plan 按所有权回退解析（见 uninstaller），
+            # 本机技能页社区安装分区也可见可卸，不再是「指向不存在的插件」，
+            # 不告警。其余（本地形态 id、或归属别的市场）照旧报残留。
+            plug = str(rec.get("plugin") or "")
+            owner_ok = (not rec.get("owner")) or rec.get("owner") == cfg.get("marketId", "wb-local-market")
+            if not (plug.count("/") == 1 and owner_ok):
+                warnings.append(f"所有权记录里的 {s} 指向已不存在的插件 {rec.get('plugin')}")
         fp = rec.get("fingerprint")
         # 旧记录只有 files/bytes/mtime_ns_max，缺少 mtime_ns_sum —— 结构对不上
         # 就会一直退回完整 SHA-256（正确但慢），所以提示重装补齐

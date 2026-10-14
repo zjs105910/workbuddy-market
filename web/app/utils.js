@@ -86,6 +86,11 @@ export function errorBox(title, err, retry){
   return new Promise(resolve => {
     $("#cfmTitle").textContent = title;
     $("#cfmBody").innerHTML = html;
+    // 2026-10-14 用户实测 P0 修复（三）：这个函数从头到尾没有 add("show")——
+    // errorBox 从来不显示，await 它的调用方（安装/卸载/远程装失败分支）
+    // 全部静默挂起：无弹窗、无 toast、无控制台错误，用户点完没反应。
+    // v2.24 的结构化错误弹窗自此形同虚设，ui_smoke 也只断言了 toast 路径。
+    $("#cfm").classList.add("show");
     // 按钮排布：cfmNo = 次要动作区（重试 / 日志 / 诊断 塞进来），cfmYes = 关闭
     const noBtn = $("#cfmNo");
     noBtn.style.display = "";
