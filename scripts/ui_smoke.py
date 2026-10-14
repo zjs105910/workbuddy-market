@@ -254,7 +254,29 @@ def main():
                    all(k in body for k in ("来自哪里", "是否可信", "能做什么", "能否安装")),
                    body[:80])
                 page.locator("#cfmYes").click()
-                page.wait_for_timeout(200)
+                page.wait_for_function(
+                    "!document.querySelector('#cfm').classList.contains('show')",
+                    timeout=5000)
+                # v2.35 NEXT_STEPS 任务3：工件构建日期显式化。精选列表
+                # 前几张可能是不带工件的 ghpm-only 条目，遍历前 6 张找到
+                # 带固定产物的再断言（50 条收录里 ghpm-only 不足半数，
+                # 前 6 张必中；隔离区 registry 是仓库副本，数据确定性）。
+                date_seen = False
+                n_detail = page.locator("[data-regdetail]").count()
+                for i in range(min(6, n_detail)):
+                    page.locator("[data-regdetail]").nth(i).click()
+                    page.wait_for_selector("#cfm.show", timeout=5000)
+                    body = page.locator("#cfmBody").inner_text()
+                    if "工件构建日期" in body:
+                        date_seen = True
+                    page.locator("#cfmYes").click()
+                    page.wait_for_function(
+                        "!document.querySelector('#cfm').classList.contains('show')",
+                        timeout=5000)
+                    if date_seen:
+                        break
+                ck("★ 详情弹窗展示工件构建日期（任务3，零协议变更）", date_seen)
+                # 循环每轮结束都已关窗（wait_for_function 保证），这里不能再点
             else:
                 CI_GATE["skipped_core"].append("注册表详情弹窗")
                 ck("注册表详情弹窗（社区目录为空，跳过）", True)

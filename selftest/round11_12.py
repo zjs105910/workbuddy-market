@@ -302,6 +302,21 @@ def round12():
         except core.ConfigError:
             ck(f"parse_registry 拒绝{why}", True)
 
+    # --- 27B-2. artifact_build_date（v2.35 NEXT_STEPS 任务3）：
+    # 从 packageUrl 的发布 tag 解析工件构建日期；没有/解析不出一律
+    # 空串——没有日期绝不用 pushedAt 冒充。
+    from workbuddy_market.registry import artifact_build_date   # noqa: E402
+    ck("★ artifact_build_date：发布 tag 内日期解析",
+       artifact_build_date({"packageUrl":
+           "https://github.com/o/r/releases/download/registry-artifacts-2026-10-11/x.tar.gz"})
+       == "2026-10-11")
+    ck("artifact_build_date：无 packageUrl → 空串（不冒充）",
+       artifact_build_date({"pushedAt": "2026-10-09"}) == ""
+       and artifact_build_date({}) == "")
+    ck("artifact_build_date：tag 不含日期 → 空串",
+       artifact_build_date({"packageUrl":
+           "https://github.com/o/r/releases/download/latest/x.tar.gz"}) == "")
+
     # --- 27C. 拉取路线与三级兜底（假接缝，零网络）
     good_doc = {"schema": 1, "updatedAt": "2026-10-07",
                 "plugins": [{"repo": "owner/repo", "displayName": "A"}]}

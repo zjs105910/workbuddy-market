@@ -12,6 +12,15 @@ import { esc, attr } from "./utils.js";
 import { trustBadge, permRows } from "./trust.js";
 import { galleryShot } from "./screenshots.js";
 
+/* v2.35 NEXT_STEPS 任务3：工件构建日期显式化（零协议变更）。
+   固定产物的发布 tag 形如 registry-artifacts-YYYY-MM-DD，从 packageUrl
+   解析；解析不出来就不显示——没有日期绝不用 pushedAt 冒充。后端 CLI 同款
+   口径见 src/workbuddy_market/registry.py 的 artifact_build_date()。 */
+function artifactDateOf(e){
+  const m = /registry-artifacts-(\d{4}-\d{2}-\d{2})/.exec(String(e.packageUrl || ""));
+  return m ? m[1] : "";
+}
+
 export function regDetailHtml(e){
   const href = e.homepage && String(e.homepage).indexOf("https://") === 0
     ? e.homepage : "https://github.com/"+e.repo;
@@ -64,8 +73,19 @@ export function regDetailHtml(e){
   const plat = Array.isArray(e.platforms) && e.platforms.length
     ? e.platforms.join("、") : "未声明（默认按全平台对待）";
   const hasPkg = !!(e.packageUrl && e.packageHash);
+  const artDate = artifactDateOf(e);
+  // 上游在工件构建后还有提交 → 如实提示「此工件未包含」，安装前知道
+  // 自己装的是哪一份（工件按 packageHash 钉死，语义上就不是最新源码）。
+  const pushed = String(e.pushedAt || "").slice(0, 10);
+  const artStale = artDate && pushed && pushed > artDate;
   h += '<div class="grp"><h5>④ 能否安装？</h5><ul>'+
     '<li>产物版本：'+(e.version ? esc(e.version) : '未声明')+'</li>'+
+    (artDate
+      ? '<li>工件构建日期：<b>'+esc(artDate)+'</b>（来自固定产物发布，'+
+        '安装即这一份）'+(artStale
+          ? ' · <span class="tag warn">上游 '+esc(pushed)+' 有更新，此工件未包含</span>'
+          : '')+'</li>'
+      : '')+
     '<li>平台：'+esc(plat)+'</li>'+
     '<li>WorkBuddy 版本：'+(e.minWorkBuddyVersion ? '≥ '+esc(e.minWorkBuddyVersion) : '未声明')+'</li>'+
     (hasPkg

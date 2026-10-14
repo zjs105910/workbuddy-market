@@ -133,6 +133,7 @@ def _registry_list_main(argv: list) -> int:
     args = ap.parse_args(argv[1:] if argv else [])
 
     from .registry import get_registry          # noqa: PLC0415
+    from .registry import artifact_build_date   # noqa: PLC0415
     from .favorites import load_favorites       # noqa: PLC0415
 
     try:
@@ -188,6 +189,16 @@ def _registry_list_main(argv: list) -> int:
             print(f"      ({e['displayNameEn'][:80]})")
         elif e.get("descriptionEn") and e.get("description"):
             print(f"      ({e['descriptionEn'][:80]})")
+        # v2.35 NEXT_STEPS 任务3：工件构建日期显式化（从 packageUrl 的
+        # 发布 tag 解析，零协议变更）；pushedAt 比工件新 → 如实提示
+        # 「上游有更新、此工件未包含」，别让用户以为装的是最新源码。
+        art = artifact_build_date(e)
+        if art:
+            hint = ""
+            pushed = str(e.get("pushedAt") or "")[:10]
+            if pushed and pushed > art:
+                hint = f"（上游 {pushed} 有更新，此工件未包含）"
+            print(f"      工件 {art}{hint}")
     return 0
 
 

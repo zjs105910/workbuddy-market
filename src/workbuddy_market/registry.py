@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.request
 
@@ -107,6 +108,23 @@ def _clean_text(v, limit: int = 400) -> str:
     if not isinstance(v, str):
         return ""
     return v.strip()[:limit]
+
+
+# 工件构建日期（v2.35 NEXT_STEPS 任务3）：固定产物的发布 tag 形如
+# registry-artifacts-YYYY-MM-DD（scripts/build_artifacts.py 每日发版），
+# 从 packageUrl 解析即可，**不动注册表 schema**（契约 additionalProperties
+# =false，加字段要升版本；展示层零协议变更）。解析不出来返回空串——
+# 没有日期就别说有，绝不用 pushedAt 冒充工件日期。
+_ARTIFACT_TAG_DATE = re.compile(r"registry-artifacts-(\d{4}-\d{2}-\d{2})")
+
+
+def artifact_build_date(entry: dict) -> str:
+    """注册表条目的工件构建日期（YYYY-MM-DD）；无固定产物或解析失败 → ""。"""
+    url = entry.get("packageUrl") if isinstance(entry, dict) else None
+    if not isinstance(url, str):
+        return ""
+    m = _ARTIFACT_TAG_DATE.search(url)
+    return m.group(1) if m else ""
 
 
 # 截图域名白名单（评审 #12）：截图的威胁模型不是哈希，而是外链追踪 /
