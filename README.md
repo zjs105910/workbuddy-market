@@ -195,8 +195,8 @@ cd workbuddy-market
 | 平台 | 当前状态 |
 | --- | --- |
 | Windows 10/11 | 主要使用与验证环境；仓库文档记录了 WorkBuddy 5.7.6 面板实测 |
-| Linux | CI 三平台硬门槛：完整隔离 selftest（789 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
-| macOS | CI 三平台硬门槛：完整隔离 selftest（789 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
+| Linux | CI 三平台硬门槛：完整隔离 selftest（804 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
+| macOS | CI 三平台硬门槛：完整隔离 selftest（804 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
 
 ## 文档与社区
 

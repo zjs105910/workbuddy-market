@@ -196,8 +196,8 @@ Permission and compatibility details shown before installation:
 | Platform | Status |
 | --- | --- |
 | Windows 10/11 | Primary development and use environment; the repository documents a WorkBuddy 5.7.6 panel test |
-| Linux | CI hard gate on all three platforms: full isolated selftest (789 checks) + pytest + POSIX semantic smoke + wheel build + ui-smoke; real WorkBuddy host integration not yet verified |
-| macOS | CI hard gate on all three platforms: full isolated selftest (789 checks) + pytest; real fcntl/symlink semantics exercised by CI; real WorkBuddy host integration not yet verified |
+| Linux | CI hard gate on all three platforms: full isolated selftest (804 checks) + pytest + POSIX semantic smoke + wheel build + ui-smoke; real WorkBuddy host integration not yet verified |
+| macOS | CI hard gate on all three platforms: full isolated selftest (804 checks) + pytest; real fcntl/symlink semantics exercised by CI; real WorkBuddy host integration not yet verified |
 
 ## Documentation and community
 

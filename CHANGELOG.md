@@ -4,6 +4,32 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.35.1 — 2026-10-15（修复：安装后市场状态不翻转 + 文档计数对齐）
+
+把 v2.35.0 tag 之后 main 上的两个修复收入正式版，外加文档计数对齐：
+
+- **P1「装完技能，市场卡片不翻转已装」**（CI fresh-clone 第二跑实锤）：
+  工件安装任务完成后只清了 `/api/state` 的缓存，`/api/registry` 的
+  600 秒内存缓存继续捂旧数据 —— `installedRepos` 合并（v2.35.0 任务4 /
+  审计 D1）看不到新装条目，精选市场卡片不翻转「已装 / 本机技能页查看」，
+  radd 添加入口残留，用户装完看到的市场状态最长滞后 600 秒。
+  `invalidate_state()` 现在一并清 `_registry_mem`：state 与 registry 的
+  数据源（配置 / 所有权）总是同变，装 / 卸 / 同步后一起失效，多清无害；
+  收藏路径独立的 `invalidate_registry_mem` 保持不变。
+- **CI 修复（ui_smoke 工件旅程入口定位）**：fresh-clone 配置由
+  `market.config.example.json` 生成、没有 remoteSources —— obra 的安装
+  入口在精选页的注册表卡片上，旅程原来只在探索页找，把「配置形态」
+  误判成「链路坏了」导致 `--ci` 核心检查 FAIL。改为先探索页、无则精选页
+  （on_explore 记录形态）；移管 / 已装好筛选断言只在收录源形态跑；
+  卸载后入口恢复两处都试。本机收录源形态回归 49/0 不变。
+- **文档计数对齐**：selftest 计数 v2.35.0 起实际已是 804 项，README /
+  README_EN / ADVANCED_GUIDE / FAQ 共 9 处仍写 789 —— 本轮一并对齐
+  （v2.35.0 漏同步的文档滞后，无代码行为变化）。
+
+验证：selftest 804 项全绿 0 失败；pytest 90 项；ui_smoke 本地回归 49/0；
+三平台 CI（Windows / Linux / macOS × Python 3.10 / 3.13）全绿；
+Release 三平台发行包冒烟通过；已发布附件 SHA-256 校验一致。
+
 ## 2.35.0 — 2026-10-14（修复：真实用户反馈安装链路 P0 三连坑 + 社区安装可见性 P1）
 
 用户实测两轮反馈驱动的修复轮：
