@@ -72,10 +72,15 @@ jobs:
           # GITHUB_TOKEN 推的分支更新同样拿不到 CI（PR #7 更新后 action_required
           # 实锤）——push 必须和建 PR 同一 PAT 身份。用 -c 一次性覆盖 checkout
           # 持久化的 extraheader：token 不进 URL、不落配置，只随本条命令生效。
-          # v2.35.2 修复：checkout v5 起持久化凭据改走 credential helper —— 只覆盖
-          # extraheader 会双份 Authorization（Duplicate header 400 实锤），push 时
-          # 必须同时清空 helper，只留 PAT extraheader。
-          git -c credential.helper= -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push -f origin "$BR"
+          # v2.35.2 修复：checkout v5 持久化的凭据键/作用域不再可枚举 ——
+          # 只覆盖通用 extraheader 键会双份 Authorization（Duplicate header
+          # 400 两次实锤）。push 前把 system/global/local 三个作用域里所有
+          # extraheader 全部拆掉，helper 全部清空，只留本条命令的 PAT。
+          for scope in --system --global --local; do
+            git config $scope --name-only --get-regexp 'http\..*\.extraheader' 2>/dev/null \
+              | while read -r k; do git config $scope --unset-all "$k" 2>/dev/null || true; done || true
+          done
+          git -c credential.helper= -c credential.https://github.com.helper= -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push -f origin "$BR"
           gh pr create --base main --head "$BR" \
             --title "$TITLE" \
             --body "自动刷新注册表动态字段（stars / pushedAt / latestSha）。静态字段未动；合并前等 CI 通过。" \
