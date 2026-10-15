@@ -168,13 +168,22 @@ def _tarball_fetch(url: str) -> bytes:
 
 # ---------------------------------------------------------------- 纯函数层
 
-def safe_extract_tar(tar_path: Path, dest: Path) -> Path:
+def safe_extract_tar(tar_path: Path, dest: Path,
+                     materialized: list | None = None) -> Path:
     """安全解包 GitHub tarball（不可信输入，按攻击面处理）。
 
-    · 成员名绝对路径 / 盘符 / ``..`` 段 → 拒绝；链接 / 设备成员 → 拒绝；
+    · 成员名绝对路径 / 盘符 / ``..`` 段 → 拒绝；硬链接 / 设备成员 → 拒绝；
+    · v2.35.2 起，**指向包内普通文件的相对符号链接**按「物化」处理：
+      解析出最终目标文件后，把目标内容写成普通文件（产物里从此没有
+      链接，安装端三层链接防线原样有效）。链式链接最多跟 8 跳；
+      指向目录、悬空、成环、绝对路径、出包（``..`` 逃逸 / 盘符）的
+      链接一律 fail-closed 拒绝 —— 收紧范围只这一种安全形态；
     · 自动剥掉 tarball 的第一层前缀（GitHub 恒为 ``<repo>-<ref>/``）；
+    · ``materialized`` 传 list 时逐项记录 ``{"from": 链接路径, "to": 目标}``
+      （调用方如实写进 report，供人工对账）；
     · 返回剥前缀后的内容根目录。
     """
+    import posixpath
     import workbuddy_market.errors as werr
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -186,8 +195,16 @@ def safe_extract_tar(tar_path: Path, dest: Path) -> Path:
             name = m.name.replace("\\", "/")
             if name.startswith("/") or re.match(r"^[A-Za-z]:", name) or ".." in name.split("/"):
                 raise werr.ArtifactError(f"tar 成员非法（路径穿越）：{name!r}")
-            if not (m.isfile() or m.isdir()):
-                raise werr.ArtifactError(f"tar 含符号链接 / 非常规成员：{name!r}")
+            if m.issym():
+                ln = m.linkname.replace("\\", "/")
+                # 这里只拒绝对路径 / 盘符（任何上下文都不可物化）；
+                # 含 ``..`` 的相对链接放行到解析阶段 —— 以成员目录为
+                # 基准归一化后仍在包内的（docs/../guide.md 这类）是合法形态。
+                if ln.startswith("/") or re.match(r"^[A-Za-z]:", ln):
+                    raise werr.ArtifactError(
+                        f"tar 符号链接目标不在包内（fail-closed）：{name!r} -> {m.linkname!r}")
+            elif not (m.isfile() or m.isdir()):
+                raise werr.ArtifactError(f"tar 含硬链接 / 设备等非常规成员：{name!r}")
             seg = name.split("/", 1)[0]
             if prefix is None:
                 prefix = seg
@@ -196,6 +213,44 @@ def safe_extract_tar(tar_path: Path, dest: Path) -> Path:
             members.append(m)
     if prefix is None:
         raise werr.ArtifactError("tarball 是空的")
+
+    # 剥前缀视图：普通文件与符号链接分别建表，供链接解析
+    file_rels: dict = {}
+    sym_rels: dict = {}
+    for m in members:
+        rel = m.name.replace("\\", "/")
+        if rel == prefix:
+            continue
+        rel = rel[len(prefix) + 1:] if rel.startswith(prefix + "/") else rel
+        if m.isfile():
+            file_rels[rel] = m
+        elif m.issym():
+            sym_rels[rel] = m.linkname.replace("\\", "/")
+
+    def _resolve_link(rel: str) -> tuple:
+        """解析包内文件符号链接 → 最终普通文件成员；解析不到就拒绝。"""
+        cur, seen, hops = rel, set(), 0
+        while cur in sym_rels:
+            hops += 1
+            if hops > 8:
+                raise werr.ArtifactError(f"tar 符号链接链过长（>8 跳）：{rel!r}")
+            if cur in seen:
+                raise werr.ArtifactError(f"tar 符号链接成环：{rel!r}")
+            seen.add(cur)
+            nxt = posixpath.normpath(
+                posixpath.join(posixpath.dirname(cur), sym_rels[cur])).replace("\\", "/")
+            if (nxt.startswith("/") or re.match(r"^[A-Za-z]:", nxt)
+                    or nxt.startswith("../")):
+                raise werr.ArtifactError(
+                    f"tar 符号链接解析后出包（fail-closed）：{rel!r} -> {cur!r}")
+            cur = nxt
+        if cur in file_rels:
+            return cur, file_rels[cur]
+        raise werr.ArtifactError(
+            f"tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：{rel!r}")
+
+    resolved: dict = {rel: _resolve_link(rel) for rel in sym_rels}
+
     # 第二遍：解包（TarFile 不支持 seek，重新打开同一个文件即可）
     with tarfile.open(tar_path, "r:gz") as tf:
         for m in members:
@@ -211,6 +266,21 @@ def safe_extract_tar(tar_path: Path, dest: Path) -> Path:
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
+            if m.issym():
+                # v2.35.2：物化 —— 写目标文件的内容，不留链接
+                src_rel, src_m = resolved[rel]
+                src = tf.extractfile(src_m)
+                if src is None:
+                    raise werr.ArtifactError(f"tar 链接目标读不出：{src_rel!r}")
+                with target.open("wb") as dst:
+                    while True:
+                        chunk = src.read(DOWNLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                if materialized is not None:
+                    materialized.append({"from": rel, "to": src_rel})
+                continue
             src = tf.extractfile(m)
             if src is None:
                 raise werr.ArtifactError(f"tar 成员读不出：{m.name!r}")
@@ -230,7 +300,11 @@ def choose_skills_root(root: Path, slug_hint: str) -> tuple[Path, list[str]]:
 
       a. ``root/skills/<name>/SKILL.md`` → (root, [names])；
       b. root 的子目录各自含 SKILL.md → 组 staging/skills/ 再打包；
-      c. root 本身就是一个 skill（root/SKILL.md）→ staging/skills/<slug>。
+      c. root 本身就是一个 skill（root/SKILL.md）→ staging/skills/<slug>；
+      d. 嵌套合集（v2.35.2）：``<dir>/skills/<name>/SKILL.md`` —— 上游把
+         skills 挂在自己插件的 skills/ 子目录下（wshobson/agents 的
+         ``plugins/*/skills/*``），收全部命中的 skill 组 staging 打包，
+         跨插件同名按父目录名消歧。
 
     都不是 → ConfigError（这个条目不满足打包形态，如实记录失败）。
     """
@@ -260,6 +334,25 @@ def choose_skills_root(root: Path, slug_hint: str) -> tuple[Path, list[str]]:
         (staging / "skills" / single).parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(root, staging / "skills" / single, symlinks=True)
         return staging, [single]
+    # d. 嵌套合集（v2.35.2）：任何 ``<dir>/skills/<name>/SKILL.md``。
+    #    注意这是内容质量敏感的贪心收集（示例目录也会进包）—— 由收录
+    #    人工审核 + 64MB 体积闸门兜底，构建侧不做语义筛选。
+    import shutil
+    nested = sorted({d.parent for d in root.rglob(_SKILL_MD)
+                     if d.is_file() and d.parent.parent.name == "skills"})
+    if nested:
+        staging = root.parent / f"{root.name}-staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        (staging / "skills").mkdir(parents=True, exist_ok=True)
+        used: dict = {}
+        for sd in nested:
+            name = sd.name
+            if name in used:                      # 跨插件同名：父目录名消歧
+                name = f"{sd.parent.parent.name}-{sd.name}"
+            used[name] = sd
+        for name, sd in used.items():
+            shutil.copytree(sd, staging / "skills" / name, symlinks=True)
+        return staging, sorted(used)
     raise ConfigError(f"{slug_hint}: 解包内容里找不到可打包的 skill（无 skills/、无含 SKILL.md 的子目录）")
 
 
@@ -317,7 +410,8 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
     try:
         tar_path = tmp / "src.tar.gz"
         tar_path.write_bytes(fetch(f"https://codeload.github.com/{repo}/tar.gz/{ref}"))
-        root = safe_extract_tar(tar_path, tmp / "src")
+        mat: list = []                      # v2.35.2：包内文件链接物化清单（如实进 report）
+        root = safe_extract_tar(tar_path, tmp / "src", materialized=mat)
         src, skills = choose_skills_root(root, slug)
         # v2.35 任务4：瘦身暂存后再 pack —— 只带声明的 skills + 剔除垃圾。
         # pack_package 对 src 是全量复制，不先瘦身的话仓库级非 skill 内容
@@ -381,7 +475,10 @@ def build_one(entry: dict, out_dir: Path, fetch=_tarball_fetch,
                 "skills": skills,
                 "bytes": zip_path.stat().st_size,
                 # v2.35 任务4：瘦身剔除量如实记进 report（剔了什么、多少字节）
-                "excluded": excluded}
+                "excluded": excluded,
+                # v2.35.2：包内文件符号链接物化清单（构建期决
+                # 策可对账；产物里从此没有链接，安装端防线不变）
+                "materializedLinks": mat}
     finally:
         import shutil
         if work_root is None:

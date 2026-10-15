@@ -17,6 +17,10 @@ name: Artifacts
 # 剔除 VCS/缓存/系统垃圾；产物超过 64MB 的条目拒发固定工件（report.json
 # 的 excluded 段），--patch-registry 拔掉其工件指针，安装回落 ghpm 源码
 # 路线。阈值与理由见 scripts/build_artifacts.py 的 ARTIFACT_MAX_BYTES。
+# v2.35.2 修订（用户实测：收录源在全新环境装不上）：tarball 里**指向包内
+# 普通文件的相对符号链接**（上游 README/AGENTS.md 常见做法）构建期物化成
+# 目标内容并如实记进 report.materializedLinks —— 产物里没有链接，安装端
+# 链接防线不变；目录 / 悬空 / 成环 / 绝对 / 出包链接仍 fail-closed 拒绝。
 on:
   schedule:
     - cron: "43 20 * * *"     # 每天 20:43 UTC（与 registry 的 21:21 错开）

@@ -14,7 +14,16 @@ export async function api(path, body){
   if(body) headers["Content-Type"] = "application/json";
   const opt = {headers};
   if(body){ opt.method = "POST"; opt.body = JSON.stringify(body); }
-  const r = await fetch(path, opt);
+  let r;
+  try{
+    r = await fetch(path, opt);
+  }catch(e){
+    // v2.35.2 用户实测：浏览器层连接失败原样抛 "Failed to fetch"，
+    // 用户完全看不懂。翻成人话 + 给排查路径（服务没开 / 页面是旧端口
+    // 的旧标签页 / 系统代理把 127.0.0.1 也劫走了）。
+    throw new Error("本机服务没有响应：请确认市场窗口还开着，并刷新本页再试。"
+      + "若开了系统代理 / VPN，请把 127.0.0.1 加入直连（绕过）名单后刷新重试。");
+  }
   let data = {};
   try { data = await r.json(); } catch(e){}
   if(r.status === 403) throw new Error("本机服务拒绝了这次请求（口令失效，刷新页面即可）");

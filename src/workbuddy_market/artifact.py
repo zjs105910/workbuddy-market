@@ -40,6 +40,7 @@ import os
 import re
 import shutil
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -103,18 +104,38 @@ def download_artifact(url: str, dest_dir, *, expected_hash=None,
     h = hashlib.sha256()
     total = 0
     try:
-        with fetch(url, timeout=timeout) as resp:
-            with part.open("wb") as fh:
-                while True:
-                    chunk = resp.read(DOWNLOAD_CHUNK)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > size_limit:
-                        raise ArtifactError(
-                            f"artifact 超过大小上限（>{size_limit} 字节），已中止下载")
-                    fh.write(chunk)
-                    h.update(chunk)
+        try:
+            with fetch(url, timeout=timeout) as resp:
+                with part.open("wb") as fh:
+                    while True:
+                        chunk = resp.read(DOWNLOAD_CHUNK)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > size_limit:
+                            raise ArtifactError(
+                                f"artifact 超过大小上限（>{size_limit} 字节），已中止下载")
+                        fh.write(chunk)
+                        h.update(chunk)
+        except urllib.error.HTTPError as exc:
+            # v2.35.2 用户实测：服务端下载失败原样抛 urlopen 异常，用户看不懂。
+            # 翻成人话：HTTP 状态 = GitHub 那头的问题；连接类错误 = 本机网络。
+            hint = ("产物可能已被清理或不存在，请稍后重试或点「检查更新」"
+                    if exc.code in (403, 404, 410) else "请稍后重试")
+            raise ArtifactError(
+                f"下载不可变产物失败：GitHub 返回 HTTP {exc.code}。{hint}。") from exc
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", None) or exc
+            raise ArtifactError(
+                f"下载不可变产物失败：连不上 GitHub（{reason}）。"
+                "这是网络问题，不是包的问题 —— 包还没开始下载。请确认本机能访问"
+                " github.com（需要代理的环境先开系统代理），然后点重试。") from exc
+        except OSError as exc:
+            # 部分平台直连被拒 / 中途断流直接抛 OSError（如 WinError 10061）
+            got = f"（已收 {total} 字节后中断）" if total else ""
+            raise ArtifactError(
+                f"下载不可变产物失败：网络连不上或中断{got}（{exc}）。"
+                "请确认能访问 github.com（需要代理时先开系统代理）后重试。") from exc
         got = h.hexdigest()
         if want and got != want:
             raise ArtifactError(
