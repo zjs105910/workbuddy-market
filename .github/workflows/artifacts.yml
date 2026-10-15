@@ -102,7 +102,10 @@ jobs:
           # 挂 GITHUB_TOKEN 凭据，GITHUB_TOKEN 推的分支更新同样拿不到 CI（PR #7
           # 更新后 action_required 实锤）——push 必须和建 PR 同一 PAT 身份。
           # 用 -c 一次性覆盖 checkout 持久化的 extraheader：token 不进 URL、不落配置。
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push -f origin "$BR"
+          # v2.35.2 修复：checkout v5 起持久化凭据改走 credential helper —— 只覆盖
+          # extraheader 会双份 Authorization（Duplicate header 400 实锤），push 时
+          # 必须同时清空 helper，只留 PAT extraheader。
+          git -c credential.helper= -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push -f origin "$BR"
           gh pr create --base main --head "$BR" \
             --title "$TITLE" \
             --body "回写每日构建的不可变产物字段（packageUrl / packageHash / manifestHash）。安装端会按 packageHash 逐包校验；合并前等 CI 通过。" \
