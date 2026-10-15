@@ -19,7 +19,7 @@
       ],
       "homepage": "https://github.com/anthropics/skills",
       "addedAt": "2026-10-06",
-      "stars": 181204,
+      "stars": 181392,
       "pushedAt": "2026-10-09",
       "latestSha": "dbd4588f9e1033efb41dad4bef2f7947c8993d44",
       "refreshedAt": "2026-10-15",
@@ -53,7 +53,7 @@
       ],
       "homepage": "https://github.com/obra/superpowers",
       "addedAt": "2026-10-06",
-      "stars": 299229,
+      "stars": 299865,
       "pushedAt": "2026-10-10",
       "latestSha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
       "refreshedAt": "2026-10-15",
@@ -86,7 +86,7 @@
       ],
       "homepage": "https://github.com/mattpocock/skills",
       "addedAt": "2026-10-07",
-      "stars": 291502,
+      "stars": 292811,
       "pushedAt": "2026-10-13",
       "latestSha": "49dd158d1076134a641b33efb035946536778336",
       "refreshedAt": "2026-10-15",
@@ -115,7 +115,7 @@
       ],
       "homepage": "https://github.com/garrytan/gstack",
       "addedAt": "2026-10-07",
-      "stars": 136432,
+      "stars": 136565,
       "pushedAt": "2026-10-15",
       "latestSha": "47d639abffa882b8cbb641d7d1dedf08ecada9ec",
       "refreshedAt": "2026-10-15",
@@ -144,7 +144,7 @@
       ],
       "homepage": "https://github.com/addyosmani/agent-skills",
       "addedAt": "2026-10-07",
-      "stars": 106734,
+      "stars": 107035,
       "pushedAt": "2026-10-13",
       "latestSha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
       "refreshedAt": "2026-10-15",
@@ -173,9 +173,9 @@
       ],
       "homepage": "https://github.com/nexu-io/open-design",
       "addedAt": "2026-10-07",
-      "stars": 101192,
+      "stars": 101347,
       "pushedAt": "2026-10-15",
-      "latestSha": "14fee234e6eb268058fed17ba979d8e22798dd34",
+      "latestSha": "7abd6fc2b11987c3940eb4ffc461478ff37c0b33",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "53231d40b778d88eba23f35547bf99485d3ae9fc",
@@ -206,7 +206,7 @@
       ],
       "homepage": "https://github.com/Leonxlnx/taste-skill",
       "addedAt": "2026-10-07",
-      "stars": 96563,
+      "stars": 97308,
       "pushedAt": "2026-10-14",
       "latestSha": "f624f37a8c650b9cc550253104925efe4c8de246",
       "refreshedAt": "2026-10-15",
@@ -239,8 +239,8 @@
       ],
       "homepage": "https://github.com/K-Dense-AI/scientific-agent-skills",
       "addedAt": "2026-10-07",
-      "stars": 49515,
-      "pushedAt": "2026-10-12",
+      "stars": 50437,
+      "pushedAt": "2026-10-15",
       "latestSha": "a1043ef544e3a100c28e70a736b6cf32554d0677",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
@@ -272,9 +272,9 @@
       ],
       "homepage": "https://agent-browser.dev",
       "addedAt": "2026-10-06",
-      "stars": 43990,
+      "stars": 44042,
       "pushedAt": "2026-10-15",
-      "latestSha": "518f6e5d73f92a403acfd07d5e5cfec0f79dcb77",
+      "latestSha": "dac13bb87468fe9d74a040d862720f6cc17a9565",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "0207911f1bd4d0393eddaa90f2e50f96e0fb8974",
@@ -307,9 +307,9 @@
       ],
       "homepage": "https://github.com/wshobson/agents",
       "addedAt": "2026-10-06",
-      "stars": 40788,
-      "pushedAt": "2026-10-14",
-      "latestSha": "46891e7e60da0e52baf1050b7b6391b64e84c6d9",
+      "stars": 40862,
+      "pushedAt": "2026-10-15",
+      "latestSha": "044b4b21f083948e69ec878a7b07c8d0951a6ffa",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "46891e7e60da0e52baf1050b7b6391b64e84c6d9",
@@ -340,9 +340,9 @@
       ],
       "homepage": "https://github.com/affaan-m/ECC",
       "addedAt": "2026-10-07",
-      "stars": 279562,
-      "pushedAt": "2026-10-12",
-      "latestSha": "b92f181b3b748d1abbc2afd94af6aa7d8c8fca29",
+      "stars": 280340,
+      "pushedAt": "2026-10-15",
+      "latestSha": "76aaa77df6adc5b889e689007bf99b9a4f74af34",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "ef648e01899ba3e8dc6371642deaaf64b4477775",
@@ -372,7 +372,7 @@
       ],
       "homepage": "https://github.com/multica-ai/andrej-karpathy-skills",
       "addedAt": "2026-10-07",
-      "stars": 219855,
+      "stars": 220091,
       "pushedAt": "2026-04-20",
       "latestSha": "2c606141936f1eeef17fa3043a72095b4765b9c2",
       "refreshedAt": "2026-10-15",
@@ -403,7 +403,7 @@
       ],
       "homepage": "https://github.com/DietrichGebert/ponytail",
       "addedAt": "2026-10-07",
-      "stars": 163720,
+      "stars": 164391,
       "pushedAt": "2026-10-15",
       "latestSha": "84740e3d344b69b4a133201fa519eb37a62a2b2a",
       "refreshedAt": "2026-10-15",
@@ -435,7 +435,7 @@
       ],
       "homepage": "https://github.com/tt-a1i/archify",
       "addedAt": "2026-10-07",
-      "stars": 83640,
+      "stars": 84036,
       "pushedAt": "2026-10-15",
       "latestSha": "d0c8c7e9f4e06f303389f804208d387f27019ef5",
       "refreshedAt": "2026-10-15",
@@ -467,7 +467,7 @@
       ],
       "homepage": "https://github.com/ayghri/i-have-adhd",
       "addedAt": "2026-10-07",
-      "stars": 57160,
+      "stars": 57296,
       "pushedAt": "2026-10-11",
       "latestSha": "1ecea1993b7fce257ffbd686c070948b5e07eda6",
       "refreshedAt": "2026-10-15",
@@ -499,7 +499,7 @@
       ],
       "homepage": "https://github.com/blader/humanizer",
       "addedAt": "2026-10-07",
-      "stars": 57013,
+      "stars": 57280,
       "pushedAt": "2026-09-28",
       "latestSha": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8",
       "refreshedAt": "2026-10-15",
@@ -532,9 +532,9 @@
       ],
       "homepage": "https://github.com/coreyhaines31/marketingskills",
       "addedAt": "2026-10-07",
-      "stars": 54782,
-      "pushedAt": "2026-10-14",
-      "latestSha": "55ff469422c3592dac45bcad08dfb40221981c02",
+      "stars": 54897,
+      "pushedAt": "2026-10-15",
+      "latestSha": "365b412152b9542499ca1439426f7fc3cc92bb65",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "b9ba399dd88b082b926e261e8ccfb843d20aa066",
@@ -565,7 +565,7 @@
       ],
       "homepage": "https://github.com/Imbad0202/academic-research-skills",
       "addedAt": "2026-10-07",
-      "stars": 52020,
+      "stars": 52246,
       "pushedAt": "2026-10-13",
       "latestSha": "a3ef8c79d888b90aaaaecce7f42fbc3fd082d5ab",
       "refreshedAt": "2026-10-15",
@@ -592,9 +592,9 @@
       ],
       "homepage": "https://github.com/cathrynlavery/diagram-design",
       "addedAt": "2026-10-07",
-      "stars": 55420,
-      "pushedAt": "2026-10-14",
-      "latestSha": "d97c5c7477e54cee17cfa6459190610da0643a05",
+      "stars": 55893,
+      "pushedAt": "2026-10-15",
+      "latestSha": "3efa45939195092b1a50513e30a2521f6190e3f7",
       "refreshedAt": "2026-10-15",
       "trust": "reviewed",
       "sourceCommit": "f4547ee95f88e5b28a52517feff6b6c11cc657f9",
@@ -625,7 +625,7 @@
       ],
       "homepage": "https://github.com/zhaoxuya520/reverse-skill",
       "addedAt": "2026-10-07",
-      "stars": 41982,
+      "stars": 42150,
       "pushedAt": "2026-09-22",
       "latestSha": "cab634bd855fc287f6e420c1f36fd1a6b9245960",
       "refreshedAt": "2026-10-15",
@@ -658,7 +658,7 @@
       ],
       "homepage": "https://github.com/mukul975/Anthropic-Cybersecurity-Skills",
       "addedAt": "2026-10-07",
-      "stars": 34466,
+      "stars": 34510,
       "pushedAt": "2026-08-31",
       "latestSha": "54a798831d2266a3ca61ce68a7acb80b81160d57",
       "refreshedAt": "2026-10-15",
@@ -690,7 +690,7 @@
       ],
       "homepage": "https://github.com/virgiliojr94/book-to-skill",
       "addedAt": "2026-10-07",
-      "stars": 34883,
+      "stars": 34983,
       "pushedAt": "2026-10-12",
       "latestSha": "a24e62f4d8caf2ee433f6e48d9073800f56f906e",
       "refreshedAt": "2026-10-15",
@@ -722,7 +722,7 @@
       ],
       "homepage": "https://github.com/Nutlope/hallmark",
       "addedAt": "2026-10-07",
-      "stars": 30070,
+      "stars": 30146,
       "pushedAt": "2026-08-06",
       "latestSha": "13ac0ec7e148655948100b6396439e481361d690",
       "refreshedAt": "2026-10-15",
@@ -754,7 +754,7 @@
       ],
       "homepage": "https://github.com/OthmanAdi/planning-with-files",
       "addedAt": "2026-10-07",
-      "stars": 27457,
+      "stars": 27466,
       "pushedAt": "2026-10-14",
       "latestSha": "96b79bf1d64f22ab5f68442e0a45704eef06ddfc",
       "refreshedAt": "2026-10-15",
@@ -787,7 +787,7 @@
       ],
       "homepage": "https://github.com/phuryn/pm-skills",
       "addedAt": "2026-10-07",
-      "stars": 27053,
+      "stars": 27091,
       "pushedAt": "2026-10-14",
       "latestSha": "c68487d721e419ec87af1ae6412a842978eab785",
       "refreshedAt": "2026-10-15",
@@ -819,7 +819,7 @@
       ],
       "homepage": "https://github.com/JimLiu/baoyu-skills",
       "addedAt": "2026-10-07",
-      "stars": 26669,
+      "stars": 26688,
       "pushedAt": "2026-09-10",
       "latestSha": "1567581c26ec29f4216c6e6835415bf30343b0e3",
       "refreshedAt": "2026-10-15",
@@ -851,7 +851,7 @@
       ],
       "homepage": "https://github.com/titanwings/distilly",
       "addedAt": "2026-10-07",
-      "stars": 25635,
+      "stars": 25663,
       "pushedAt": "2026-10-13",
       "latestSha": "0afc45c29c360ba7bc8260f1bb0bf34e9155f4fa",
       "refreshedAt": "2026-10-15",
@@ -884,7 +884,7 @@
       ],
       "homepage": "https://github.com/alchaincyf/huashu-design",
       "addedAt": "2026-10-07",
-      "stars": 24965,
+      "stars": 25019,
       "pushedAt": "2026-10-13",
       "latestSha": "3bd465d7ad29ffcb284113beb48910b469f00797",
       "refreshedAt": "2026-10-15",
@@ -923,8 +923,8 @@
         "method": "manual"
       },
       "sourceCommit": "5bb9d1d180e76b93353adf1a755322ac8f66f438",
-      "stars": 247,
-      "pushedAt": "2026-10-12",
+      "stars": 250,
+      "pushedAt": "2026-10-15",
       "latestSha": "39092bbb6f146cc9d5631dabcf53f57f601fde6c",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/machina-sports-sports-skills-2026.10.15.5bb9d1d.zip",
@@ -956,8 +956,8 @@
       },
       "sourceCommit": "ec0108f0f590e0694f24fe4144b0b90f6896e6c3",
       "stars": 7,
-      "pushedAt": "2026-10-14",
-      "latestSha": "b51b8049ae7a78e74e5e97ec0e93ad5d2ba7ca95",
+      "pushedAt": "2026-10-15",
+      "latestSha": "df9df007bf2111603414ae9f8c1b725ce62bd3bf",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/stefanoskarakasis-Product-Marketing-Skills-2026.10.15.ec0108f.zip",
       "packageHash": "3dbed20d4e8783acdaa7b532c941b843bebf343de42c3f6b1512fc81fe756022",
@@ -1017,7 +1017,7 @@
         "method": "manual"
       },
       "sourceCommit": "0071f98803eefc81a5211394f1bde2b73bc1d6f2",
-      "stars": 24,
+      "stars": 27,
       "pushedAt": "2026-10-14",
       "latestSha": "fb57fa417647baa8c61c2086aa0787ededf6f653",
       "refreshedAt": "2026-10-15",
@@ -1050,7 +1050,7 @@
       "sourceCommit": "ddfa2a4df1e0e81eaab1913184ca1d0221b02cd4",
       "stars": 10,
       "pushedAt": "2026-10-15",
-      "latestSha": "44d9ecfb1bacf21b06d79f79aca2d8a3a87d2c9f",
+      "latestSha": "54d92a099715b49add4ec9b08fad213863b83595",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/buidangminh23-spacing-skill-2026.10.15.ddfa2a4.zip",
       "packageHash": "a9583deb1d528184dde7d98f62958346571c1c9ccde7904031f48ec917356e1e",
@@ -1265,8 +1265,8 @@
       },
       "sourceCommit": "e29f9dd438a4f82b66555dcef353f744a0a638d1",
       "stars": 9,
-      "pushedAt": "2026-10-14",
-      "latestSha": "3021fdcdc143e1c1e2cf42a3a6517bc2ca49fb92",
+      "pushedAt": "2026-10-15",
+      "latestSha": "6c100765533fb61181ca1f0e879b1f55d7e1ffe4",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/danieljustus-symaira-eraseme-2026.10.15.e29f9dd.zip",
       "packageHash": "0fab53de17197eaa62c7cc663522ac10df95c0a26f1983cb11a10eef8d5e7a89",
@@ -1295,9 +1295,9 @@
         "method": "manual"
       },
       "sourceCommit": "ddb68afad71ffaacba8cfa2d693d3cab9cc70f67",
-      "stars": 119,
-      "pushedAt": "2026-10-14",
-      "latestSha": "f48dce326a5cd0857d620668ea01c635dab4df70",
+      "stars": 120,
+      "pushedAt": "2026-10-15",
+      "latestSha": "65f9274508f9c96a73d22659ad4b870a33f9bff0",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/yschimke-compose-ai-tools-2026.10.15.ddb68af.zip",
       "packageHash": "dc6b3a24aa4ca5a709ca0b292ccf5a53cc0fbeb16b66e17f46728f167ebb9235",
@@ -1326,9 +1326,9 @@
         "method": "manual"
       },
       "sourceCommit": "a70a9b885239db83b9a901c83c491aa1fc74f2b7",
-      "stars": 8,
+      "stars": 9,
       "pushedAt": "2026-10-15",
-      "latestSha": "4ee9e3c73dcca16278ace6879164f0314e6b161d",
+      "latestSha": "3bb916055d879f1ddf2906478d648a4bb1ea4dfa",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/creedants-pstack-t3-2026.10.15.a70a9b8.zip",
       "packageHash": "87f1fb65644e33c08a8a4891e7194126d2a8171d8f8805dad5b843804c5e9e0d",
@@ -1358,8 +1358,8 @@
       },
       "sourceCommit": "7ad536d74ca3f00b530aa57f1d74a6a23f314566",
       "stars": 20,
-      "pushedAt": "2026-10-13",
-      "latestSha": "1da7f326caa122544cd25332b89e971e95c70b8b",
+      "pushedAt": "2026-10-15",
+      "latestSha": "ad55cb1822e6deb9a5691162c514ff3044b0e2ab",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/theonly1me-shadowclone-2026.10.15.7ad536d.zip",
       "packageHash": "f89d31f8b3d55a9547cea3f3b78de84770e7614d7734339f21f94da50af5fa42",
@@ -1389,8 +1389,8 @@
       },
       "sourceCommit": "b04f1478e0294382bfec280722dc369078d1d4d1",
       "stars": 13,
-      "pushedAt": "2026-10-12",
-      "latestSha": "d26ce271ad49c119bfc2e35c0a21a1179477499a",
+      "pushedAt": "2026-10-15",
+      "latestSha": "876a6293f2f4b11d35d6d47037d22d54920166e8",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1417,7 +1417,7 @@
       "sourceCommit": "e548b64f7fb7567cd598153f14221d2715d454db",
       "stars": 11,
       "pushedAt": "2026-10-15",
-      "latestSha": "2f437ff46c8db930fb86b6df7383fd397ee3d63c",
+      "latestSha": "d44a7c5c57c6ea68c94ac59c730c7d07a9bfeef9",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/kurone-kito-idd-skill-2026.10.15.e548b64.zip",
       "packageHash": "82a40cfe9e4753ce4e7c601ba017f96511b37291c6e22468d10a0e078a13202d",
@@ -1447,8 +1447,8 @@
       },
       "sourceCommit": "ebe70553aa0e5ebabcbcece62b97bac70f2081ad",
       "stars": 5,
-      "pushedAt": "2026-10-14",
-      "latestSha": "896d13701cd8cb79ce3b1c8d467e9b0d5d31670d",
+      "pushedAt": "2026-10-15",
+      "latestSha": "9857d2d375223f9d5da68da003fc711054f50723",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Marsjunwang-nblane-2026.10.15.ebe7055.zip",
       "packageHash": "7d97f878d44822214b322da2e00095b2008995e217268c4bd0612f9669499fca",
@@ -1508,9 +1508,9 @@
         "method": "manual"
       },
       "sourceCommit": "0d89978333a7f139c53f35f1bb622d08eb73affa",
-      "stars": 247264,
+      "stars": 269250,
       "pushedAt": "2026-10-15",
-      "latestSha": "b7dcf782aac160a05363dc4ddba23040972f1c9e",
+      "latestSha": "d52a488476e7c41f573f23a1965d3f32d4e6a7f2",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/morluto-rea-2026.10.15.0d89978.zip",
       "packageHash": "421cc287a8a1a0bd675bc88ed18067a88cae9e8d58026460f4b238c4066c87b1",
@@ -1540,8 +1540,8 @@
       },
       "sourceCommit": "af0caef7187504439beeafb643a9694f5d542289",
       "stars": 11,
-      "pushedAt": "2026-10-14",
-      "latestSha": "f64e42bd915eed2ba2d96b878facece9e5bc0fa7",
+      "pushedAt": "2026-10-15",
+      "latestSha": "f05096f26b27337662e792b48a02b9eed181f5d4",
       "refreshedAt": "2026-10-15",
       "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/frankxai-Starlight-Intelligence-System-2026.10.15.af0caef.zip",
       "packageHash": "c0d983ebf8d7162071e7d0fd9acdcadf98ef950b675806b5a6a1030b6ce345dc",
@@ -1570,7 +1570,7 @@
         "method": "manual"
       },
       "sourceCommit": "f866289b3e7ec69354cf854e67b52fa29aee088e",
-      "stars": 215,
+      "stars": 218,
       "pushedAt": "2026-10-14",
       "latestSha": "5bf06162f682dd61cbf791b4bc340bc353d84e3d",
       "refreshedAt": "2026-10-15",
@@ -1602,7 +1602,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 135909,
+      "stars": 136244,
       "pushedAt": "2026-10-15",
       "latestSha": "56ea9cf174ed86786187daa9de0e6247cb0747e4",
       "refreshedAt": "2026-10-15"
@@ -1630,9 +1630,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 100803,
-      "pushedAt": "2026-10-13",
-      "latestSha": "fef3402e674bebbf72a23aeb735e91c92cd34afd",
+      "stars": 101039,
+      "pushedAt": "2026-10-15",
+      "latestSha": "b8fc2ef9bab0dd1438d6cc8699c6884445ad409b",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1657,7 +1657,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 86321,
+      "stars": 86481,
       "pushedAt": "2026-10-12",
       "latestSha": "f2d0164f72fe678805c34245a6df36acededfebd",
       "refreshedAt": "2026-10-15"
@@ -1684,9 +1684,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 74610,
+      "stars": 75044,
       "pushedAt": "2026-10-15",
-      "latestSha": "7e3eabbb2f2b33e77ebc33dd91d99c1a4c32479b",
+      "latestSha": "c3230d12a5e94e9c00840410c75e8d89753218f0",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1710,9 +1710,9 @@
         "reviewedAt": "2026-10-15",
         "method": "manual"
       },
-      "stars": 70040,
+      "stars": 70076,
       "pushedAt": "2026-10-15",
-      "latestSha": "cea011b36929f4ec9397c5506cd2369584225418",
+      "latestSha": "d560e1f28c6a7a973fcee2965961ce5bfe314584",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1737,7 +1737,7 @@
         "method": "manual"
       },
       "license": "AGPL-3.0",
-      "stars": 68319,
+      "stars": 68593,
       "pushedAt": "2026-10-12",
       "latestSha": "e45f5b12bd46440b04f3675af9a77d0718e6a254",
       "refreshedAt": "2026-10-15"
@@ -1764,9 +1764,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 64316,
-      "pushedAt": "2026-10-13",
-      "latestSha": "f4dff26b3b14d3c55c5a9dedfc4c7c8c5df2f84a",
+      "stars": 64432,
+      "pushedAt": "2026-10-15",
+      "latestSha": "99441f8a6e72aab3286234e55909d4832f299289",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1791,9 +1791,9 @@
         "method": "manual"
       },
       "license": "AGPL-3.0",
-      "stars": 52647,
+      "stars": 52669,
       "pushedAt": "2026-10-15",
-      "latestSha": "c7fdfe131b8045a87a9e0f3e27c7ea04dd22cf16",
+      "latestSha": "ee80e88c9c8ec13f2ebedc542545d5e2f2b5fee3",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1818,7 +1818,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 49560,
+      "stars": 49595,
       "pushedAt": "2026-09-15",
       "latestSha": "3ccff5338ea700537839b21900aa5358a0402c98",
       "refreshedAt": "2026-10-15"
@@ -1845,9 +1845,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 48332,
-      "pushedAt": "2026-10-14",
-      "latestSha": "19be8d45e0d5233aa44be6d4572e655b9914ff54",
+      "stars": 48515,
+      "pushedAt": "2026-10-15",
+      "latestSha": "7c1cdd2f4c484d4038ea36f1b7397f61237a4f90",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1872,9 +1872,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 47217,
+      "stars": 47375,
       "pushedAt": "2026-10-15",
-      "latestSha": "ea5ced22ea3da6e66b261a083ad3b503f9662425",
+      "latestSha": "11ac6d4c57082f310067a4a1654ad5b63cb57410",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -1899,7 +1899,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 34978,
+      "stars": 35111,
       "pushedAt": "2026-10-09",
       "latestSha": "13e4063a1cf913f5606d57d42ab83a86f5001e04",
       "refreshedAt": "2026-10-15"
@@ -1926,7 +1926,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 33535,
+      "stars": 33566,
       "pushedAt": "2026-10-14",
       "latestSha": "c140550d04e44f3d6f8a9830b40ae56e4689a977",
       "refreshedAt": "2026-10-15"
@@ -1952,7 +1952,7 @@
         "reviewedAt": "2026-10-15",
         "method": "manual"
       },
-      "stars": 32437,
+      "stars": 32489,
       "pushedAt": "2026-10-14",
       "latestSha": "063bee94c3f4df8453406c830b0a7df0f2860278",
       "refreshedAt": "2026-10-15"
@@ -1979,8 +1979,8 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 32308,
-      "pushedAt": "2026-10-14",
+      "stars": 32364,
+      "pushedAt": "2026-10-15",
       "latestSha": "f154b32a9e544dac73e7ddf2010327cf9988edcd",
       "refreshedAt": "2026-10-15"
     },
@@ -2006,7 +2006,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 32022,
+      "stars": 32050,
       "pushedAt": "2026-10-13",
       "latestSha": "fb98e593612dee2cec36847666671dba502e60aa",
       "refreshedAt": "2026-10-15"
@@ -2034,7 +2034,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 31506,
+      "stars": 31533,
       "pushedAt": "2026-10-06",
       "latestSha": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
       "refreshedAt": "2026-10-15"
@@ -2061,9 +2061,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 30950,
-      "pushedAt": "2026-10-14",
-      "latestSha": "8fbacc91b6e2671d53c17fd0c866c0e2eef21715",
+      "stars": 30955,
+      "pushedAt": "2026-10-15",
+      "latestSha": "19698fe2b007b6fa6c0283583df8d3d37a3000fa",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2088,7 +2088,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 29648,
+      "stars": 29897,
       "pushedAt": "2026-09-14",
       "latestSha": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
       "refreshedAt": "2026-10-15"
@@ -2115,7 +2115,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 28204,
+      "stars": 28238,
       "pushedAt": "2026-08-30",
       "latestSha": "19392f7a08264ed00486a251f5b2098321771f94",
       "refreshedAt": "2026-10-15"
@@ -2142,7 +2142,7 @@
         "method": "manual"
       },
       "license": "AGPL-3.0",
-      "stars": 27977,
+      "stars": 28018,
       "pushedAt": "2026-08-07",
       "latestSha": "c91369c449d34755d320a8b81d0734000d99d1ab",
       "refreshedAt": "2026-10-15"
@@ -2169,7 +2169,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 21414,
+      "stars": 21431,
       "pushedAt": "2026-10-01",
       "latestSha": "322346ded8129436b3f64707789a73e732ae24d9",
       "refreshedAt": "2026-10-15"
@@ -2196,9 +2196,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 21306,
-      "pushedAt": "2026-10-14",
-      "latestSha": "b85f257d127c190b9c362ac491eb4f0e58f2e5fb",
+      "stars": 21341,
+      "pushedAt": "2026-10-15",
+      "latestSha": "730939d15d6f026cbd29f7ea707d66aa320fb93a",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2223,9 +2223,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 19741,
-      "pushedAt": "2026-10-14",
-      "latestSha": "fd7af2cd5c4afccad1da9e7d5ce51c1388193408",
+      "stars": 19750,
+      "pushedAt": "2026-10-15",
+      "latestSha": "4188d7e26a07b6b94b67bf95041c81bc1530c508",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2250,7 +2250,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 18382,
+      "stars": 18455,
       "pushedAt": "2026-10-06",
       "latestSha": "343db229dbd5ddaf9df6b1d5540d8bcdb2604d5c",
       "refreshedAt": "2026-10-15"
@@ -2277,7 +2277,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 18136,
+      "stars": 18146,
       "pushedAt": "2026-10-12",
       "latestSha": "9ff0c99108b36d3b886defd825d8ac1f47dba374",
       "refreshedAt": "2026-10-15"
@@ -2304,7 +2304,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 17681,
+      "stars": 17694,
       "pushedAt": "2026-10-15",
       "latestSha": "017b19a793ad71794a02887ede04757f3d82e10d",
       "refreshedAt": "2026-10-15"
@@ -2331,8 +2331,8 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 17403,
-      "pushedAt": "2026-10-14",
+      "stars": 17447,
+      "pushedAt": "2026-10-15",
       "latestSha": "dca7003349c5f7132189ba00547cbbd7ff8e597e",
       "refreshedAt": "2026-10-15"
     },
@@ -2358,7 +2358,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 15980,
+      "stars": 16149,
       "pushedAt": "2026-10-13",
       "latestSha": "069432cac935ed1895859df201c31436c07fb74e",
       "refreshedAt": "2026-10-15"
@@ -2385,9 +2385,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 15544,
-      "pushedAt": "2026-10-14",
-      "latestSha": "98ce9fb14a0a159e626f806c2be86672659db9c7",
+      "stars": 15559,
+      "pushedAt": "2026-10-15",
+      "latestSha": "f47482574471ca45cbee51e1e55fa6bbe9657f71",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2412,7 +2412,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 15541,
+      "stars": 15559,
       "pushedAt": "2026-09-10",
       "latestSha": "32ac5a02c4e082e4a5628ca810776375e134708e",
       "refreshedAt": "2026-10-15"
@@ -2439,7 +2439,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 14467,
+      "stars": 14495,
       "pushedAt": "2026-10-12",
       "latestSha": "769bf64d8e11f78fee2d183ad8891f9403f365e6",
       "refreshedAt": "2026-10-15"
@@ -2466,7 +2466,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 13575,
+      "stars": 13590,
       "pushedAt": "2026-10-11",
       "latestSha": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
       "refreshedAt": "2026-10-15"
@@ -2493,9 +2493,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 13189,
+      "stars": 13212,
       "pushedAt": "2026-10-15",
-      "latestSha": "44acd07e15a4f33bf5dcf5c5c5e7d752325919c4",
+      "latestSha": "46c78263d9b6d30b4f43919c37c0840b5afad550",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2520,9 +2520,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 13089,
-      "pushedAt": "2026-10-14",
-      "latestSha": "88060c98065b8d9d3f32620cef66d4fea29afcb0",
+      "stars": 13235,
+      "pushedAt": "2026-10-15",
+      "latestSha": "c5be806cb8dbb18350a805c776b572b36b0181ad",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2547,7 +2547,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 11952,
+      "stars": 12066,
       "pushedAt": "2026-10-13",
       "latestSha": "13c74a707786872a18e3317e48c5c94011027620",
       "refreshedAt": "2026-10-15"
@@ -2574,9 +2574,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 11878,
-      "pushedAt": "2026-10-14",
-      "latestSha": "1be15d8064f88fc25216442406d40add8fd23b53",
+      "stars": 11888,
+      "pushedAt": "2026-10-15",
+      "latestSha": "be8783ecda6f679936a9e70749bceee7c29a8893",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2601,7 +2601,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 11328,
+      "stars": 11353,
       "pushedAt": "2026-10-02",
       "latestSha": "a28de55ba881b9928956a55048f743f7a9e3b23e",
       "refreshedAt": "2026-10-15"
@@ -2628,9 +2628,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 11122,
-      "pushedAt": "2026-10-14",
-      "latestSha": "6bb7ea55aa6522c118ad4b7f317fce521399750f",
+      "stars": 11132,
+      "pushedAt": "2026-10-15",
+      "latestSha": "27d13c1d8091681db05a10ef9626081217da240f",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2655,7 +2655,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 11107,
+      "stars": 11109,
       "pushedAt": "2026-10-14",
       "latestSha": "e44fdd933d011deae34ed6a9eba5773a27dbdf26",
       "refreshedAt": "2026-10-15"
@@ -2682,9 +2682,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 10789,
-      "pushedAt": "2026-10-14",
-      "latestSha": "bc943e40c59998be5da61f9d39c6a983b1116099",
+      "stars": 12680,
+      "pushedAt": "2026-10-15",
+      "latestSha": "e9488296a44211c42701ff71705b7901470ec78f",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2709,9 +2709,9 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 10437,
-      "pushedAt": "2026-10-13",
-      "latestSha": "33a6b4d43958d2d152c9cb13762af802062fade5",
+      "stars": 10455,
+      "pushedAt": "2026-10-15",
+      "latestSha": "69cd7395cee2979aa7301ebe51bb4c2ba5f5ef9e",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2736,7 +2736,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 9993,
+      "stars": 10015,
       "pushedAt": "2026-10-14",
       "latestSha": "ac21644933910419529bcf81efb95a9ca71edf81",
       "refreshedAt": "2026-10-15"
@@ -2763,9 +2763,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 9703,
+      "stars": 9768,
       "pushedAt": "2026-10-15",
-      "latestSha": "2a607bd49bc341f74a60a8fa852183dfb6ce3c1f",
+      "latestSha": "4dc4b7b3fc3e1b1da5089e652b49a4b4506a9e23",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2790,7 +2790,7 @@
         "method": "manual"
       },
       "license": "AGPL-3.0",
-      "stars": 9536,
+      "stars": 9566,
       "pushedAt": "2026-09-12",
       "latestSha": "21dc7e5fc8c3a0d7f6a94948153dd1ee954f4e64",
       "refreshedAt": "2026-10-15"
@@ -2817,9 +2817,9 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 9422,
+      "stars": 9451,
       "pushedAt": "2026-10-15",
-      "latestSha": "72b6c9604879b209ec866e6b0894482861d854f7",
+      "latestSha": "a16661b1223fc0c19f91bbd62144abd7238e6d7a",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2844,7 +2844,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 9126,
+      "stars": 9134,
       "pushedAt": "2026-10-13",
       "latestSha": "975fb3bcb98f1777781fb4c738902d36e32c8c46",
       "refreshedAt": "2026-10-15"
@@ -2871,7 +2871,7 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "stars": 8509,
+      "stars": 8521,
       "pushedAt": "2026-08-17",
       "latestSha": "0337446dadde6f8c94210444e2aa9d546126480f",
       "refreshedAt": "2026-10-15"
@@ -2897,9 +2897,9 @@
         "reviewedAt": "2026-10-15",
         "method": "manual"
       },
-      "stars": 8128,
-      "pushedAt": "2026-10-13",
-      "latestSha": "ae7524659f04a09c69d6c67e50075668dc5563a4",
+      "stars": 8129,
+      "pushedAt": "2026-10-15",
+      "latestSha": "dc6d816a1c87efb340182bf6cff9b3ccf6911e78",
       "refreshedAt": "2026-10-15"
     },
     {
@@ -2924,7 +2924,7 @@
         "method": "manual"
       },
       "license": "MIT",
-      "stars": 7934,
+      "stars": 7956,
       "pushedAt": "2026-10-13",
       "latestSha": "4c66b1fa86e9ab70187b43d7da9b6fdb29f2ef63",
       "refreshedAt": "2026-10-15"
