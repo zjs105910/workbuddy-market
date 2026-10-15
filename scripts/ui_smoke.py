@@ -318,7 +318,7 @@ def main():
                     timeout=5000)
                 # v2.35 NEXT_STEPS 任务3：工件构建日期显式化。精选列表
                 # 前几张可能是不带工件的 ghpm-only 条目，遍历前 6 张找到
-                # 带固定产物的再断言（50 条收录里 ghpm-only 不足半数，
+                # 带固定产物的再断言（100 条收录里 ghpm-only 不足半数，
                 # 前 6 张必中；隔离区 registry 是仓库副本，数据确定性）。
                 date_seen = False
                 n_detail = page.locator("[data-regdetail]").count()

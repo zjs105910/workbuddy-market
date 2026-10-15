@@ -964,6 +964,10 @@ REGISTRY_MEM_TTL = 600.0           # /api/registry 的进程内缓存（秒）
 _registry_mem_lock = threading.Lock()
 _registry_mem: dict = {"at": 0.0, "force": None, "data": None}
 
+# v2.36：市场本体更新检查（/api/selfupdate）的进程内缓存 —— 同一 TTL 口径
+_selfupdate_lock = threading.Lock()
+_selfupdate_cache: dict = {"at": 0.0, "data": None}
+
 
 def invalidate_registry_mem() -> None:
     """清掉 /api/registry 的进程内缓存（刷新任务 / 自动循环拉到新数据后调），
@@ -1194,6 +1198,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state":
                 exact = "exact=1" in (urlparse(self.path).query or "")
                 return self._json(get_state(exact))
+            if path == "/api/selfupdate":
+                # v2.36：市场本体更新检查（只读不装）。600 秒内存缓存
+                # —— 检查是网络动作，别让手快连点打穿 GitHub 匿名限额。
+                with _selfupdate_lock:
+                    data = dict(_selfupdate_cache["data"]) if _selfupdate_cache["data"] else None
+                if data is None:
+                    from workbuddy_market.selfupdate import check_for_update
+                    data = check_for_update()
+                    with _selfupdate_lock:
+                        _selfupdate_cache["at"] = time.time()
+                        _selfupdate_cache["data"] = data
+                    core.log("info", "api",
+                             f"selfupdate 检查：当前 {data.get('current')} / "
+                             f"latest {data.get('latest')} / 可更新 {data.get('updateAvailable')}")
+                return self._json(data)
             if path == "/api/log":
                 return self._json({"items": core.tail_log(80)})
             if path == "/api/doctor":

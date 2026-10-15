@@ -4,6 +4,28 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.36.0 — 2026-10-15（功能：市场本体自更新检查 + 精选市场扩容到 100 条）
+
+- **市场本体自更新检查（只读不装）**：新增 `workbuddy_market/selfupdate.py`
+  —— 把运行中的 MARKET_VERSION 与 GitHub Releases 最新正式 tag 逐段比较。
+  网络接缝只有一处（`_release_fetch`，测试整体替换）；tag 形态不对 / 网络
+  失败都**如实返回**（`updateAvailable: None` + 人话 error），绝不把
+  「查不到」伪装成「已是最新」。三个出口同口径：
+  ① `GET /api/selfupdate`（服务端 600 秒内存缓存，连点不打穿匿名限额）；
+  ② 更新中心弹窗顶部新增「市场本体」区（当前 → 最新 + 两条升级路径：
+  重跑 install.cmd 幂等升级 CLI 与市场根 / pipx upgrade）；③ 包级 CLI
+  `workbuddy-market check-update`（退出码 0 最新 / 1 有更新 / 2 检查失败）。
+  升级动作永远由用户自己执行 —— 本市场不自我替换运行中的文件。
+- **精选市场扩容到 100 条**：按收录标准（SKILL.md 结构 / 非归档 / 活跃
+  pushedAt≥2026-08 / 非 awesome / 非平台工具 / 非重复）从 6 组主题搜索
+  483 个候选中结构校验后收录 50 个新条目（全部含 ≥1 个 SKILL.md、
+  ⭐7900+、pushedAt 近 60 天，sourceCommit 钉死收录时 HEAD），中文收录
+  信息逐条人工撰写。`build_registry` 刷新 100 条 0 失败；收录契约门禁
+  PASS（0 error / 7 warn，warn 为建议补全项）。新条目无固定工件的由
+  artifacts 每日构建自动补建（v2.35.2 的链接物化后命中率更高）。
+- 验证：pytest **118** 项全绿（102 → 118：selfupdate ×16）；selftest
+  804 项全绿；收录契约门禁 PASS；三平台 CI + Release 冒烟。
+
 ## 2.35.2 — 2026-10-15（修复：收录源在全新环境装不上 —— 包内链接物化 + 网络失败人话化）
 
 用户实测：探索页两个 GitHub 收录源（vercel-labs/agent-browser、wshobson/agents）

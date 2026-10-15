@@ -105,7 +105,7 @@ cd workbuddy-market
 
 <!-- registry-table:start -->
 
-> 共 **50** 个收录条目，由每日 CI 从人工审核的注册表自动刷新本表格。
+> 共 **100** 个收录条目，由每日 CI 从人工审核的注册表自动刷新本表格。
 
 | 插件 | 说明 | 分类 | 信任级 |
 | --- | --- | --- | --- |
@@ -159,6 +159,56 @@ cd workbuddy-market
 | [逆向工程代理 Rea](https://github.com/morluto/rea) | 逆向工程代理技能：从应用行为入手向下还原实现细节，2 个技能覆盖行为观测与结构还原，适合学习与兼容性分析。 | 安全 | 已审 |
 | [星际智能系统](https://github.com/frankxai/Starlight-Intelligence-System) | 给整个 AI 舰队一个共享大脑：带证明的记忆、知识组织与跨会话延续等 69 个技能，适合多代理长期协作场景。 | 效率 | 已审 |
 | [代理技能百科 RSC](https://github.com/ericrisco/rsc-harness) | 超大体量的代理技能百科：开发、写作、测试、运维等方向 271 个技能，按需取用，适合作为团队技能弹药库。 | 合集 | 已审 |
+| [UI/UX Pro Max 设计智能](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | 跨平台专业级 UI/UX 设计智能 Skill：为多端界面提供设计决策、版式与交互规范，让代理产出专业水准的前端设计。 | 设计 | 已审 |
+| [Claude Mem 跨会话记忆](https://github.com/thedotmack/claude-mem) | 跨会话持久记忆：自动捕获代理会话中的操作与决策，向量化归档后按需取回，让每个代理都带着上下文继续工作。 | 效率 | 已审 |
+| [代码知识图谱理解](https://github.com/Egonex-AI/Understand-Anything) | 把任意代码库转成可探索、可检索的交互式知识图谱——教学优先于炫技，快速建立对陌生代码库的结构性理解。 | 开发工具 | 已审 |
+| [AI 求职代理](https://github.com/career-ops-hq/career-ops) | 开源 AI 求职代理：扫描多个职位板，按你的简历逐条 1-5 打分再决定投递，全流程可追踪。 | 商业 | 已审 |
+| [OmO 图形工程技能包](https://github.com/code-yeongyu/oh-my-openagent) | OmO：60 个技能的大合集，一个关键词即可驱动整套图形工程工作流，覆盖从设计到实现的完整链路。 | 合集 | 已审 |
+| [OpenMontage 代理视频制作](https://github.com/calesthio/OpenMontage) | 开源的代理式视频制作系统：12 条生产流水线、100+ 工具、700+ 技能文件（139 个 skill），从脚本到成片全链路。 | 设计 | 已审 |
+| [近 30 天话题研究](https://github.com/mvanhorn/last30days-skill) | 研究任意话题在 Reddit、X、YouTube、Hacker News、Polymarket 与全网近 30 天的动态，并合成一份带出处的报告。 | 效率 | 已审 |
+| [Cherry Studio AI 工作台](https://github.com/CherryHQ/cherry-studio) | AI 生产力工作台：智能对话、自主代理与 300+ 助手，统一接入主流大模型，内建 35 个 agent skill。 | 效率 | 已审 |
+| [Obsidian 官方技能](https://github.com/kepano/obsidian-skills) | Obsidian 官方出品的代理技能：教代理正确使用 Obsidian CLI 与 Markdown、Bases、JSON Canvas 等开放格式。 | 效率 | 已审 |
+| [Nature 学术表达与绘图](https://github.com/Yuan1z0825/nature-skills) | 符合 Nature 论文学术表达与科研绘图规范的 Skill 合集：从措辞到图表风格对齐顶级期刊要求（23 个 skill）。 | 科研 | 已审 |
+| [阿里开源代码评审](https://github.com/alibaba/open-code-review) | 阿里巴巴开源的混合架构代码评审：确定性静态检查 + 仓库级上下文理解，在阿里规模久经实战。 | 开发工具 | 已审 |
+| [Vercel Skills 工具](https://github.com/vercel-labs/skills) | Vercel 开源的 agent skills 管理工具（npx skills）：技能的发现、安装与发布一条命令搞定，自带 3 个实用技能。 | 开发工具 | 已审 |
+| [AionUi 协作桌面](https://github.com/iOfficeAI/AionUi) | 开源 7×24 协作桌面应用：对接 OpenClaw、Claude Code、Codex、OpenCode 等 20+ CLI 代理，自定义工作区。 | 效率 | 已审 |
+| [Vercel 官方技能集](https://github.com/vercel-labs/agent-skills) | Vercel 官方 agent skills 合集：9 个覆盖前端部署与工作流场景的技能，与 Next.js 生态同源。 | 合集 | 已审 |
+| [Cognee AI 记忆平台](https://github.com/topoteretes/cognee) | 开源 AI 记忆平台：给代理装上持久长期记忆——知识图谱 + 向量检索双引擎（22 个 skill）。 | 效率 | 已审 |
+| [OfficeCLI 办公自动化](https://github.com/iOfficeAI/OfficeCLI) | 首个专为 AI 代理打造的 Office 套件 CLI：读写与自动化 Word/Excel/PPT（12 个 skill），文档处理一条命令。 | 自动化 | 已审 |
+| [Google Workspace CLI](https://github.com/googleworkspace/cli) | Google Workspace 官方命令行：Drive、Gmail、Calendar、Sheets、Docs、Chat、Admin 一条命令行全覆盖（95 个 skill）。 | 自动化 | 已审 |
+| [NanoClaw 容器代理](https://github.com/nanocoai/nanoclaw) | OpenClaw 的轻量替代：在容器内安全运行，接入 WhatsApp、Telegram、Slack 等消息渠道（63 个 skill）。 | 自动化 | 已审 |
+| [Cloudflare 安全审计](https://github.com/cloudflare/security-audit-skill) | Cloudflare 出品的多阶段安全审计 Skill：产出可独立核验的机器可读发现，让代理审计有据可查。 | 安全 | 已审 |
+| [380 技能超大合集](https://github.com/alirezarezvani/claude-skills) | 380+ Claude 技能与插件大合集：30+ agents、70+ 自定义命令、846 个技能文件，按角色与场景分类。 | 合集 | 已审 |
+| [归藏 PPT 生成](https://github.com/op7418/guizang-ppt-skill) | 归藏出品的 HTML 幻灯片生成 Skill：杂志编辑与瑞士版式双风格，内建配图提示词，产出可直接演示的页面。 | 设计 | 已审 |
+| [卡兹克技能集](https://github.com/KKKKhazix/khazix-skills) | 数字生命卡兹克开源的 AI Skills 合集：leader 目标定义、洁癖整理、hv-analysis 深度分析、写作等中文场景技能。 | 合集 | 已审 |
+| [Google 官方技能库](https://github.com/google/skills) | Google 官方 agent skills 库：覆盖 Google Cloud 与全线产品的 166 个技能，官方维护持续更新。 | 合集 | 已审 |
+| [NotebookLM 编程接口](https://github.com/teng-lin/notebooklm-py) | Google Gemini Notebook 的非官方 Python API 与代理 Skill：对 NotebookLM 做全量程序化操作。 | 科研 | 已审 |
+| [SkillOpt 技能优化器](https://github.com/microsoft/SkillOpt) | 微软开源的文本空间优化器：通过真实执行反馈训练可复用的自然语言技能，让冻结参数的 LLM 代理越用越准。 | 科研 | 已审 |
+| [上下文工程技能集](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | 上下文工程与多代理架构的技能合集：生产级模式、注意力管理、记忆分层等 24 个进阶技能。 | 开发工具 | 已审 |
+| [飞书官方 CLI](https://github.com/larksuite/cli) | 飞书官方 CLI（larksuite 团队维护）：为人和 AI 代理双向设计，覆盖消息、文档、表格、日历等核心域（37 个 skill）。 | 自动化 | 已审 |
+| [Ego Lite 浏览器自动化](https://github.com/citrolabs/ego-lite) | 为 AI 代理打造的极速浏览器自动化：直接复用你已登录的浏览器状态，无需重复登录与配置。 | 自动化 | 已审 |
+| [一键发布视频](https://github.com/latent-spaces/brag) | 『做出来了就吆喝』：一条命令把刚完成的项目变成一支可分享的发布视频，自动提取亮点生成脚本与画面。 | 设计 | 已审 |
+| [Eigent 开源协作桌面](https://github.com/eigent-ai/eigent) | 开源协作桌面（Cowork Desktop）：Claude Cowork 与 Codex 的本地免费替代，多代理协同完成日常工作。 | 效率 | 已审 |
+| [Obsidian 第二大脑](https://github.com/AgriciDaniel/claude-obsidian) | Obsidian + Claude Code 的自组织第二大脑：丢进任何资料，代理自动阅读、建立链接并归档入 vault（16 个 skill）。 | 效率 | 已审 |
+| [提示词大师](https://github.com/nidhinjs/prompt-master) | 为任意 AI 工具写准提示词的 Skill：完整上下文分析，不浪费一个 token 或额度，一次写到位。 | 写作 | 已审 |
+| [AI 研究技能库](https://github.com/Orchestra-Research/AI-Research-SKILLs) | 面向 AI 研究与工程的开源技能库（98 个 skill）：实验、评测、文献、写作全流程，可打包给任意模型使用。 | 科研 | 已审 |
+| [代理编排监督](https://github.com/OrchestratorInc/agent-orchestrator) | 运行并监督成队的编码代理：从规划到合并全流程，跨 Claude Code、Codex 等 25+ harness 通用。 | 开发工具 | 已审 |
+| [OpenCreator 创作工作台](https://github.com/krillinai/OpenCreator) | 开源创作者 AI 工作台（原 KrillinAI）：视频翻译与配音、图像生成、本地化，Codex 驱动（15 个 skill）。 | 设计 | 已审 |
+| [分镜级产品视频](https://github.com/Vincentwei1021/video-shotcraft) | 电影级产品视频 Skill：基于 Remotion 实现，152 张分镜配方卡与 209 个动效组件，Claude Code / Codex 可用。 | 设计 | 已审 |
+| [全栈 67 技能](https://github.com/Jeffallan/claude-skills) | 面向全栈开发者的 67 个专项技能：把 Claude Code 变成覆盖前后端的专家结对程序员。 | 合集 | 已审 |
+| [内容蒸馏成技能](https://github.com/kangarooking/cangjie-skill) | 把书、长视频、播客等高价值内容蒸馏成可执行的 Agent Skills：读完即会用，知识沉淀自动化（36 个 skill）。 | 效率 | 已审 |
+| [Autoharness 自学习技能层](https://github.com/tigerless-labs/autoharness) | 自学习技能层：从你的真实使用会话中蒸馏技能、持续更新阈值——越用越贴合你的工作方式。 | 效率 | 已审 |
+| [Hive 生产级多代理](https://github.com/aden-hive/hive) | 生产级多代理 Harness：自主代理团队的任务分解、执行与守护（24 个 skill），面向真实业务负载。 | 开发工具 | 已审 |
+| [等距机械插图](https://github.com/wheresryan22/anatomy) | 生成真实世界机器与复杂系统的精细等距插图：交互式 SVG，可缩放可标注，工程科普利器。 | 设计 | 已审 |
+| [可视化讲解生成器](https://github.com/nicobailon/visual-explainer) | 把图表、diff 评审、计划审计、数据表生成富 HTML 页面或幻灯片：讲解型内容一键成稿。 | 设计 | 已审 |
+| [付费媒体投放运营](https://github.com/AgriciDaniel/claude-ads) | Claude 优先的付费媒体运营 Skill：覆盖 Google、Meta、YouTube、LinkedIn 等 12 个广告平台（34 个 skill）。 | 商业 | 已审 |
+| [GenOffice AI 办公套件](https://github.com/genspark-ai/genoffice) | 免费开源的 AI Office 套件：文档、表格、幻灯、PDF、Markdown 与 HTML 编辑器，内建 AI 代理。 | 效率 | 已审 |
+| [多主题演示生成](https://github.com/chuspeeism/dashi-ppt-skill) | 从多套视觉主题生成可浏览器编辑的演示文稿：所见即所得微调，可导出 HTML 分享。 | 设计 | 已审 |
+| [计划可视化批注](https://github.com/backnotprop/plannotator) | 可视化批注与评审编码代理的计划和代码 diff：团队共享反馈直达代理（18 个 skill）。 | 开发工具 | 已审 |
+| [HTML Anything 代理编辑器](https://github.com/nexu-io/html-anything) | 代理式 HTML 编辑器：本地 AI 代理写页面、你来发布——75 个技能 × 9 种版面（杂志/落地页/报告等）。 | 设计 | 已审 |
+| [Stitch 官方技能库](https://github.com/google-labs-code/stitch-skills) | Google Labs Stitch 官方技能库：配合 Stitch MCP 服务器使用的 16 个技能，遵循 Agent Skills 开放规范。 | 合集 | 已审 |
+| [Yao 全端代理工作台](https://github.com/YaoApp/yao) | 所有代理与工作台集中一处、全设备可达：任务看板、跨端同步（15 个 skill），AI 原生架构。 | 效率 | 已审 |
+| [界面构建技能集](https://github.com/jakubkrehel/skills) | 帮你构建出色界面的代理技能合集（14 个 skill）：从布局系统到交互细节的实战规范。 | 设计 | 已审 |
 
 <!-- registry-table:end -->
 

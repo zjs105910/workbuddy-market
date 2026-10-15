@@ -234,6 +234,24 @@ def main(argv: list | None = None) -> int:
     if argv and argv[0] in ("list", "search"):
         return _registry_list_main(argv)
 
+    # check-update（v2.36）：市场本体更新检查 —— 包级能力，只读不装。
+    # 退出码：0 = 已是最新；1 = 有更新（人话给出升级路径）；2 = 检查失败。
+    if argv and argv[0] == "check-update":
+        from .selfupdate import check_for_update       # noqa: PLC0415
+        r = check_for_update()
+        print(f"当前版本：{r['current']}")
+        if r["updateAvailable"] is None:
+            print(r["error"])
+            return 2
+        if r["updateAvailable"]:
+            print(f"有更新：{r['current']} → {r['latest']}"
+                  f"（{r.get('latestTag', '')}）")
+            for hint in r["howToUpdate"]:
+                print("  · " + hint)
+            return 1
+        print(f"已是最新（{r['current']}）。")
+        return 0
+
     if root is None:
         print("workbuddy-market: 当前目录不在 workbuddy-market 的 clone 里"
               "（向上找不到 launcher.py）。", file=sys.stderr)

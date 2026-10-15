@@ -106,7 +106,7 @@ The launch scripts have Chinese filenames. You can also start from PowerShell wi
 
 <!-- registry-table:start -->
 
-> **50** listed plugins; this table is refreshed daily by CI from the human-reviewed registry.
+> **100** listed plugins; this table is refreshed daily by CI from the human-reviewed registry.
 
 | Plugin | Description | Category | Trust |
 | --- | --- | --- | --- |
@@ -160,6 +160,56 @@ The launch scripts have Chinese filenames. You can also start from PowerShell wi
 | [逆向工程代理 Rea](https://github.com/morluto/rea) | 逆向工程代理技能：从应用行为入手向下还原实现细节，2 个技能覆盖行为观测与结构还原，适合学习与兼容性分析。 | 安全 | Reviewed |
 | [星际智能系统](https://github.com/frankxai/Starlight-Intelligence-System) | 给整个 AI 舰队一个共享大脑：带证明的记忆、知识组织与跨会话延续等 69 个技能，适合多代理长期协作场景。 | 效率 | Reviewed |
 | [代理技能百科 RSC](https://github.com/ericrisco/rsc-harness) | 超大体量的代理技能百科：开发、写作、测试、运维等方向 271 个技能，按需取用，适合作为团队技能弹药库。 | 合集 | Reviewed |
+| [UI/UX Pro Max 设计智能](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) | An AI skill providing design intelligence for professional UI/UX across multiple platforms. | 设计 | Reviewed |
+| [Claude Mem 跨会话记忆](https://github.com/thedotmack/claude-mem) | Persistent context across sessions for every agent - captures what your agent does and makes it searchable. | 效率 | Reviewed |
+| [代码知识图谱理解](https://github.com/Egonex-AI/Understand-Anything) | Turn any codebase into an interactive knowledge graph you can explore and search. | 开发工具 | Reviewed |
+| [AI 求职代理](https://github.com/career-ops-hq/career-ops) | Open-source AI job search agent: scan job boards and score each job 1-5 against your CV before applying. | 商业 | Reviewed |
+| [OmO 图形工程技能包](https://github.com/code-yeongyu/oh-my-openagent) | OmO: a 60-skill collection - type one keyword with your prompt and become the master of graph engineering. | 合集 | Reviewed |
+| [OpenMontage 代理视频制作](https://github.com/calesthio/OpenMontage) | The first open-source agentic video production system: 12 pipelines, 100+ tools, 700+ agent skills. | 设计 | Reviewed |
+| [近 30 天话题研究](https://github.com/mvanhorn/last30days-skill) | Research any topic across Reddit, X, YouTube, HN, Polymarket and the web for the last 30 days, then synthesize. | 效率 | Reviewed |
+| [Cherry Studio AI 工作台](https://github.com/CherryHQ/cherry-studio) | AI productivity studio with smart chat, autonomous agents, and 300+ assistants. | 效率 | Reviewed |
+| [Obsidian 官方技能](https://github.com/kepano/obsidian-skills) | Agent skills for Obsidian: teach your agent to use Obsidian CLI and open formats. | 效率 | Reviewed |
+| [Nature 学术表达与绘图](https://github.com/Yuan1z0825/nature-skills) | Skills aligned with Nature paper writing conventions and scientific figure standards. | 科研 | Reviewed |
+| [阿里开源代码评审](https://github.com/alibaba/open-code-review) | Hybrid-architecture code review: deterministic checks plus repository-level context, battle-tested at Alibaba scale. | 开发工具 | Reviewed |
+| [Vercel Skills 工具](https://github.com/vercel-labs/skills) | The open agent skills tool from Vercel - npx skills. | 开发工具 | Reviewed |
+| [AionUi 协作桌面](https://github.com/iOfficeAI/AionUi) | Open-source 24/7 cowork app for OpenClaw, Claude Code, Codex, OpenCode and 20+ more CLI agents. | 效率 | Reviewed |
+| [Vercel 官方技能集](https://github.com/vercel-labs/agent-skills) | Vercel's official collection of agent skills. | 合集 | Reviewed |
+| [Cognee AI 记忆平台](https://github.com/topoteretes/cognee) | The open-source AI memory platform: persistent long-term memory for agents. | 效率 | Reviewed |
+| [OfficeCLI 办公自动化](https://github.com/iOfficeAI/OfficeCLI) | The first Office suite CLI purpose-built for AI agents to read, edit, and automate Word, Excel, PPT. | 自动化 | Reviewed |
+| [Google Workspace CLI](https://github.com/googleworkspace/cli) | One command-line tool for Drive, Gmail, Calendar, Sheets, Docs, Chat, Admin, and more. | 自动化 | Reviewed |
+| [NanoClaw 容器代理](https://github.com/nanocoai/nanoclaw) | A lightweight OpenClaw alternative that runs in containers, connecting WhatsApp, Telegram, Slack. | 自动化 | Reviewed |
+| [Cloudflare 安全审计](https://github.com/cloudflare/security-audit-skill) | A coding-agent skill for multi-phase security audits with independently verified, machine-readable findings. | 安全 | Reviewed |
+| [380 技能超大合集](https://github.com/alirezarezvani/claude-skills) | 380 Claude Code skills & plugins: 30+ agents, 70+ custom commands, 380+ skills. | 合集 | Reviewed |
+| [归藏 PPT 生成](https://github.com/op7418/guizang-ppt-skill) | Generate polished HTML slide decks: editorial magazine and Swiss layouts with image prompts. | 设计 | Reviewed |
+| [卡兹克技能集](https://github.com/KKKKhazix/khazix-skills) | AI skills collection from khazix: leader, neat-freak, hv-analysis, khazix-writer and more. | 合集 | Reviewed |
+| [Google 官方技能库](https://github.com/google/skills) | Agent Skills for Google products and technologies. | 合集 | Reviewed |
+| [NotebookLM 编程接口](https://github.com/teng-lin/notebooklm-py) | Unofficial Python API and agentic skill for Google Gemini Notebook (NotebookLM). | 科研 | Reviewed |
+| [SkillOpt 技能优化器](https://github.com/microsoft/SkillOpt) | A text-space optimizer that trains reusable natural-language skills for frozen LLM agents. | 科研 | Reviewed |
+| [上下文工程技能集](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering) | Agent skills for context engineering, multi-agent architectures, and production patterns. | 开发工具 | Reviewed |
+| [飞书官方 CLI](https://github.com/larksuite/cli) | The official Lark/飞书 CLI tool - built for humans and AI Agents. | 自动化 | Reviewed |
+| [Ego Lite 浏览器自动化](https://github.com/citrolabs/ego-lite) | The fastest browser for AI agents to run browser automation, sharing your logged-in browser state. | 自动化 | Reviewed |
+| [一键发布视频](https://github.com/latent-spaces/brag) | Turn the project you just created into a short, shareable launch video with one command. | 设计 | Reviewed |
+| [Eigent 开源协作桌面](https://github.com/eigent-ai/eigent) | Eigent: the open source cowork desktop - local and free alternative to Claude Cowork and Codex. | 效率 | Reviewed |
+| [Obsidian 第二大脑](https://github.com/AgriciDaniel/claude-obsidian) | Self-organizing AI second brain for Obsidian + Claude Code. | 效率 | Reviewed |
+| [提示词大师](https://github.com/nidhinjs/prompt-master) | A Claude skill that writes accurate prompts for any AI tool. Zero tokens wasted. | 写作 | Reviewed |
+| [AI 研究技能库](https://github.com/Orchestra-Research/AI-Research-SKILLs) | Comprehensive open-source library of AI research and engineering skills for any AI model. | 科研 | Reviewed |
+| [代理编排监督](https://github.com/OrchestratorInc/agent-orchestrator) | Run and supervise teams of coding agents from planning to merge, across any harness. | 开发工具 | Reviewed |
+| [OpenCreator 创作工作台](https://github.com/krillinai/OpenCreator) | Open-source AI workspace for creators: video translation, dubbing, image generation, localization. | 设计 | Reviewed |
+| [分镜级产品视频](https://github.com/Vincentwei1021/video-shotcraft) | Cinematic product videos with Remotion: 152 shot recipe cards, 209 motion components. | 设计 | Reviewed |
+| [全栈 67 技能](https://github.com/Jeffallan/claude-skills) | 67 specialized skills for full-stack developers: transform Claude Code into your expert pair programmer. | 合集 | Reviewed |
+| [内容蒸馏成技能](https://github.com/kangarooking/cangjie-skill) | Distill high-value content from books, long-form videos, and podcasts into executable agent skills. | 效率 | Reviewed |
+| [Autoharness 自学习技能层](https://github.com/tigerless-labs/autoharness) | A self-learning skill layer for Claude Code - distills skills from your real sessions. | 效率 | Reviewed |
+| [Hive 生产级多代理](https://github.com/aden-hive/hive) | Multi-Agent Harness for Production AI. | 开发工具 | Reviewed |
+| [等距机械插图](https://github.com/wheresryan22/anatomy) | An agent skill for creating detailed, interactive isometric illustrations of real-world machines. | 设计 | Reviewed |
+| [可视化讲解生成器](https://github.com/nicobailon/visual-explainer) | Generates rich HTML pages or slide decks for diagrams, diff reviews, plan audits, data tables. | 设计 | Reviewed |
+| [付费媒体投放运营](https://github.com/AgriciDaniel/claude-ads) | Paid-media operations skill across 12 ad platforms (Google, Meta, YouTube, LinkedIn...). | 商业 | Reviewed |
+| [GenOffice AI 办公套件](https://github.com/genspark-ai/genoffice) | Free, open-source AI Office suite: Docs, Sheets, Slides, PDF, Markdown and HTML editors with a built-in agent. | 效率 | Reviewed |
+| [多主题演示生成](https://github.com/chuspeeism/dashi-ppt-skill) | Generate browser-editable presentations from multiple visual themes, exportable to HTML. | 设计 | Reviewed |
+| [计划可视化批注](https://github.com/backnotprop/plannotator) | Annotate and review coding agent plans and code diffs visually; share feedback to agents. | 开发工具 | Reviewed |
+| [HTML Anything 代理编辑器](https://github.com/nexu-io/html-anything) | The agentic HTML editor - your local AI agent writes the HTML, you ship it. 75 skills, 9 surfaces. | 设计 | Reviewed |
+| [Stitch 官方技能库](https://github.com/google-labs-code/stitch-skills) | Agent Skills designed to work with the Stitch MCP server, following the Agent Skills open spec. | 合集 | Reviewed |
+| [Yao 全端代理工作台](https://github.com/YaoApp/yao) | All your agents and workspaces in one place, on every device you own. | 效率 | Reviewed |
+| [界面构建技能集](https://github.com/jakubkrehel/skills) | A collection of agent skills that help you build great interfaces. | 设计 | Reviewed |
 
 <!-- registry-table:end -->
 
