@@ -70,10 +70,9 @@ LEGACY_STATE_DIRS = {
     ".trash": "trash",
     ".workbuddy-market": "legacy-workbuddy-market",
 }
-LEGACY_LOCK_FILES = {
-    ".market.lock": "locks/market.lock",
-    ".market-log.lock": "locks/log.lock",
-}
+# Root-level lock files are intentionally left in the retained old-root backup.
+# They are OS-lock targets, not recoverable user state, and copying them over
+# STATE_HOME/locks/market.lock would collide with the lock held by this updater.
 _VERSION_RE = re.compile(r"""MARKET_VERSION\s*=\s*["'](\d+\.\d+\.\d+)["']""")
 _BACKUP_RE = re.compile(r"^.+\.old-\d{14}$")
 
@@ -374,10 +373,6 @@ def _legacy_state_sources(root: Path) -> list[tuple[Path, Path]]:
         source = root / source_name
         if source.exists():
             sources.append((source, STATE_HOME / target_name))
-    for source_name, target_name in LEGACY_LOCK_FILES.items():
-        source = root / source_name
-        if source.exists():
-            sources.append((source, STATE_HOME / target_name))
     for source in sorted(root.glob(".market-log.ndjson*")):
         if source.name == ".market-log.ndjson":
             target_name = "market.ndjson"
@@ -490,7 +485,11 @@ def _doctor_ok(root: Path) -> tuple[bool, str]:
     try:
         # Run outside the root: Windows cannot rename a process's current directory.
         result = subprocess.run(
-            [sys.executable, "-m", "workbuddy_market", "doctor"],
+            [
+                sys.executable,
+                "-c",
+                "from workbuddy_market.cli import main; raise SystemExit(main(['doctor']))",
+            ],
             cwd=str(root.resolve().parent),
             env=env,
             text=True,
