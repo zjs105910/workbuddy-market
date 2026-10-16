@@ -83,6 +83,16 @@ def test_read_market_version_is_literal_and_fail_closed(tmp_path):
     assert updater.read_market_version(root) == "2.37.0"
     version_file.write_text('MARKET_VERSION = "latest"\n', encoding="utf-8")
     assert updater.read_market_version(root) is None
+    version_file.write_text(
+        '# MARKET_VERSION = "9.9.9" is only a comment\nMARKET_VERSION = "2.37.0"\n',
+        encoding="utf-8",
+    )
+    assert updater.read_market_version(root) == "2.37.0"
+    version_file.write_text(
+        'MARKET_VERSION = "2.37.0"\nMARKET_VERSION = "9.9.9"\n',
+        encoding="utf-8",
+    )
+    assert updater.read_market_version(root) is None
     assert updater.read_market_version(tmp_path / "missing") is None
 
 
@@ -123,6 +133,13 @@ def test_zip_symlink_member_is_rejected():
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     with pytest.raises(updater.RootUpdateError, match="符号链接"):
         updater._check_zip_member(info)
+
+
+def test_zip_member_count_is_limited_before_crc_scan(tmp_path, monkeypatch):
+    archive = _release_zip(tmp_path / "many.zip", extras={"extra.txt": "extra\n"})
+    monkeypatch.setattr(updater, "MAX_ARCHIVE_MEMBERS", 1)
+    with pytest.raises(updater.RootUpdateError, match="成员过多"):
+        updater._extract_verified_zip(archive, tmp_path / "stage")
 
 
 def test_release_missing_required_file_is_rejected(tmp_path):
