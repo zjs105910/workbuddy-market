@@ -71,6 +71,10 @@ LEGACY_STATE_DIRS = {
     ".backups": "backups",
     ".trash": "trash",
 }
+LEGACY_LOCK_FILES = {
+    ".market.lock": "locks/market.lock",
+    ".market-log.lock": "locks/log.lock",
+}
 _VERSION_RE = re.compile(r"""MARKET_VERSION\s*=\s*["'](\d+\.\d+\.\d+)["']""")
 _BACKUP_RE = re.compile(r"^.+\.old-\d{14}$")
 
@@ -209,12 +213,13 @@ def _check_zip_member(info: zipfile.ZipInfo) -> tuple[str, bool]:
     raw = name[:-1] if name.endswith("/") else name
     if not raw or ":" in raw:
         raise RootUpdateError(f"ZIP 含非法路径：{name!r}")
+    if any(part in ("", ".", "..") for part in raw.split("/")):
+        raise RootUpdateError(f"ZIP 含路径穿越或空路径段：{name!r}")
     path = PurePosixPath(raw)
-    if any(part in ("", ".", "..") for part in path.parts):
-        raise RootUpdateError(f"ZIP 含路径穿越：{name!r}")
     mode = (info.external_attr >> 16) & 0xFFFF
-    if stat.S_ISLNK(mode):
-        raise RootUpdateError(f"ZIP 含符号链接成员，拒绝解压：{name!r}")
+    dos_attributes = info.external_attr & 0xFFFF
+    if stat.S_ISLNK(mode) or dos_attributes & 0x0400:
+        raise RootUpdateError(f"ZIP 含符号链接或 reparse 成员，拒绝解压：{name!r}")
     kind = stat.S_IFMT(mode)
     if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
         raise RootUpdateError(f"ZIP 含特殊文件成员，拒绝解压：{name!r}")
@@ -368,6 +373,10 @@ def _legacy_state_sources(root: Path) -> list[tuple[Path, Path]]:
         if source.exists():
             sources.append((source, STATE_HOME / target_name))
     for source_name, target_name in LEGACY_STATE_DIRS.items():
+        source = root / source_name
+        if source.exists():
+            sources.append((source, STATE_HOME / target_name))
+    for source_name, target_name in LEGACY_LOCK_FILES.items():
         source = root / source_name
         if source.exists():
             sources.append((source, STATE_HOME / target_name))
@@ -626,11 +635,8 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
             if source.exists():
                 _copy_path(source, new_root / rel)
                 print(f"保留：{rel}")
-        for source in root.glob(".market-log.ndjson*"):
-            _assert_no_links(source)
-            target = new_root / source.name
-            _copy_path(source, target)
-            print(f"保留旧布局状态：{source.name}")
+        for source, target in state_sources:
+            print(f"迁移旧布局状态：{source.name} → {target}（原件保留在备份）")
         for rel in (".market-state.json", ".ownership.json", ".market-tx",
                     ".backups", ".trash", ".market.lock", ".market-log.lock",
                     ".market-catalog.json", ".market-registry.json"):
