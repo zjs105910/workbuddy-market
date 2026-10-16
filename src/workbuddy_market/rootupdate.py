@@ -8,6 +8,7 @@ tested with pytest and the isolated selftest harness.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -34,7 +35,8 @@ API_ZIPBALL = f"https://api.github.com/repos/{REPO}/zipball"
 ARCHIVE_URL = f"https://github.com/{REPO}/archive/refs/tags"
 PORTS = tuple(range(8777, 8792))
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
-MAX_UNPACKED_BYTES = 5 * 1024 * 1024 * 1024
+MAX_UNPACKED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 50_000
 DISK_MARGIN_BYTES = 64 * 1024 * 1024
 STATE_HOME = _IMPORTED_STATE_HOME
 
@@ -82,17 +84,37 @@ class RootUpdateError(RuntimeError):
 
 
 def read_market_version(root: Path) -> str | None:
-    """Read the literal MARKET_VERSION from a market root, never infer it."""
+    """Read exactly one literal MARKET_VERSION assignment, never infer it from comments."""
     try:
         source = (root / "src" / "workbuddy_market" / "version.py").read_text(
             encoding="utf-8"
         )
-    except (OSError, UnicodeError):
+        tree = ast.parse(source, filename="version.py")
+    except (OSError, UnicodeError, SyntaxError):
         return None
-    match = _VERSION_RE.search(source)
-    if not match or parse_tag(match.group(1)) is None:
+
+    values: list[str] = []
+    for node in tree.body:
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "MARKET_VERSION"
+                   for target in targets):
+            continue
+        if (len(targets) != 1 or not isinstance(value, ast.Constant)
+                or type(value.value) is not str):
+            return None
+        values.append(value.value)
+
+    if len(values) != 1 or parse_tag(values[0]) is None:
         return None
-    return match.group(1)
+    return values[0]
 
 
 def _is_reparse_or_link(path: Path) -> bool:
@@ -230,17 +252,22 @@ def _extract_verified_zip(zip_path: Path, stage_dir: Path) -> Path:
     except (OSError, zipfile.BadZipFile) as exc:
         raise RootUpdateError(f"下载内容不是有效 ZIP：{exc}") from exc
     with archive:
-        bad_member = archive.testzip()
-        if bad_member is not None:
-            raise RootUpdateError(f"ZIP CRC 校验失败：{bad_member}")
         infos = archive.infolist()
         if not infos:
             raise RootUpdateError("ZIP 为空。")
+        if len(infos) > MAX_ARCHIVE_MEMBERS:
+            raise RootUpdateError(
+                f"ZIP 成员过多（{len(infos)}），上限为 {MAX_ARCHIVE_MEMBERS}。"
+            )
         total_size = sum(max(0, item.file_size) for item in infos)
         if total_size > MAX_UNPACKED_BYTES:
             raise RootUpdateError(
                 f"ZIP 解压体积过大（{total_size} 字节），拒绝继续。"
             )
+        # Enforce limits before fully decompressing files to check CRCs.
+        bad_member = archive.testzip()
+        if bad_member is not None:
+            raise RootUpdateError(f"ZIP CRC 校验失败：{bad_member}")
         normalized: list[tuple[zipfile.ZipInfo, str, bool]] = []
         root_names: set[str] = set()
         folded: set[str] = set()
