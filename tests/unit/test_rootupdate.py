@@ -210,16 +210,16 @@ def test_doctor_failure_rolls_back_and_keeps_recovery_workspace(tmp_path, monkey
     with pytest.raises(updater.RootUpdateError, match="doctor 未通过"):
         updater.update_root(root)
     assert updater.read_market_version(root) == "2.36.0"
-    assert not (root / "src" / "workbuddy_market" / "version.py").read_text(
-        encoding="utf-8"
-    ).find("2.37.0") >= 0
+    assert "2.37.0" not in (
+        root / "src" / "workbuddy_market" / "version.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_failed_rollback_reports_manual_recovery_commands(tmp_path, monkeypatch):
     root = _old_root(tmp_path / "workbuddy-market")
     _state_home(monkeypatch, tmp_path)
     _mock_download(monkeypatch, tmp_path)
-    monkeypatch.setattr(updater, "_doctor_ok", lambda root: (True, ""))
+    monkeypatch.setattr(updater, "_doctor_ok", lambda root: (False, "injected doctor failure"))
     real_rename = os.rename
 
     def fail_restore_backup(source, target):
@@ -231,5 +231,5 @@ def test_failed_rollback_reports_manual_recovery_commands(tmp_path, monkeypatch)
     monkeypatch.setattr(updater.os, "rename", fail_restore_backup)
     with pytest.raises(updater.RootUpdateError, match="需要人工恢复") as exc:
         updater.update_root(root)
-    assert f'ren "{root}"' in str(exc.value)
+    assert "move /Y" in str(exc.value)
     assert "旧版备份" in str(exc.value)
