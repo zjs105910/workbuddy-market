@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+for _path in (str(_REPO_ROOT), str(_REPO_ROOT / "src")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 from workbuddy_market import rootupdate as updater
 
