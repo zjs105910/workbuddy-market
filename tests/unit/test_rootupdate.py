@@ -15,7 +15,7 @@ for _path in (str(_REPO_ROOT), str(_REPO_ROOT / "src")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from workbuddy_market import rootupdate as updater
+from workbuddy_market import rootupdate as updater  # noqa: E402
 
 
 def _release_zip(path: Path, version: str = "2.37.0", *, omit=(), extras=None) -> Path:
