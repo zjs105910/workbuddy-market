@@ -34,6 +34,7 @@ from .round21_26 import round23
 from .round21_26 import round24
 from .round21_26 import round25
 from .round21_26 import round26
+from .round27 import round27
 
 
 def run() -> None:
@@ -110,6 +111,8 @@ def run() -> None:
 
     # ============ 41. v2.28：CLI 口径诚实化 / zip 市场构建清单 ============
     round26()
+    # ============ 42. v2.37：市场根显式升级 / ZIP 安全与版本校验 ============
+    round27()
 
 
 def main() -> int:
