@@ -15,7 +15,8 @@ REM    5. run doctor, then start the interactive launcher
 REM       (Enter = browse only, 2 = register into WorkBuddy)
 REM
 REM  Safe to re-run at any time: every step is idempotent.
-REM  Optional argument: --no-launch  (install only, do not start)
+REM  Optional arguments: --no-launch, --update-root [--tag vX.Y.Z] [--force]
+REM  --update-root replaces the source root; ordinary runs update the CLI only.
 REM
 REM  Style note: this script deliberately uses goto-flow with no
 REM  parenthesized blocks, because quoted parentheses such as
@@ -30,6 +31,15 @@ echo.
 
 set "ZIPURL=https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip"
 set "DEST=%USERPROFILE%\workbuddy-market"
+set "UPDATE_ROOT="
+if /i "%~1"=="--update-root" set "UPDATE_ROOT=1"
+set "UPDATE_FORCE="
+if /i "%~2"=="--force" set "UPDATE_FORCE=--force"
+if /i "%~3"=="--force" set "UPDATE_FORCE=--force"
+if /i "%~4"=="--force" set "UPDATE_FORCE=--force"
+set "UPDATE_TAG="
+if /i "%~2"=="--tag" set "UPDATE_TAG=--tag %~3"
+if /i "%~3"=="--tag" set "UPDATE_TAG=--tag %~4"
 set "PYCHECK=import sys; sys.exit(0 if sys.version_info.minor>=10 and sys.version_info.major==3 else 1)"
 
 REM ---- [1/5] Python 3.10+ ----
@@ -83,6 +93,10 @@ goto cli_done
 echo       CLI OK: !WBMEXE!
 :cli_done
 
+if defined UPDATE_ROOT if exist "%DEST%\launcher.py" goto update_root_mode
+if defined UPDATE_ROOT echo [INFO] No existing market root found; falling back to first-install flow.
+if defined UPDATE_ROOT set "UPDATE_ROOT="
+
 REM ---- [4/5] market root (web UI + launcher + wizard) ----
 if exist "%DEST%\launcher.py" goto dest_ok
 echo [4/5] Downloading market root to %DEST% ...
@@ -115,7 +129,9 @@ pause
 exit /b 1
 :dest_ok
 echo       Market root ready: %DEST%
-
+if defined WBMEXE call "!WBMEXE!" root-update --check-only --market-root "%DEST%"
+if not defined WBMEXE %PY% -m workbuddy_market root-update --check-only --market-root "%DEST%"
+echo.
 REM ---- [5/5] doctor + launch ----
 echo [5/5] Health check ...
 echo       ^(First run: a few lines may show X here - they resolve once
@@ -135,10 +151,27 @@ echo.
 %PY% launcher.py
 popd
 echo.
-echo All done. Re-run this file anytime to update the CLI.
+echo All done. Re-run this file anytime to update the CLI; use --update-root to update the market root.
 pause
 exit /b 0
 :no_launch
 popd
 echo [--no-launch] Skipping launch. Market root: %DEST%
 exit /b 0
+
+:update_root_mode
+echo [4/5] Updating market root explicitly ...
+echo       Current root: %DEST%
+if defined WBMEXE call "!WBMEXE!" root-update --market-root "%DEST%" !UPDATE_TAG! !UPDATE_FORCE!
+if not defined WBMEXE %PY% -m workbuddy_market root-update --market-root "%DEST%" !UPDATE_TAG! !UPDATE_FORCE!
+set "UPDATE_EXIT=!errorlevel!"
+if not "!UPDATE_EXIT!"=="0" goto update_root_failed
+echo       Market root update completed.
+pause
+exit /b 0
+:update_root_failed
+echo.
+echo [ERROR] Market root update failed with exit code !UPDATE_EXIT!.
+echo       Follow the recovery instructions above. Do not delete any .old-* backup manually.
+pause
+exit /b !UPDATE_EXIT!
