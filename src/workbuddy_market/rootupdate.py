@@ -58,8 +58,7 @@ PROTECTED_PATHS = (
     ".workbuddy-market",
 )
 # Old in-root state is migrated into the same path-hashed STATE_HOME bucket.
-# Lock files are deliberately not migrated: OS locks are process-owned, and a
-# stale lock file must not be mistaken for a live lock.
+# Lock-file contents are not treated as an active lock; the OS lock is process-owned.
 LEGACY_STATE_FILES = {
     ".market-state.json": "state.json",
     ".ownership.json": "ownership.json",
@@ -555,7 +554,7 @@ def check_root_update(root: Path) -> int:
     return 0
 
 
-def update_root(root: Path, requested_tag: str | None = None, *, force: bool = False) -> int:
+def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force: bool = False) -> int:
     root = root.expanduser().resolve()
     if not (root / "launcher.py").is_file():
         raise RootUpdateError(f"市场根不存在（{root}），应走首装流程。")
@@ -709,7 +708,10 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
                 f"升级元数据写入失败，已回滚到旧版本：{exc}"
             ) from exc
 
-        _cleanup_old_backups(root, backup)
+        try:
+            _cleanup_old_backups(root, backup)
+        except OSError as exc:
+            print(f"警告：旧备份轮换未完全清理（不影响已通过体检的新版本）：{exc}")
         shutil.rmtree(state_txn_dir, ignore_errors=True)
         shutil.rmtree(work_dir, ignore_errors=True)
         if current is None:
@@ -767,6 +769,28 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
                 os.chdir(original_cwd)
         except OSError:
             pass
+
+
+def update_root(root: Path, requested_tag: str | None = None, *, force: bool = False) -> int:
+    """Serialize explicit root updates with a cross-platform OS-level file lock."""
+    root = root.expanduser().resolve()
+    state_home = _state_home_for_root(root)
+    try:
+        from .errors import FileLockTimeout
+        from .locking import FileLock
+
+        lock = FileLock(state_home / "locks" / "root-update.lock", timeout=0.0)
+        with lock:
+            return _update_root_unlocked(root, requested_tag, force=force)
+    except FileLockTimeout as exc:
+        raise RootUpdateError(
+            f"另一项市场操作正在进行，无法取得升级锁：{state_home / 'locks' / 'root-update.lock'}。"
+            "请等待其他安装/同步结束后重试。"
+        ) from exc
+    except RootUpdateError:
+        raise
+    except OSError as exc:
+        raise RootUpdateError(f"无法建立升级锁或准备运行状态目录：{exc}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
