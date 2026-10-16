@@ -4,6 +4,16 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.37.0 — 2026-10-16（功能：市场根显式升级与失败恢复）
+
+- **默认安装行为不覆盖市场根**：重复运行 `install.cmd` 仍更新 CLI，并分别显示 CLI 与市场本体的更新检查结果；只有显式运行 `install.cmd --update-root` 才开始替换市场根。首装仍走原来的 main.zip 路径。
+- **升级逻辑进入 Python 包**：新增 `workbuddy_market.rootupdate`，并由已安装 CLI 的 `workbuddy-market root-update` 分发。支持 `--check-only`、显式 `--tag vX.Y.Z`（可明确降级）与 `--force`（只跳过端口预检）。
+- **替换前 fail-closed**：拒绝 Git 工作区；下载正式 Release 源码 ZIP，检查 CRC、单一顶层目录、路径穿越/重复路径/符号链接与特殊成员、必备文件清单，以及 ZIP 内 `MARKET_VERSION` 与 tag 版本严格相等。
+- **用户数据与旧状态**：显式保留配置、个人 plugins、WorkBuddy manifest、本机环境与工作区。识别旧布局状态并迁移到该市场对应的 STATE_HOME；有目标冲突或链接时拒绝自动迁移。旧根在体检通过前不清理，成功后保留最近一份备份。
+- **失败处理**：同卷目录 rename；新根上位失败或升级后 doctor 失败时回滚；无法自动恢复时以非零退出码提供具体路径和 Windows `move /Y` 恢复命令。升级操作由跨平台文件锁串行化。
+- **信任边界如实声明**：源码 ZIP 当前没有可核验的 `SHA256SUMS.txt`；版本/tag、必备文件与 ZIP CRC 检查并不等同于独立来源证明。日志会明确输出该限制。
+- 验证状态：本次提交增加 pytest 故障注入及 selftest 第 42 节；完整 CI 与 Windows 实机升级/回滚冒烟需通过后才能宣布通过。
+
 ## 2.36.0 — 2026-10-15（功能：市场本体自更新检查 + 精选市场扩容到 100 条）
 
 - **市场本体自更新检查（只读不装）**：新增 `workbuddy_market/selfupdate.py`
