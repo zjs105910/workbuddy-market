@@ -5,10 +5,11 @@
 与 GitHub Releases 的最新正式 tag 比对。**只读不装** —— 升级动作永远由
 用户自己执行，这里只给出两条人话升级路径：
 
-  · 一键安装渠道：重跑 install.cmd（幂等，pipx 会自动 upgrade CLI，
-    市场根从 main.zip 重新落位）；
-  · pipx / 源码渠道：``pipx upgrade workbuddy-market`` + 更新市场根
-    （重跑 install.cmd 或 git pull）。
+  · 一键安装渠道：重跑 install.cmd 更新 CLI 并检查市场本体；确认后运行
+    ``install.cmd --update-root`` 才会替换市场根；
+  · pipx / 源码渠道：``pipx upgrade workbuddy-market``，再用
+    ``workbuddy-market root-update --market-root <市场根目录>`` 更新本体；Git
+    工作区一律用 ``git pull``，不做自动目录替换。
 
 设计约束（与全项目同口径）：
   · 网络接缝只有一处（``_release_fetch``），自检 / pytest 可整体替换；
@@ -29,10 +30,10 @@ SELFUPDATE_TIMEOUT = 10.0
 
 _TAG_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 _UPGRADE_HINT = [
-    "一键安装渠道：重新运行 install.cmd（幂等；pipx 会自动升级 CLI，"
-    "市场根从 main.zip 重新落位）。",
-    "pipx 渠道：pipx upgrade workbuddy-market；市场根更新可重跑 "
-    "install.cmd 或在仓库目录 git pull。",
+    "一键安装渠道：重新运行 install.cmd 更新 CLI 并检查本体；确认后运行 "
+    "install.cmd --update-root 才会替换市场根。",
+    "pipx 渠道：pipx upgrade workbuddy-market；再运行 "
+    "workbuddy-market root-update --market-root <市场根目录>。Git 工作区请用 git pull。",
 ]
 
 
