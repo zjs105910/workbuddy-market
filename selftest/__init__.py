@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SELFTEST_VERSION = "2.36"
+SELFTEST_VERSION = "2.37"
 
 # ---------------------------------------------------------------- 隔离环境
 # 必须在 import market_core 之前设置：路径常量是 import 期求值的。
