@@ -214,7 +214,6 @@ def _check_zip_member(info: zipfile.ZipInfo) -> tuple[str, bool]:
         raise RootUpdateError(f"ZIP 含非法路径：{name!r}")
     if any(part in ("", ".", "..") for part in raw.split("/")):
         raise RootUpdateError(f"ZIP 含路径穿越或空路径段：{name!r}")
-    path = PurePosixPath(raw)
     mode = (info.external_attr >> 16) & 0xFFFF
     dos_attributes = info.external_attr & 0xFFFF
     if stat.S_ISLNK(mode) or dos_attributes & 0x0400:
@@ -555,7 +554,10 @@ def check_root_update(root: Path) -> int:
 
 
 def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force: bool = False) -> int:
+    global STATE_HOME
+    original_cwd = Path.cwd()
     root = root.expanduser().resolve()
+    STATE_HOME = _state_home_for_root(root)
     if not (root / "launcher.py").is_file():
         raise RootUpdateError(f"市场根不存在（{root}），应走首装流程。")
     if (root / ".git").exists():
@@ -598,7 +600,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
     if state_txn_dir.exists():
         raise RootUpdateError(f"状态暂存路径已存在，拒绝覆盖：{state_txn_dir}")
     root_moved = False
-    new_root_moved = False
     staged_states: list[tuple[Path, Path]] = []
     applied_states: list[tuple[Path, Path]] = []
     keep_work_dir = False
@@ -651,7 +652,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
         root_moved = True
         try:
             os.rename(new_root, root)
-            new_root_moved = True
         except OSError as exc:
             for attempt in range(3):
                 try:
@@ -678,10 +678,9 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
             applied_states = []
             _restore_root(root, backup, failed_new_root)
             root_moved = False
-            new_root_moved = False
             keep_work_dir = True
             raise RootUpdateError(
-                "升级后 doctor 未通过，已回滚到旧版本；旧版备份仍保留。\n" + detail
+                "升级后 doctor 未通过，已恢复旧版本；失败的新版本目录保留供排查。\n" + detail
             )
 
         metadata = {
@@ -732,7 +731,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
                 if root.exists():
                     _restore_root(root, backup, failed_new_root)
                     root_moved = False
-                    new_root_moved = False
                     keep_work_dir = True
                 elif not root.exists():
                     last_error = None
