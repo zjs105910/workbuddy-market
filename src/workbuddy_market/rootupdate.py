@@ -8,12 +8,15 @@ tested with pytest and the isolated selftest harness.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import time
 import urllib.parse
@@ -21,9 +24,8 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from .doctor import run_doctor
 from .fsutil import atomic_write_text
-from .paths import MARKET_ROOT, STATE_HOME
+from .paths import MARKET_ROOT, STATE_HOME as _IMPORTED_STATE_HOME
 from .selfupdate import _release_fetch, compare_versions, parse_tag
 
 REPO = "zjs105910/workbuddy-market"
@@ -34,6 +36,7 @@ PORTS = tuple(range(8777, 8792))
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_UNPACKED_BYTES = 5 * 1024 * 1024 * 1024
 DISK_MARGIN_BYTES = 64 * 1024 * 1024
+STATE_HOME = _IMPORTED_STATE_HOME
 
 REQUIRED_FILES = (
     "launcher.py",
@@ -131,6 +134,30 @@ def _copy_path(source: Path, target: Path) -> None:
         shutil.copytree(source, target, copy_function=shutil.copy2)
     else:
         shutil.copy2(source, target)
+
+
+def _path_size(path: Path) -> int:
+    """Best-effort regular-file byte count without traversing links."""
+    if _is_reparse_or_link(path) or not path.exists():
+        return 0
+    if path.is_file():
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for base, dirs, files in os.walk(path, followlinks=False):
+        base_path = Path(base)
+        dirs[:] = [name for name in dirs if not _is_reparse_or_link(base_path / name)]
+        for name in files:
+            child = base_path / name
+            if _is_reparse_or_link(child):
+                continue
+            try:
+                total += child.stat().st_size
+            except OSError:
+                pass
+    return total
 
 
 def _protected_size(root: Path) -> int:
@@ -432,20 +459,48 @@ def _restore_root(root: Path, backup: Path, failed_new_root: Path) -> None:
         )
 
 
-def _doctor_ok() -> tuple[bool, str]:
+def _state_home_for_root(root: Path) -> Path:
+    """Mirror paths.py's bucket rule for the target root, not the pipx package."""
+    explicit = os.environ.get("WBM_STATE_HOME")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if os.environ.get("WBM_MARKET_ROOT") is None and os.environ.get("GHPM_MARKET_ROOT") is not None:
+        # Compatibility with the old selftest/harness layout.
+        return root.resolve()
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", root.resolve().name).strip("-") or "market"
+    digest = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
+    return (Path.home() / ".workbuddy-market" / "markets" / f"{name[:40]}-{digest}").resolve()
+
+
+def _doctor_ok(root: Path) -> tuple[bool, str]:
+    """Run the doctor's real CLI in a fresh process with explicit roots."""
+    env = os.environ.copy()
+    env["WBM_MARKET_ROOT"] = str(root.resolve())
+    env["WBM_STATE_HOME"] = str(STATE_HOME.resolve())
+    old_pythonpath = env.get("PYTHONPATH", "")
+    source_path = str(root.resolve() / "src")
+    env["PYTHONPATH"] = source_path + (os.pathsep + old_pythonpath if old_pythonpath else "")
     try:
-        report = run_doctor(fix=False)
+        # Run outside the root: Windows cannot rename a process's current directory.
+        result = subprocess.run(
+            [sys.executable, "-m", "workbuddy_market", "doctor"],
+            cwd=str(root.resolve().parent),
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
     except Exception as exc:
-        return False, f"doctor 自身异常：{exc}"
-    failed = [item for item in report.get("checks", []) if not item.get("ok")]
-    # An uninitialised market is explicitly represented as pending + ok=True.
-    if report.get("ok") and not failed:
+        return False, f"doctor 子进程执行失败：{exc}"
+    output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    if output:
+        print(output)
+    if result.returncode == 0:
         return True, ""
-    details = "\n".join(
-        f"  ✗ {item.get('name', '未知检查')}：{item.get('detail', '')}"
-        for item in failed[:8]
-    )
-    return False, details or "doctor 未通过。"
+    return False, f"doctor 退出码 {result.returncode}。\n{output or '无诊断输出。'}"
 
 
 def _cleanup_old_backups(root: Path, keep: Path) -> None:
@@ -529,6 +584,8 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
     stage_dir = work_dir / "unpack"
     stage_dir.mkdir()
     state_txn_dir = STATE_HOME / (".rootupdate-stage-" + txn_id)
+    if state_txn_dir.exists():
+        raise RootUpdateError(f"状态暂存路径已存在，拒绝覆盖：{state_txn_dir}")
     root_moved = False
     new_root_moved = False
     staged_states: list[tuple[Path, Path]] = []
@@ -536,12 +593,12 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
     keep_work_dir = False
     try:
         state_sources = _legacy_state_sources(root)
-        staged_states = _copy_legacy_state_to_staging(state_sources, state_txn_dir)
         _download_release_zip(tag, archive_path)
         with zipfile.ZipFile(archive_path) as archive:
             expanded_size = sum(max(0, item.file_size) for item in archive.infolist())
         free = shutil.disk_usage(root.parent).free
         protected_size = _protected_size(root)
+        legacy_state_size = sum(_path_size(source) for source, _ in state_sources)
         needed = int(expanded_size * 1.2) + protected_size + DISK_MARGIN_BYTES
         if expanded_size > MAX_UNPACKED_BYTES:
             raise RootUpdateError("Release ZIP 解压体积超出上限。")
@@ -550,8 +607,20 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
                 f"磁盘空间不足：预计至少还需 {_format_bytes(needed)}，"
                 f"当前可用 {_format_bytes(free)}。旧市场根尚未改动。"
             )
+        STATE_HOME.mkdir(parents=True, exist_ok=True)
+        state_volume = STATE_HOME
+        while not state_volume.exists() and state_volume != state_volume.parent:
+            state_volume = state_volume.parent
+        state_free = shutil.disk_usage(state_volume).free
+        state_needed = legacy_state_size + DISK_MARGIN_BYTES
+        if state_free < state_needed:
+            raise RootUpdateError(
+                f"运行状态盘空间不足：迁移旧状态预计需要 {_format_bytes(state_needed)}，"
+                f"当前可用 {_format_bytes(state_free)}。旧市场根尚未改动。"
+            )
         new_root = _extract_verified_zip(archive_path, stage_dir)
         _validate_release_tree(new_root, target_version)
+        staged_states = _copy_legacy_state_to_staging(state_sources, state_txn_dir)
         for rel in PROTECTED_PATHS:
             source = root / rel
             if source.exists():
@@ -568,6 +637,8 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
             if (root / rel).exists():
                 print(f"迁移旧布局状态：{rel} → STATE_HOME（原件保留在备份）")
 
+        # Release a cwd inside the market root before attempting a Windows rename.
+        os.chdir(root.parent)
         os.rename(root, backup)
         root_moved = True
         try:
@@ -592,7 +663,7 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
             raise RootUpdateError(f"新根上位失败，旧版已恢复：{exc}") from exc
 
         applied_states = _apply_state_migrations(staged_states)
-        ok, detail = _doctor_ok()
+        ok, detail = _doctor_ok(root)
         if not ok:
             _rollback_state_migrations(applied_states)
             applied_states = []
@@ -642,8 +713,6 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
         print("校验口径：正式 Release tag + MARKET_VERSION 一致 + 必备文件清单 + ZIP CRC。")
         print("注意：源码 ZIP 未附可核对的 SHA-256 清单；以上不等于独立来源证明。")
         return 0
-    except RootUpdateError:
-        raise
     except Exception as exc:
         if root_moved and backup.exists():
             try:
@@ -654,10 +723,21 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
                     failed_new_root = work_dir / "failed-new-root"
                     _restore_root(root, backup, failed_new_root)
                     root_moved = False
+                    new_root_moved = False
                     keep_work_dir = True
                 elif not root.exists():
-                    os.rename(backup, root)
-                    root_moved = False
+                    last_error = None
+                    for attempt in range(3):
+                        try:
+                            os.rename(backup, root)
+                            root_moved = False
+                            break
+                        except OSError as rollback_exc:
+                            last_error = rollback_exc
+                            if attempt < 2:
+                                time.sleep(0.2 * (2 ** attempt))
+                    if root_moved:
+                        raise RootUpdateError(f"恢复旧根失败：{last_error}")
             except Exception as rollback_exc:
                 keep_work_dir = True
                 raise RootUpdateError(
@@ -668,6 +748,8 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
                     f'  ren "{backup}" "{root}"\n'
                     f"原始异常：{exc}\n回滚异常：{rollback_exc}"
                 ) from rollback_exc
+        if isinstance(exc, RootUpdateError):
+            raise
         raise RootUpdateError(f"升级失败，旧市场根未被静默覆盖：{exc}") from exc
     finally:
         if not keep_work_dir:
@@ -681,8 +763,13 @@ def main(argv: list[str] | None = None) -> int:
         prog="workbuddy-market root-update",
         description="显式升级 WorkBuddy Market 源码根目录；默认模式只检查，不自动安装。",
     )
-    parser.add_argument("--market-root", type=Path, default=MARKET_ROOT,
-                        help="待管理的市场根目录")
+    default_root = MARKET_ROOT
+    if not (default_root / "launcher.py").is_file():
+        home_root = Path.home() / "workbuddy-market"
+        if (home_root / "launcher.py").is_file() or not (default_root / "launcher.py").exists():
+            default_root = home_root
+    parser.add_argument("--market-root", type=Path, default=default_root,
+                        help="待管理的市场根目录（默认尝试当前市场或 ~/workbuddy-market）")
     parser.add_argument("--check-only", action="store_true",
                         help="仅显示当前根版本与最新正式 Release，不替换文件")
     parser.add_argument("--tag", help="指定正式 Release 版本（vX.Y.Z 或 X.Y.Z；允许显式降级）")
