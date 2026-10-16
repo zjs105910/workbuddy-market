@@ -702,7 +702,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
         except Exception as exc:
             _rollback_state_migrations(applied_states)
             applied_states = []
-            _restore_placeholder_remove = None
             _restore_root(root, backup, failed_new_root)
             root_moved = False
             new_root_moved = False
@@ -731,7 +730,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
                     _rollback_state_migrations(applied_states)
                     applied_states = []
                 if root.exists():
-                    failed_new_root = work_dir / "failed-new-root"
                     _restore_root(root, backup, failed_new_root)
                     root_moved = False
                     new_root_moved = False
