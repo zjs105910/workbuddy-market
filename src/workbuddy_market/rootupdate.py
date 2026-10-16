@@ -55,7 +55,6 @@ PROTECTED_PATHS = (
     ".codebuddy-plugin/marketplace.json",
     ".env",
     ".workbuddy",
-    ".workbuddy-market",
 )
 # Old in-root state is migrated into the same path-hashed STATE_HOME bucket.
 # Lock-file contents are not treated as an active lock; the OS lock is process-owned.
@@ -69,6 +68,7 @@ LEGACY_STATE_DIRS = {
     ".market-tx": "tx",
     ".backups": "backups",
     ".trash": "trash",
+    ".workbuddy-market": "legacy-workbuddy-market",
 }
 LEGACY_LOCK_FILES = {
     ".market.lock": "locks/market.lock",
@@ -703,7 +703,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
             applied_states = []
             _restore_root(root, backup, failed_new_root)
             root_moved = False
-            new_root_moved = False
             keep_work_dir = True
             raise RootUpdateError(
                 f"升级元数据写入失败，已回滚到旧版本：{exc}"
@@ -786,12 +785,14 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
         from .errors import FileLockTimeout
         from .locking import FileLock
 
-        lock = FileLock(state_home / "locks" / "root-update.lock", timeout=0.0)
+        # Reuse the market lock shared by install/sync/restore. A separate
+        # updater-only lock would not serialize against normal market writes.
+        lock = FileLock(state_home / "locks" / "market.lock", timeout=0.0)
         with lock:
             return _update_root_unlocked(root, requested_tag, force=force)
     except FileLockTimeout as exc:
         raise RootUpdateError(
-            f"另一项市场操作正在进行，无法取得升级锁：{state_home / 'locks' / 'root-update.lock'}。"
+            f"另一项市场操作正在进行，无法取得市场锁：{state_home / 'locks' / 'market.lock'}。"
             "请等待其他安装/同步结束后重试。"
         ) from exc
     except RootUpdateError:
