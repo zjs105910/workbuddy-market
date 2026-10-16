@@ -234,6 +234,12 @@ def main(argv: list | None = None) -> int:
     if argv and argv[0] in ("list", "search"):
         return _registry_list_main(argv)
 
+    # root-update: explicit source-root replacement; available from the packaged CLI
+    # even when the market root being upgraded is stale or cannot be imported.
+    if argv and argv[0] == "root-update":
+        from .rootupdate import main as root_update_main  # noqa: PLC0415
+        return root_update_main(argv[1:])
+
     # check-update（v2.36）：市场本体更新检查 —— 包级能力，只读不装。
     # 退出码：0 = 已是最新；1 = 有更新（人话给出升级路径）；2 = 检查失败。
     if argv and argv[0] == "check-update":
