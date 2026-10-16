@@ -1,0 +1,19 @@
+{
+ "name": "microsoft-SkillOpt",
+ "version": "2026.10.16.343db22",
+ "description": "微软开源的文本空间优化器：通过真实执行反馈训练可复用的自然语言技能，让冻结参数的 LLM 代理越用越准。",
+ "description_en": "A text-space optimizer that trains reusable natural-language skills for frozen LLM agents.",
+ "author": {
+  "name": "microsoft"
+ },
+ "keywords": [
+  "微软",
+  "优化",
+  "自进化",
+  "研究"
+ ],
+ "category": "科研",
+ "license": "MIT",
+ "homepage": "https://github.com/microsoft/SkillOpt",
+ "sourceCommit": "343db229dbd5ddaf9df6b1d5540d8bcdb2604d5c"
+}

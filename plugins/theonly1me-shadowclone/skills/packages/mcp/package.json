@@ -1,0 +1,24 @@
+{
+  "name": "@shadowclone/mcp",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/changes": "workspace:*",
+    "@shadowclone/cloud": "workspace:*",
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/environment": "workspace:*",
+    "@shadowclone/learning": "workspace:*",
+    "@shadowclone/profile": "workspace:*",
+    "@shadowclone/sessions": "workspace:*",
+    "@shadowclone/skills": "workspace:*",
+    "@shadowclone/web": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}

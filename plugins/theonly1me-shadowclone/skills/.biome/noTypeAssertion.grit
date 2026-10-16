@@ -1,0 +1,10 @@
+language js(typescript)
+
+`$value as $type` where {
+  $type <: not r"^const$",
+  register_diagnostic(
+    span = $type,
+    message = "Type assertions are banned. Narrow the type instead.",
+    severity = "error"
+  )
+}

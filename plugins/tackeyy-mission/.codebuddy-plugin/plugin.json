@@ -1,0 +1,18 @@
+{
+ "name": "tackeyy-mission",
+ "version": "2026.10.16.4274db6",
+ "description": "质量门禁驱动的自治任务闭环技能集：任务拆解、执行、验证与交付全程受质量闸约束，含 12 个技能，适合让代理在明确验收标准下长跑完成任务。",
+ "author": {
+  "name": "tackeyy"
+ },
+ "keywords": [
+  "自治任务",
+  "质量门禁",
+  "任务闭环",
+  "Claude Code"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/tackeyy/mission",
+ "sourceCommit": "4274db69a3af7457ba70c941c6c9edd4c2ca015a"
+}

@@ -1,0 +1,19 @@
+{
+ "name": "career-ops-hq-career-ops",
+ "version": "2026.10.16.7e3eabb",
+ "description": "开源 AI 求职代理：扫描多个职位板，按你的简历逐条 1-5 打分再决定投递，全流程可追踪。",
+ "description_en": "Open-source AI job search agent: scan job boards and score each job 1-5 against your CV before applying.",
+ "author": {
+  "name": "career-ops-hq"
+ },
+ "keywords": [
+  "求职",
+  "简历",
+  "ATS",
+  "自动化"
+ ],
+ "category": "商业",
+ "license": "MIT",
+ "homepage": "https://github.com/career-ops-hq/career-ops",
+ "sourceCommit": "7e3eabbb2f2b33e77ebc33dd91d99c1a4c32479b"
+}

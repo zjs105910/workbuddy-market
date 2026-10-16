@@ -1,0 +1,19 @@
+{
+ "name": "Nutlope-hallmark",
+ "version": "2026.10.16.13ac0ec",
+ "description": "反 AI 味设计技能：阻止智能体产出千篇一律的模板化界面，让生成的设计更有个性与质感。",
+ "description_en": "Anti-AI-slop design skill for Claude Code, Cursor and Codex - stop generic, template-generated UI.",
+ "author": {
+  "name": "Nutlope"
+ },
+ "keywords": [
+  "设计",
+  "去模板化",
+  "ui",
+  "审美"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/Nutlope/hallmark",
+ "sourceCommit": "13ac0ec7e148655948100b6396439e481361d690"
+}

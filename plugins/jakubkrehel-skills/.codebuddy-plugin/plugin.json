@@ -1,0 +1,19 @@
+{
+ "name": "jakubkrehel-skills",
+ "version": "2026.10.16.4c66b1f",
+ "description": "帮你构建出色界面的代理技能合集（14 个 skill）：从布局系统到交互细节的实战规范。",
+ "description_en": "A collection of agent skills that help you build great interfaces.",
+ "author": {
+  "name": "jakubkrehel"
+ },
+ "keywords": [
+  "界面",
+  "前端",
+  "设计",
+  "合集"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/jakubkrehel/skills",
+ "sourceCommit": "4c66b1fa86e9ab70187b43d7da9b6fdb29f2ef63"
+}

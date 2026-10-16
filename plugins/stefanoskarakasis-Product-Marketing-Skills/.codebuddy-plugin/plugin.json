@@ -1,0 +1,19 @@
+{
+ "name": "stefanoskarakasis-Product-Marketing-Skills",
+ "version": "2026.10.16.ec0108f",
+ "description": "产品营销（PMM）技能市场：包含定位、发布、竞争分析、客户研究、内容与销售赋能等 30+ 个代理技能与命令，覆盖产品营销全流程。",
+ "author": {
+  "name": "stefanoskarakasis"
+ },
+ "keywords": [
+  "产品营销",
+  "PMM",
+  "定位",
+  "发布",
+  "竞争分析"
+ ],
+ "category": "商业",
+ "license": "MIT",
+ "homepage": "https://github.com/stefanoskarakasis/Product-Marketing-Skills",
+ "sourceCommit": "ec0108f0f590e0694f24fe4144b0b90f6896e6c3"
+}

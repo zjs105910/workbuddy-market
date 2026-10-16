@@ -1,0 +1,18 @@
+{
+ "name": "machina-sports-sports-skills",
+ "version": "2026.10.16.5bb9d1d",
+ "description": "面向体育场景的开源 agent 技能集：实时赛事数据获取、比赛结果预测、联赛与球员信息查询等 27 个技能，按主题分组，适合构建体育资讯与数据分析工作流。",
+ "author": {
+  "name": "machina-sports"
+ },
+ "keywords": [
+  "体育",
+  "赛事数据",
+  "预测",
+  "技能集"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/machina-sports/sports-skills",
+ "sourceCommit": "5bb9d1d180e76b93353adf1a755322ac8f66f438"
+}

@@ -1,0 +1,60 @@
+# Platform compatibility
+
+Rigorous Research Assistant keeps one canonical skill at `skills/research-rigor/`.
+
+## Codex
+
+- Install the directory at `$CODEX_HOME/skills/research-rigor/`.
+- If `CODEX_HOME` is unset, the installer uses `~/.codex/skills/research-rigor/`.
+- Invoke explicitly with `$research-rigor`.
+- `agents/openai.yaml` provides Codex-facing display metadata.
+
+## Claude Code
+
+- User installation: `~/.claude/skills/research-rigor/SKILL.md`.
+- Project installation: `<project>/.claude/skills/research-rigor/SKILL.md`.
+- Invoke explicitly with `/research-rigor`.
+- Claude Code can also load the skill automatically from its description.
+- `${CLAUDE_SKILL_DIR}` resolves to the directory containing `SKILL.md`.
+- Claude Code ignores the Codex-specific `agents/openai.yaml`; the shared instructions, references, scripts, and assets remain usable.
+
+Claude Code documents these personal and project skill locations in its official [skills guide](https://code.claude.com/docs/en/skills).
+
+## Shared-format decisions
+
+The [model adaptation reference](../skills/research-rigor/references/model-adaptation.md)
+records the September 2026 design guidance. Compatibility with Codex and Claude
+Code is a file/CLI contract, not a claim that GPT-6 Astra or Opus 5.5 has passed
+a comparative research benchmark. No model, account, pricing, or API setting is
+changed by installing this skill.
+
+- Frontmatter uses only the portable `name` and `description` fields.
+- Host-specific tool allowlists, forced subagent context, hooks, and dynamic shell injection are not required.
+- All bundled resource links are relative to `SKILL.md`.
+- Script instructions define `<SKILL_DIR>` rather than assuming the research project contains the skill's scripts.
+- The canonical skill is copied at install time; there are no platform-specific forks to keep in sync.
+- The persistent cycle controller and project scaffold use only Python's standard
+  library and portable paths; neither depends on a Codex-only or Claude-only API.
+
+## Compatibility test
+
+A release is compatible only if all of the following pass:
+
+1. `SKILL.md` frontmatter validates and the directory name matches `research-rigor`.
+2. Every linked reference, script, and scaffold file exists.
+3. A clean install reaches the expected Codex and Claude Code target directories.
+4. The installed skill can initialize a disposable full-cycle project scaffold.
+5. The state audit accepts the untouched scaffold.
+6. Checkpoint, rollback, gate transition, dependent-gate reopening, and terminal
+   scientific-failure behavior pass.
+7. A privacy-safe synthetic project reaches G11, while an unsupported manuscript
+   claim is blocked until remediated.
+8. The installed revision-package audit rejects unresolved comments, missing
+   response anchors, unverified citations, and failed final-size figure checks.
+9. The release privacy scan passes.
+10. Existing authorization is reused; scientific responsibility remains with the researcher.
+11. Coverage-based novelty rejects empty or unverified evidence and broken source links.
+12. Explicit quotas and legacy policies remain enforced; merging does not rewrite state.
+
+The repository runs the lifecycle suite on Windows and Linux with Python 3.11
+and 3.13 in GitHub Actions.

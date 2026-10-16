@@ -1,0 +1,19 @@
+{
+ "name": "op7418-guizang-ppt-skill",
+ "version": "2026.10.16.c91369c",
+ "description": "归藏出品的 HTML 幻灯片生成 Skill：杂志编辑与瑞士版式双风格，内建配图提示词，产出可直接演示的页面。",
+ "description_en": "Generate polished HTML slide decks: editorial magazine and Swiss layouts with image prompts.",
+ "author": {
+  "name": "op7418"
+ },
+ "keywords": [
+  "PPT",
+  "幻灯片",
+  "版式",
+  "html"
+ ],
+ "category": "设计",
+ "license": "AGPL-3.0",
+ "homepage": "https://github.com/op7418/guizang-ppt-skill",
+ "sourceCommit": "c91369c449d34755d320a8b81d0734000d99d1ab"
+}

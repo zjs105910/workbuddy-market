@@ -1,0 +1,1 @@
+- docs: record the light-mode trial's results in `docs/light-mode.md`. The `medium` gate review missed a blocking finding at 3 of 8 paired commits, so the gate keeps its full level in light mode, and the trial's cost side stays unmeasured.

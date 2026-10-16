@@ -1,0 +1,311 @@
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { linkOrCopy } from './index.js';
+import { ensureShadowClaudeMd, removeShadowClaudeMd } from './agents-md-shadow.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+export function writeSkill(id, fromDir, toPath) {
+  // Migrate away from the legacy nested layout (.claude/skills/rsc/<id>) that
+  // Claude Code never discovered — it only reads .claude/skills/<name>/SKILL.md.
+  // toPath is now .claude/skills/<id>; drop the stale rsc/ sibling if present.
+  const legacy = join(dirname(toPath), 'rsc');
+  if (existsSync(legacy)) rmSync(legacy, { recursive: true, force: true });
+  return linkOrCopy(fromDir, toPath);
+}
+
+// A hook entry, stringified with its path separators normalized to `/`.
+//
+// This exists because of a Windows bug that cost real users 4× the context budget. `join()` yields
+// `.rsc\session-start.mjs` on Windows, `JSON.stringify` escapes that to `.rsc\\session-start.mjs`,
+// and all seven dedup filters below searched for a forward-slash needle (`.rsc/session-start.`).
+// The needle never matched, so every `install` / `add` / `sync` APPENDED a hook instead of replacing
+// it: a real Windows box reported every hook present four times, which means the `suggest` always-on
+// body was injected 4× per session start and all six guards ran 4× per command.
+//
+// Worse, and unreported: `unwireHook` uses the same needles, so on Windows `uninstall` and `purge`
+// removed NONE of the hooks they claim to remove — a cleanup that silently cleans nothing.
+//
+// ONE replacement, and only the JSON-escaped form. `JSON.stringify` escapes every backslash as
+// `\\`, so a separator always arrives doubled and a LONE backslash in the JSON text is never a
+// separator — it is some other escape (`\"`, `\n`, `\uXXXX`). Collapsing those too would mangle
+// them for no gain, which is why the second `.replace(/\\/g, '/')` this started with is gone: a
+// mutation pass showed nothing depended on it.
+//
+// Normalizing the HAYSTACK (never the needle) keeps every call site readable as a plain POSIX path,
+// and keeps a user's own `C:\...\my-own-hook.mjs` from ever looking like an rsc hook.
+// `scripts/doctor.js` already handled both forms; this is that knowledge, shared.
+export function hookWiringOf(entry) {
+  return JSON.stringify(entry).replace(/\\\\/g, '/');
+}
+
+// Inverse of wireHook: drop every rsc-wired hook entry (any command pointing at a
+// .rsc/ script — session-start, worklog-checkpoint, ship-guard, danger-guard, … —
+// plus the legacy cat-form) from settings.json, across all events. User hooks and
+// other settings are preserved. Empty event arrays (and an empty hooks object) are
+// pruned so we don't leave noise behind.
+export function unwireHook(paths) {
+  // The bootstrap lives in the COMMITTED tree, so leaving it behind does not just orphan a file the
+  // way a stray `.rsc/` entry would — it leaves an executable in something the user pushes. Nothing
+  // else removes it: uninstall and purge only ever knew about `.rsc/`.
+  try {
+    rmSync(join(paths.projectRoot, '.claude', 'rsc-bootstrap.mjs'), { force: true });
+  } catch { /* never let cleanup be the thing that fails */ }
+
+  // The shadow CLAUDE.md exists only to keep the hook from being doubled by a natively-read
+  // AGENTS.md. Unwiring the hook removes the reason for it. Only ever takes back an untouched one.
+  const shadow = removeShadowClaudeMd(paths.projectRoot);
+  const removed = shadow ? [shadow] : [];
+
+  const file = paths.hookTarget;
+  if (!existsSync(file)) return removed;
+  let settings;
+  try { settings = JSON.parse(readFileSync(file, 'utf8')); } catch { return removed; }
+  if (!settings.hooks) return removed;
+  for (const event of Object.keys(settings.hooks)) {
+    settings.hooks[event] = (settings.hooks[event] || []).filter((e) => {
+      const s = hookWiringOf(e);
+      return !s.includes('.rsc/') && !s.includes('skills/rsc/suggest');
+    });
+    if (settings.hooks[event].length === 0) delete settings.hooks[event];
+  }
+  if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+  writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+  return [...removed, file];
+}
+
+// SessionStart runs a project-local session-start.mjs via `node`: it prints
+// suggest's always-on body, an onboarding banner when the workspace has no harness
+// profile yet, and an auto-ingest nudge when the inbox has un-ingested material. We
+// invoke with `node` (not bash) so the hook runs on Windows too. We materialize the
+// script next to the shared base and point the hook at it. Any prior rsc SessionStart
+// entry (the old `cat …/suggest/SKILL.md` form, or a previous `.sh`/`.mjs` script
+// form) is dropped before we add the current one — idempotent, migrating legacy and
+// bash-era hooks in place. Other (non-rsc) SessionStart hooks are preserved.
+// Commands name the project through ${CLAUDE_PROJECT_DIR}, never through the absolute
+// path of the folder it happened to be installed in. Baking that path in is what made a
+// harness unshareable: a committed settings.json was broken in every other checkout, and
+// even renaming your own folder broke it. The variable is resolved by the client at run
+// time, so the same bytes work on every machine — which is the precondition for the
+// manifest being worth committing at all.
+const P = '${CLAUDE_PROJECT_DIR}';
+const at = (...seg) => `${P}/${seg.join('/')}`;
+
+// Everything below points at `.rsc/`, which git does not carry — so in a clone every one of these
+// commands runs against a file that is not there and the client shows the module loader's stack
+// trace instead of a hook. The fix is not to make each script survive its own absence (it cannot:
+// the guards import only node builtins, so a missing entry file fails before a line of theirs runs).
+// The fix is to point the wiring at a file that IS committed, and let it decide: delegate when the
+// harness is mounted, speak once when it is not.
+//
+// The script's own path stays in the command as an argument, so every dedup/unwire needle
+// (`.rsc/session-start.`, `.rsc/ship-guard.`, …) still matches and idempotency is untouched.
+// Three modes, because a hook's event decides what it is allowed to say. `announce` is the one hook
+// that may open with the offer (one per session, no marker needed). `guard` is a shell guard, and in
+// an unbuilt harness it is the only place that can notice someone is about to do the thing the
+// missing guard protected. `quiet` delegates and never speaks.
+const BOOTSTRAP = '.claude/rsc-bootstrap.mjs';
+const viaBootstrap = (mode, target, ...args) =>
+  [`node "${at(...BOOTSTRAP.split('/'))}"`, `"${mode}"`, `"${P}"`, `"${target}"`, ...args].join(' ');
+
+export function wireHook(paths, sourceMd, policy = {}) {
+  const scriptDest = join(paths.projectRoot, '.rsc', 'session-start.mjs');
+  mkdirSync(dirname(scriptDest), { recursive: true });
+  // Shared by session-start + userprompt-gate. Hooks are materialized file by file, so a module
+  // they import must be copied as their SIBLING — a subdirectory import would break once copied.
+  copyFileSync(join(HERE, 'hook-once.mjs'), join(paths.projectRoot, '.rsc', 'hook-once.mjs'));
+  // Shared by every PreToolUse guard (and the sello): what a Bash command really runs, `bash -c` and
+  // `eval` unwrapped. A sibling for the same reason, and here because the danger guard needs it too.
+  copyFileSync(join(HERE, 'shell-unwrap.mjs'), join(paths.projectRoot, '.rsc', 'shell-unwrap.mjs'));
+  // Same reason: session-start imports the reaper for the landed-worktree sweep, so it travels as a
+  // sibling too. Missing it does not break startup — the sweep is wrapped — it just goes silent.
+  copyFileSync(join(HERE, 'worktree-reaper.mjs'), join(paths.projectRoot, '.rsc', 'worktree-reaper.mjs'));
+  // session-start imports the shared update check, so it travels as a sibling too.
+  copyFileSync(join(HERE, 'auto-update.mjs'), join(paths.projectRoot, '.rsc', 'auto-update.mjs'));
+  // team-safe-default: the 3.0 start-up duties and the trunk policy they read, as siblings.
+  copyFileSync(join(HERE, 'team-safe-start.mjs'), join(paths.projectRoot, '.rsc', 'team-safe-start.mjs'));
+  copyFileSync(join(HERE, 'trunk-policy.mjs'), join(paths.projectRoot, '.rsc', 'trunk-policy.mjs'));
+  copyFileSync(join(HERE, 'session-start.mjs'), scriptDest);
+  // The one harness file that belongs in the committed tree rather than in `.rsc/`: it is the only
+  // thing standing between a clone and seven stack traces, so it has to survive `git clone`.
+  const bootstrapDest = join(paths.projectRoot, '.claude', 'rsc-bootstrap.mjs');
+  mkdirSync(dirname(bootstrapDest), { recursive: true });
+  copyFileSync(join(HERE, 'clone-bootstrap.mjs'), bootstrapDest);
+
+  let suggestRel = at(relative(paths.projectRoot, paths.skillDir('suggest')).split(sep).join('/'), 'SKILL.md');
+  const operationsSuggest = join(paths.projectRoot, '.rsc', 'suggest-always-on.md');
+  // The lane decision (FTD or SDD) belongs to every SOFTWARE project, small ones included. Tying it to
+  // the code gates was the cause behind the E2E of 2026-10-07: a small project got a three-line stub
+  // with no lanes in it, no per-turn gate, and so never wrote a feature document. Plans from before
+  // the field keep their old meaning (`laneGate` follows `codeHooks`) until onboard runs again.
+  const laneGate = policy.laneGate ?? policy.codeHooks !== false;
+  if (policy.codeHooks === false && !laneGate) {
+    writeFileSync(operationsSuggest, '# rsc-suggest — always-on operations layer\n\nRead `02-DOCS/wiki/harness/user-profile.md` before acting. Use `orient` to keep the user situated and `suggest` to offer a missing skill only when the current task needs it. Close with the configured orientation block.\n');
+    suggestRel = at('.rsc', 'suggest-always-on.md');
+  } else if (existsSync(operationsSuggest)) rmSync(operationsSuggest, { force: true });
+  const cmd = viaBootstrap('announce', at('.rsc', 'session-start.mjs'), `"${suggestRel}"`, `"${P}"`);
+
+  const file = paths.hookTarget;
+  const settings = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  settings.hooks ||= {};
+  settings.hooks.SessionStart ||= [];
+  settings.hooks.SessionStart = settings.hooks.SessionStart.filter((e) => {
+    const s = hookWiringOf(e);
+    // drop legacy cat-form and any prior session-start script (.sh from the bash era, or .mjs)
+    return !s.includes('skills/rsc/suggest') && !s.includes('.rsc/session-start.');
+  });
+  settings.hooks.SessionStart.push({ hooks: [{ type: 'command', command: cmd }] });
+
+  // Worklog checkpoint: PreCompact + SessionEnd run a project-local
+  // worklog-checkpoint.mjs via `node` that reminds the agent to capture what we did
+  // this session into 02-DOCS/raw/worklog/ (the work-driven on-ramp). Silent when
+  // the workspace has no harness wiki. Registered idempotently on both events, with
+  // any prior rsc worklog-checkpoint entry (.sh or .mjs) dropped first.
+  const wlDest = join(paths.projectRoot, '.rsc', 'worklog-checkpoint.mjs');
+  const written = [paths.hookTarget, scriptDest, wlDest, bootstrapDest];
+  copyFileSync(join(HERE, 'worklog-checkpoint.mjs'), wlDest);
+  const wlCmd = viaBootstrap('quiet', at('.rsc', 'worklog-checkpoint.mjs'), `"${P}"`);
+  for (const event of ['PreCompact', 'SessionEnd']) {
+    settings.hooks[event] ||= [];
+    settings.hooks[event] = settings.hooks[event].filter(
+      (e) => !hookWiringOf(e).includes('.rsc/worklog-checkpoint.'),
+    );
+    settings.hooks[event].push({ hooks: [{ type: 'command', command: wlCmd }] });
+  }
+
+  if (policy.codeHooks !== false) {
+  // Ship guard: a PreToolUse(Bash) hook that DENIES switching to / merging the trunk
+  // while the current feature branch has uncommitted or unpushed work — forcing the
+  // commit → push → PR close (the `ship` skill). Materialized + node-run (Windows-safe),
+  // registered idempotently, fail-open, opt-out via .rsc/.no-ship-guard. Other
+  // (non-rsc) PreToolUse hooks are preserved.
+  const sgDest = join(paths.projectRoot, '.rsc', 'ship-guard.mjs');
+  copyFileSync(join(HERE, 'ship-guard.mjs'), sgDest);
+  // sello.mjs is ship-guard's sibling import (hooks are materialized file-by-file,
+  // so the deterministic sello core must land next to the guard that loads it).
+  copyFileSync(join(HERE, 'sello.mjs'), join(paths.projectRoot, '.rsc', 'sello.mjs'));
+  const sgCmd = viaBootstrap('guard', at('.rsc', 'ship-guard.mjs'), `"${P}"`);
+  settings.hooks.PreToolUse ||= [];
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+    (e) => !hookWiringOf(e).includes('.rsc/ship-guard.'),
+  );
+  settings.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: sgCmd }] });
+
+  // Branch guard (team-safe-default): the default branch closed for the agent where the project shows
+  // it is complex or in production, and no branch switching under another session working in the same
+  // checkout. trunk-policy.mjs is its sibling import (and knowledge-sync's); session-memory-core.mjs
+  // comes with the memory wiring, and without it the isolation rule simply sees nobody. Fail-open,
+  // opt-outs `.rsc/.no-trunk-guard` and `.rsc/.no-worktree-isolation`.
+  const bgDest = join(paths.projectRoot, '.rsc', 'branch-guard.mjs');
+  copyFileSync(join(HERE, 'branch-guard.mjs'), bgDest);
+  copyFileSync(join(HERE, 'trunk-policy.mjs'), join(paths.projectRoot, '.rsc', 'trunk-policy.mjs'));
+  const bgCmd = viaBootstrap('guard', at('.rsc', 'branch-guard.mjs'), `"${P}"`);
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+    (e) => !hookWiringOf(e).includes('.rsc/branch-guard.'),
+  );
+  settings.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: bgCmd }] });
+
+
+  // Gitmoji guard: a PreToolUse(Bash) hook that DENIES a `git commit` whose message
+  // carries no gitmoji (gitmoji.dev) in front of the Conventional Commits header. The
+  // convention lives in `git-workflow`; prose asks, this hook decides — at the one
+  // deterministic moment the message exists. Only fires when the message is inline and
+  // readable (-m / heredoc); editor commits, -F files and --amend --no-edit are allowed.
+  // Materialized + node-run (Windows-safe), idempotent, fail-open, opt-out via
+  // .rsc/.no-gitmoji.
+  const gmDest = join(paths.projectRoot, '.rsc', 'gitmoji-guard.mjs');
+  copyFileSync(join(HERE, 'gitmoji-guard.mjs'), gmDest);
+  const gmCmd = viaBootstrap('guard', at('.rsc', 'gitmoji-guard.mjs'), `"${P}"`);
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(
+    (e) => !hookWiringOf(e).includes('.rsc/gitmoji-guard.'),
+  );
+  settings.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: gmCmd }] });
+
+  // New-feature gate: a UserPromptSubmit hook that re-injects the SDD new-feature gate as
+  // the most-recent instruction on every user turn. SessionStart injects the full gate (the
+  // `suggest` body) once; this keeps the precedence rule salient regardless of how many
+  // skills are installed or how long the session runs (otherwise a strongly-matched stack
+  // skill can pull the model to code despite the gate being in context). UserPromptSubmit
+  // stdout is added to context, so a plain print suffices. Materialized + node-run
+  // (Windows-safe), idempotent, fail-open, opt-out via .rsc/.no-feature-gate. Other
+  // (non-rsc) UserPromptSubmit hooks are preserved.
+  const fgDest = join(paths.projectRoot, '.rsc', 'userprompt-gate.mjs');
+  copyFileSync(join(HERE, 'userprompt-gate.mjs'), fgDest);
+  const fgCmd = viaBootstrap('quiet', at('.rsc', 'userprompt-gate.mjs'), `"${P}"`);
+  settings.hooks.UserPromptSubmit ||= [];
+  settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter(
+    (e) => !hookWiringOf(e).includes('.rsc/userprompt-gate.'),
+  );
+  settings.hooks.UserPromptSubmit.push({ hooks: [{ type: 'command', command: fgCmd }] });
+  written.push(sgDest, gmDest, fgDest, bgDest, join(paths.projectRoot, '.rsc', 'sello.mjs'), join(paths.projectRoot, '.rsc', 'trunk-policy.mjs'));
+  } else {
+    for (const event of ['PreToolUse', 'UserPromptSubmit']) {
+      if (!settings.hooks[event]) continue;
+      settings.hooks[event] = settings.hooks[event].filter((entry) => {
+        const body = hookWiringOf(entry);
+        return !body.includes('.rsc/ship-guard.') && !body.includes('.rsc/branch-guard.') &&
+          !body.includes('.rsc/gitmoji-guard.') && (laneGate || !body.includes('.rsc/userprompt-gate.'));
+      });
+      if (!settings.hooks[event].length) delete settings.hooks[event];
+    }
+    const gone = ['ship-guard.mjs', 'branch-guard.mjs', 'gitmoji-guard.mjs', 'sello.mjs', ...(laneGate ? [] : ['trunk-policy.mjs', 'userprompt-gate.mjs'])];
+    for (const name of gone) rmSync(join(paths.projectRoot, '.rsc', name), { force: true });
+    if (laneGate) {
+      // Same per-turn gate as a governed project: the lane, and where code changes go here.
+      const fgDest = join(paths.projectRoot, '.rsc', 'userprompt-gate.mjs');
+      copyFileSync(join(HERE, 'userprompt-gate.mjs'), fgDest);
+      copyFileSync(join(HERE, 'trunk-policy.mjs'), join(paths.projectRoot, '.rsc', 'trunk-policy.mjs'));
+      const fgCmd = viaBootstrap('quiet', at('.rsc', 'userprompt-gate.mjs'), `"${P}"`);
+      settings.hooks.UserPromptSubmit ||= [];
+      settings.hooks.UserPromptSubmit = settings.hooks.UserPromptSubmit.filter((e) => !hookWiringOf(e).includes('.rsc/userprompt-gate.'));
+      settings.hooks.UserPromptSubmit.push({ hooks: [{ type: 'command', command: fgCmd }] });
+      written.push(fgDest, join(paths.projectRoot, '.rsc', 'trunk-policy.mjs'));
+    } else written.push(operationsSuggest);
+  }
+
+  // FTD nudge: once per session, right after the first code edit with no feature document touched.
+  // Wherever the lane decision is installed; context only, never blocks; .rsc/.no-ftd-nudge.
+  settings.hooks.PostToolUse ||= [];
+  settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter((e) => !hookWiringOf(e).includes('.rsc/ftd-nudge.'));
+  if (laneGate) {
+    const fnDest = join(paths.projectRoot, '.rsc', 'ftd-nudge.mjs');
+    copyFileSync(join(HERE, 'ftd-nudge.mjs'), fnDest);
+    const fnCmd = viaBootstrap('quiet', at('.rsc', 'ftd-nudge.mjs'), `"${P}"`);
+    settings.hooks.PostToolUse.push({ matcher: 'Edit|Write|MultiEdit|NotebookEdit', hooks: [{ type: 'command', command: fnCmd }] });
+    written.push(fnDest);
+  } else rmSync(join(paths.projectRoot, '.rsc', 'ftd-nudge.mjs'), { force: true });
+  if (!settings.hooks.PostToolUse.length) delete settings.hooks.PostToolUse;
+
+  // Danger guard: its own decision, not part of the code-hook block above (#273). `init` promises it
+  // to non-technical and mixed users whatever the project is, and a plan that predates the field is
+  // read as "yes": a non-technical operations install gets the guard it was missing on its next sync,
+  // and a technical user gets a guard that stands down at runtime.
+  settings.hooks.PreToolUse ||= [];
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter((e) => !hookWiringOf(e).includes('.rsc/danger-guard.'));
+  if (policy.dangerGuard !== false) {
+    // Danger guard: a PreToolUse(Bash) hook that DENIES irreversible foot-gun commands
+    // (rm -rf, git push --force, DROP/TRUNCATE, DELETE/UPDATE without WHERE, dd to /dev,
+    // curl|bash, …) when the user-profile says the user is NON-technical (default-safe
+    // when no profile exists yet; never guards a fully `technical` user). Materialized +
+    // node-run (Windows-safe), idempotent, fail-open, opt-out via .rsc/.no-danger-guard.
+    const dgDest = join(paths.projectRoot, '.rsc', 'danger-guard.mjs');
+    copyFileSync(join(HERE, 'danger-guard.mjs'), dgDest);
+    const dgCmd = viaBootstrap('guard', at('.rsc', 'danger-guard.mjs'), `"${P}"`);
+    settings.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: dgCmd }] });
+    written.push(dgDest);
+  } else {
+    rmSync(join(paths.projectRoot, '.rsc', 'danger-guard.mjs'), { force: true });
+  }
+  if (!settings.hooks.PreToolUse.length) delete settings.hooks.PreToolUse;
+
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+
+  // settings.json now names this project as rsc-wired, which is the predicate the shadow reads —
+  // so this call belongs AFTER the write, not before it. No-op unless the root AGENTS.md also
+  // carries the always-on body and no CLAUDE.md exists: see targets/agents-md-shadow.js.
+  const shadow = ensureShadowClaudeMd(paths.projectRoot);
+  if (shadow) written.push(shadow);
+  return written;
+}

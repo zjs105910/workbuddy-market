@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  TURBO_FORCE: ${{ github.event_name != 'pull_request' }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ github.job }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run knip
+      - run: bun run stage
+      - run: npm pack --dry-run ./packages/cli/out/package
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-${{ github.job }}-
+      - run: bun install --frozen-lockfile
+      - name: Install Linux sandbox support
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap socat
+          if ! bwrap --ro-bind / / --unshare-pid --unshare-ipc -- /usr/bin/true; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            bwrap --ro-bind / / --unshare-pid --unshare-ipc -- /usr/bin/true
+          fi
+      - run: bun run test

@@ -1,0 +1,19 @@
+{
+ "name": "blader-humanizer",
+ "version": "2026.10.16.225a6f3",
+ "description": "去除文本中 AI 生成痕迹的智能体技能：去掉模板腔与机械感，让输出读起来像人写的。",
+ "description_en": "Agent skill that removes signs of AI-generated writing from text, making output read like a human wrote it.",
+ "author": {
+  "name": "blader"
+ },
+ "keywords": [
+  "去AI味",
+  "写作",
+  "人味",
+  "文案"
+ ],
+ "category": "写作",
+ "license": "MIT",
+ "homepage": "https://github.com/blader/humanizer",
+ "sourceCommit": "225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8"
+}

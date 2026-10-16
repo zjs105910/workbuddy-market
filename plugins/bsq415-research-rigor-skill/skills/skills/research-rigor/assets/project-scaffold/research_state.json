@@ -1,0 +1,128 @@
+{
+  "schema_version": 2,
+  "project_title": "__PROJECT_TITLE__",
+  "created_utc": "__CREATED_UTC__",
+  "updated_utc": "__CREATED_UTC__",
+  "authoritative_spec": "00_CONSTRAINTS.md",
+  "current_stage": "G0",
+  "stage_status": "not_started",
+  "execution": {
+    "mode": "__EXECUTION_MODE__",
+    "status": "ready",
+    "current_gate": "G0",
+    "active_task": "",
+    "last_checkpoint_id": "",
+    "last_checkpoint_utc": "",
+    "next_action": "Recover existing authorization and complete the relevant G0 records",
+    "acceptance_condition": "G0 evidence exists and the structural audit passes",
+    "requires_human": false
+  },
+  "privacy": {
+    "classification": "__PRIVACY_CLASSIFICATION__",
+    "export_policy": "__EXPORT_POLICY__",
+    "release_scan_passed": false,
+    "semantic_review_passed": false
+  },
+  "literature_policy": {
+    "mode": "__LITERATURE_POLICY__",
+    "assessment_file": "02_NOVELTY_ASSESSMENT.json",
+    "verified_deep_read_min": __DEEP_READ_MIN__,
+    "forensic_neighbor_min": __FORENSIC_NEIGHBOR_MIN__,
+    "independent_audit_fraction": __INDEPENDENT_AUDIT_FRACTION__
+  },
+  "claim_policy": {
+    "headline_max": null
+  },
+  "frozen": {
+    "claims": false,
+    "protocol": false,
+    "test_touched": false,
+    "submission_ready": false
+  },
+  "gates": [
+    {
+      "id": "G0",
+      "name": "orientation_privacy_constraints",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G1",
+      "name": "problem_value",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G2",
+      "name": "literature_novelty",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G3",
+      "name": "claim_theory_contract",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G4",
+      "name": "evidence_experiment_design",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G5",
+      "name": "reproducible_implementation",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G6",
+      "name": "brittle_path_pilot",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G7",
+      "name": "frozen_full_execution",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G8",
+      "name": "result_statistical_audit",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G9",
+      "name": "paper_visual_evidence",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G10",
+      "name": "reviewer_red_team",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "G11",
+      "name": "submission_release_archive",
+      "status": "not_started",
+      "evidence": [],
+      "blockers": []
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+<svg viewBox="0 0 860 412" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>planning-with-files eval results: with skill vs without, four metrics</title>
+  <text x="20" y="26" font-size="15" font-weight="600" fill="#8b949e">Does the agent actually keep the plan on disk? 5 tasks, 10 subagents, 30 checked assertions.</text>
+  <text x="20" y="45" font-size="12" fill="#8b949e" opacity="0.85">Anthropic skill-creator eval framework · claude-sonnet-4-6 · 2026-03-06 · skill v2.21.0 · higher is better</text>
+  <rect x="20" y="58" width="12" height="12" rx="2" fill="#2da44e"/><text x="38" y="69" font-size="13" fill="#8b949e">with planning-with-files</text>
+  <rect x="210" y="58" width="12" height="12" rx="2" fill="#8b949e"/><text x="228" y="69" font-size="13" fill="#8b949e">without (same tasks, no skill)</text>
+  <text x="20" y="100" font-size="13" font-weight="600" fill="#8b949e">Assertions passed (of 30)</text>
+  <rect x="20" y="108" width="491" height="14" rx="2" fill="#2da44e"/><text x="519" y="119" font-size="12" fill="#2da44e" font-weight="600">29/30 · 96.7%</text>
+  <rect x="20" y="126" width="34" height="14" rx="2" fill="#8b949e"/><text x="62" y="137" font-size="12" fill="#8b949e">2/30 · 6.7%</text>
+  <text x="20" y="172" font-size="13" font-weight="600" fill="#8b949e">3-file pattern followed (of 5 evals)</text>
+  <rect x="20" y="180" width="508" height="14" rx="2" fill="#2da44e"/><text x="536" y="191" font-size="12" fill="#2da44e" font-weight="600">5/5</text>
+  <rect x="20" y="198" width="3" height="14" rx="1" fill="#8b949e"/><text x="31" y="209" font-size="12" fill="#8b949e">0/5</text>
+  <text x="20" y="244" font-size="13" font-weight="600" fill="#8b949e">Blind A/B wins (of 3)</text>
+  <rect x="20" y="252" width="508" height="14" rx="2" fill="#2da44e"/><text x="536" y="263" font-size="12" fill="#2da44e" font-weight="600">3/3</text>
+  <rect x="20" y="270" width="3" height="14" rx="1" fill="#8b949e"/><text x="31" y="281" font-size="12" fill="#8b949e">0/3</text>
+  <text x="20" y="316" font-size="13" font-weight="600" fill="#8b949e">Average rubric score (of 10)</text>
+  <rect x="20" y="324" width="508" height="14" rx="2" fill="#2da44e"/><text x="536" y="335" font-size="12" fill="#2da44e" font-weight="600">10.0</text>
+  <rect x="20" y="342" width="345" height="14" rx="2" fill="#8b949e"/><text x="373" y="353" font-size="12" fill="#8b949e">6.8</text>
+  <text x="20" y="384" font-size="11" fill="#8b949e" opacity="0.8">Measures 3-file workflow fidelity, not long-run goal drift. Bars within each group share one linear scale.</text>
+  <text x="20" y="400" font-size="11" fill="#8b949e" opacity="0.8">Full method, dataset, and per-assertion list: docs/evals.md</text>
+</svg>

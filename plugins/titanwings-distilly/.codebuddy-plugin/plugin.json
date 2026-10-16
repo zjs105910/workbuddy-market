@@ -1,0 +1,19 @@
+{
+ "name": "titanwings-distilly",
+ "version": "2026.10.16.b830d3d",
+ "description": "把领域专家的思维方式蒸馏成可复用技能：让任何智能体继承「他们怎么想」（原 Colleague Skills）。",
+ "description_en": "Distill how experts think into reusable skills for any agent or bot. Formerly Colleague Skills.",
+ "author": {
+  "name": "titanwings"
+ },
+ "keywords": [
+  "蒸馏",
+  "思维方式",
+  "技能生成",
+  "专家"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/titanwings/distilly",
+ "sourceCommit": "b830d3dcbde006370f141155795b89021e3a947b"
+}

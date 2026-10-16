@@ -1,0 +1,249 @@
+---
+title: 会话查看器
+sidebar:
+  order: 10
+---
+
+`ocr viewer` 是一个小型内嵌 HTTP 服务器，以浏览器友好的 UI 渲染历史评审会话。
+无外部依赖——会话直接从 OCR 在每次评审期间写入磁盘的 JSONL 文件读取。
+
+## 启动
+
+```bash
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
+ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
+```
+
+默认地址是 `localhost:5483`。服务器在前台运行——`Ctrl+C` 停止。会话在每次请求时
+从 `~/.opencodereview/sessions/` 惰性扫描，因此另一个终端里运行的评审一旦其
+JSONL 文件出现就会显示。
+
+> **DNS-rebinding 防护。** 查看器会对照 loopback 白名单
+> （`localhost`、`127.0.0.1`、`::1`）检查 `Host` 头。具体的绑定主机
+> （如 `--addr 192.168.1.10:5483`）会自动加入，但**通配**绑定
+> （`:3000`、`0.0.0.0`、`::`）不会——此时从 LAN IP 或主机名访问 UI 会返回
+> `forbidden host`。要让通配绑定可被访问，设置
+> `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
+> （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
+
+## 打开浏览器
+
+服务器一开始监听，`ocr viewer` 就会在默认浏览器中打开该 URL。这一行为由
+`--open` 控制，取值与全局的 `--color` 一致：
+
+| 取值 | 行为 |
+|---|---|
+| `auto`（默认） | 仅在大概率可用时打开——见下文。 |
+| `always` | 无条件打开。用于 `auto` 拒绝但其实有可用浏览器的场景——输出被管道接走，或 WSL 上没有显示环境。 |
+| `never` | 只打印 URL，不做别的。 |
+
+在 `auto` 模式下，以下情况**不会**打开浏览器：
+
+- stdout 不是终端——输出被管道或重定向了；
+- `SSH_CONNECTION` 已设置**且**没有转发任何显示环境——远程主机上无处可开。
+  `ssh -X` / `ssh -Y` 会设置 `DISPLAY`，因此不会被抑制；
+- Linux 上 `DISPLAY` 和 `WAYLAND_DISPLAY` 都为空——没有显示服务器。
+
+原因会附加在 ready 行末尾，这样"有意抑制"就不会被误认为"功能坏了"：
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+在 Unix 上会优先尝试 `$BROWSER`：以冒号分隔的命令列表，每一项要么含有代表
+URL 的 `%s` 占位符，要么把 URL 作为末尾参数接收。否则使用各平台的默认命令——
+macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32`。
+打开浏览器失败只会在 stderr 上给出一条警告，绝不致命；无论如何服务器都继续提供服务。
+
+## 四个页面
+
+查看器有四个 URL：
+
+| URL | 看到内容 |
+|---|---|
+| `/` | 磁盘上有会话的所有仓库列表。 |
+| `/r/{repo}` | 单个仓库的会话列表，最新在前。 |
+| `/r/{repo}/{sessionID}` | 单个会话的完整详情。 |
+| `/r/{repo}/compare` | 同一仓库两次会话的比较。 |
+
+`{repo}` 是一个路径编码字符串（分隔符 `/` 和 `\` 替换为 `-`、冒号替换为
+`_`——与磁盘目录命名相同的编码）。通常你不会手动输入它——而是点击进入。
+
+### `/`——仓库列表
+
+对每个至少有一条会话的仓库，显示仓库路径、总会话数、最近活动时间戳，以及指向其会话列表的 `Check` 链接。搜索框会按仓库路径过滤列表；每页显示 10 个仓库，右下角的分页器用于在页面之间切换。
+
+### `/r/{repo}`——单仓库会话列表
+
+对每个会话：ID（一个 UUID）、分支名（OCR 能检测到时）、评审模式、模型、文件数、
+时长、开始时间戳，以及指向上一次（更早）会话的 `Check` 链接。每页显示十个会话，
+右下角的分页控件用于翻页。
+
+### `/r/{repo}/{sessionID}`——会话详情
+
+详情页是最有用的那个。它显示：
+
+1. **头部**——diff 范围、模型、分支、总 token、运行时长。
+2. **文件分组**——每个被评审的**组**一个块。文件在评审前已按语义打包，因此一个块
+   可能覆盖多个相关文件，其标题是该组的文件路径。每个组内，五条“任务类型”泳道：
+
+| 任务类型 | 何时出现 |
+|---|---|
+| `plan_task` | 运行了 plan 阶段（组内最大文件 ≥ `PLAN_MODE_LINE_THRESHOLD`，或 2 个以上文件合计 ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`）。 |
+| `main_task` | 每个组。主评审循环——每个评审轮一遍。 |
+| `review_filter_task` | 为该组运行了评审后评论过滤流程。 |
+| `memory_compression_task` | active+compress 区超过 60 % / 80 % 预算。 |
+| `re_location_task` | 某条 `code_comment` 无法锚定，回退重新定位运行。 |
+
+每条泳道是**任务卡片**的水平条带——每个 LLM 往返一张。卡片按任务类型着色，让你
+一眼看出哪些阶段主导了运行。
+
+页面上更长的列表——**File breakdown**、**Files Reviewed**、**Session Tasks**
+和 **Conversations**——每页显示 20 条。只有一页时分页器保持隐藏。
+
+### `/r/{repo}/compare`——比较两次会话
+
+`ocr session compare` 输出的同样四个分组，以页面形式呈现。会话列表的
+**Action** 列带有 `Check` 链接：每行打开与上一次（更早）会话的比较，因此最新一行显示的是
+相对上一次运行发生了什么变化。最早的一行显示 `-`，因为没有更早的运行可比。
+
+发现项分入四个分组：
+
+| 分组 | 含义 |
+|---|---|
+| New | 只有较新的一次运行报告了它。 |
+| Persisting | 两次运行都报告了它。 |
+| Resolved | 只有较早的一次运行报告了它，且较新的一次确实评审了该文件。 |
+| Not reviewed | 只有较早的一次运行报告了它，且较新的一次从未看过该文件。没有人复查过，因此它不算已解决。 |
+
+页面与 CLI 有一处不同：CLI 会跳过为空的分组，页面则始终打印全部四个。
+`Resolved (0)` 本身就是答案，而一个悄悄消失的区块看起来像页面出错了。
+
+每个分组每页显示 20 条发现；分组只有一页时分页器保持隐藏。
+
+早于运行清单（run manifest）的旧会话没有记录覆盖范围，因此其中所有未匹配的
+发现项会归入 Resolved 而非 Not reviewed。
+
+要比较任意其他一对会话，直接编辑查询串：
+`/r/{repo}/compare?before=<较早的会话 id>&after=<较新的会话 id>`。
+两个 id 必须属于 URL 中的同一个仓库。
+
+如果两次运行使用了不同的评审模式，页面会显示与 `ocr session compare` 相同的
+警告：它们可能没有看过同一批文件，因此这些分组无法直接对比。
+
+## 任务卡片里有什么
+
+点击任务卡片展开。每张卡片有：
+
+- 一行**头部**——请求号、模型徽章、token 徽章（`P:` prompt / `C:` completion，
+  存在时还显示 `CR:` / `CW:` 缓存读写）、时长徽章，以及该轮失败时的错误徽章；
+- **Response**——原始 assistant 响应，包括任何推理 / `thinking` 块；
+- **Tool calls**——每个工具调用及其参数 + 返回结果（可折叠）。
+
+发给模型的完整消息列表和作用域内工具定义**不**在卡片 UI 中渲染；如需要，可直接
+检查 JSONL 转录（每条 `llm_request` 记录的 `messages` 字段）。
+
+## 评审评论
+
+任务泳道下方，会话页面把本次评审产生的每条发现列为**评论卡片**，按文件分组，
+展示评论正文、存在时的现有代码 / 建议代码，以及严重程度 / 类别徽章。过滤栏上的
+筛选片可按严重程度或类别缩小列表。每页显示 20 条评论；只有一页时分页器保持隐藏。
+更改严重程度或类别筛选会回到第 1 页；标记发现、切换 **Hide marked** 或清除标记
+会在当前页仍存在时留在该页。
+
+### 边修边标记
+
+每张卡片有三个按钮——**Fixed** / **Ignored** / **Clear**——为单条
+评论设置标记：
+
+- 标记互斥：设置一个会替换另一个，**Clear** 移除标记。当前状态以彩色徽章显示
+  在卡片上。
+- **Hide marked**（默认开启，按浏览器记忆）在你处理剩余发现时把已标记的卡片
+  收起来。工具栏会统计已标记和已隐藏的数量；随时关掉它即可重新看到全部。
+- **Clear all marks** 一次重置整个会话。
+
+标记是查看器状态，不是评审数据——查看器本身保持只读：
+
+- 标记存放在浏览器的 `localStorage` 中，按会话页面隔离。会话 JSONL 旁边
+  不会写入任何内容，查看器也完全不提供写接口。
+- 标记隶属于单个会话**和单个浏览器**：换一个浏览器或机器看到的是未标记的
+  会话；清除该站点的浏览器存储后会从头开始。
+- 对同一变更重新评审会生成新会话，从无标记开始。
+
+## 使用场景
+
+查看器围绕三个工作流设计：
+
+### “模型为什么这么说？”
+
+在终端输出中打开一条评论，在查看器中定位包含该文件的那个**组**，沿着它的
+`main_task` 泳道向下查看。
+**工具调用**中包含你关心的 `code_comment` 的那张卡片，就是产出它的那一轮。卡片的
+Response 显示模型推理；要确切知道发给模型的 prompt + 上下文，在 JSONL 转录中
+打开该请求号的 `llm_request` 记录（其 `messages` 字段）。
+
+### “这个文件为什么静默？”
+
+一个**无评论**的文件，只有当模型*主动*调用 `task_done` 时才是成功评审。若泳道
+显示工具调用但无 `code_comment`，那是模型主动给出的干净评审。若泳道以错误卡片结束，那是
+伪装成静默的失败——应作为警告处理。
+
+### “压缩保留 / 丢弃了什么？”
+
+`memory_compression_task` 泳道显示每次压缩轮。其中，Response 窗格有结果摘要；
+被压缩的 compress 区渲染出的 XML 在该轮 `llm_request` 的 `messages`（JSONL 转录中）。
+排查“模型忘了早前上下文”这类反馈时有用——你能看到压缩是否丢弃了相关细节。
+
+## 磁盘存储布局
+
+查看器读取：
+
+```
+~/.opencodereview/sessions/
+└── <path-encoded-repo-path>/
+    └── <session-id>.jsonl
+```
+
+JSONL 文件每行是一个事件：
+
+```json
+{"type": "llm_request", "filePath": "src/foo.go", "taskType": "main_task", "request_no": 1, "messages": [{"role": "user", "content": "Review this diff…"}], "timestamp": "2026-06-02T10:15:23Z"}
+{"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
+{"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
+```
+
+`filePath` 存放的是**组的 key**：单文件组就是那一个路径；多个文件一起被评审时，
+则是该组路径排序后用逗号连接的结果。
+
+行是 append-only——不完整的 JSONL 意味着会话在运行中被中断，查看器会渲染已写入的
+内容。
+
+要释放磁盘空间，删除整个会话文件即可；查看器在下次请求时重建索引。
+
+## 隐私
+
+JSONL 转录包含发给 LLM 和从 LLM 收到的**一切**，包括 diff 中的任何代码。它们
+完全存在于你机器的 `~/.opencodereview/` 内。OCR 不会把它们上传到任何地方。
+
+如果你的评审包含你不想长期存储的代码，可以：
+
+- 定期删除会话文件，或
+- 在 CI 中把 `--audience agent --format json` 输出重定向到临时管道，并用临时
+  `HOME` 运行，使 JSONL 不会被持久化。
+
+OpenTelemetry exporter 是另一回事——如何让 prompt 内容不进入导出 trace 见
+[遥测](../telemetry/)。
+
+## 查看器不适用时
+
+- 程序化后处理（CI、仪表盘）用 `ocr review --format json --audience agent`。
+  查看器为人渲染，不为机器。
+- 如需跨多会话 grep，直接对 JSONL 文件用 `jq`。UI 中暂无搜索框。
+
+## 另见
+
+- [架构](../architecture/)——那五种任务类型在底层实际做什么。
+- [工具](../tools/)——你在 `main_task` 卡片中会看到的工具调用。

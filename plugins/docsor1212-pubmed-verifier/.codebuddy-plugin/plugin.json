@@ -1,0 +1,17 @@
+{
+ "name": "docsor1212-pubmed-verifier",
+ "version": "2026.10.16.ae908b7",
+ "description": "PubMed 文献引用批量核验工具：对 AI 生成的引用逐条比对 PubMed 数据库，检测编造与张冠李戴，降低科研写作中的幻觉引用。",
+ "author": {
+  "name": "docsor1212"
+ },
+ "keywords": [
+  "PubMed",
+  "引用核验",
+  "科研诚信",
+  "幻觉检测"
+ ],
+ "category": "科研",
+ "homepage": "https://github.com/docsor1212/pubmed-verifier",
+ "sourceCommit": "ae908b72a3aed3e15d87b58772dab6c4f1b174b7"
+}

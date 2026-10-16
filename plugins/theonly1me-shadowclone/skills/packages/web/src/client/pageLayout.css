@@ -1,0 +1,80 @@
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  background: #171824ed;
+  border-top: 1px solid var(--line);
+  padding: 20px 32px;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 -12px 30px #0b0c1326;
+}
+
+.footer strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.footer p {
+  font-size: 12px;
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 12px;
+  }
+
+  main {
+    padding: 26px 18px 0;
+  }
+
+  .masthead,
+  .footer {
+    padding: 18px;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .scope-field {
+    width: 100%;
+  }
+
+  .scope-field select {
+    width: 100%;
+  }
+
+  .footer {
+    align-items: flex-start;
+  }
+
+  .footer-actions {
+    flex-direction: column-reverse;
+    align-items: flex-end;
+  }
+
+  .local-badge {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

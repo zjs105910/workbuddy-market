@@ -1,0 +1,19 @@
+{
+ "name": "nexu-io-html-anything",
+ "version": "2026.10.16.975fb3b",
+ "description": "代理式 HTML 编辑器：本地 AI 代理写页面、你来发布——75 个技能 × 9 种版面（杂志/落地页/报告等）。",
+ "description_en": "The agentic HTML editor - your local AI agent writes the HTML, you ship it. 75 skills, 9 surfaces.",
+ "author": {
+  "name": "nexu-io"
+ },
+ "keywords": [
+  "html",
+  "编辑器",
+  "版面",
+  "agentic"
+ ],
+ "category": "设计",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/nexu-io/html-anything",
+ "sourceCommit": "975fb3bcb98f1777781fb4c738902d36e32c8c46"
+}

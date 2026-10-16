@@ -1,0 +1,19 @@
+{
+ "name": "muratcankoylan-Agent-Skills-for-Context-Engineering",
+ "version": "2026.10.16.9ff0c99",
+ "description": "上下文工程与多代理架构的技能合集：生产级模式、注意力管理、记忆分层等 24 个进阶技能。",
+ "description_en": "Agent skills for context engineering, multi-agent architectures, and production patterns.",
+ "author": {
+  "name": "muratcankoylan"
+ },
+ "keywords": [
+  "上下文工程",
+  "多代理",
+  "架构",
+  "最佳实践"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering",
+ "sourceCommit": "9ff0c99108b36d3b886defd825d8ac1f47dba374"
+}

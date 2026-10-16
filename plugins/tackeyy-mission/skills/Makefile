@@ -1,0 +1,60 @@
+PYTHON ?= python3
+VENV ?= .venv-ci
+VENV_PYTHON := $(VENV)/bin/python
+REQUIREMENTS := .github/requirements-ci.txt
+REQUIREMENTS_STAMP := $(VENV)/.requirements-ci.stamp
+PYTEST_TARGETS ?= skills/mission
+SHARD_INDEX ?= 1
+SHARD_TOTAL ?= 1
+# The entries a person runs by hand share the machine with whatever else is
+# open on it, so they take a fixed number of workers rather than one per core.
+# 4 is the value tackeyy/open-claw-assistant#645 measured on this hardware:
+# serial, 2 and 4 all finished with the same results, and 4 was the fastest.
+# Override it when the machine is not shared: MISSION_TEST_WORKERS=auto make test
+#
+# test-shard keeps `auto` on purpose -- CI runners are not shared with anyone.
+MISSION_TEST_WORKERS ?= 4
+
+.PHONY: test-smoke test test-shard test-e2e
+
+$(VENV_PYTHON):
+	$(PYTHON) -m venv $(VENV)
+
+$(REQUIREMENTS_STAMP): $(REQUIREMENTS) | $(VENV_PYTHON)
+	$(VENV_PYTHON) -m pip install -r $(REQUIREMENTS)
+	@touch $(REQUIREMENTS_STAMP)
+
+test-smoke:
+	$(PYTHON) -m py_compile skills/mission/bin/mission-state.py scripts/mission-audit.py
+	bash -n scripts/mission-stop-guard.sh
+	@printf '{"schema":"mission-test-report/1","tree_sha":"%s","tier":"smoke","test_manifest":["skills/mission/bin/mission-state.py","scripts/mission-audit.py","scripts/mission-stop-guard.sh"]}\n' "$$(git rev-parse 'HEAD^{tree}')"
+
+# MISSION_SUITE_REPORT is set by the integration gate (#735).  When present the
+# suite writes a report there recording how many tests actually ran, because an
+# exit code alone cannot distinguish a passing suite from one that ran nothing.
+# The count comes from the JUnit XML rather than from parsing pytest's output.
+test: $(REQUIREMENTS_STAMP)
+	@set -eu; \
+	if [ -n "$${MISSION_SUITE_REPORT:-}" ]; then \
+	  junit="$$(dirname "$$MISSION_SUITE_REPORT")/mission-suite-junit.xml"; \
+	  $(VENV_PYTHON) -m pytest -q -n $(MISSION_TEST_WORKERS) --dist loadfile --junit-xml="$$junit" $(PYTEST_TARGETS); \
+	  $(PYTHON) scripts/write_suite_report.py --junit "$$junit" --out "$$MISSION_SUITE_REPORT"; \
+	else \
+	  $(VENV_PYTHON) -m pytest -q -n $(MISSION_TEST_WORKERS) --dist loadfile $(PYTEST_TARGETS); \
+	fi
+	@printf '{"schema":"mission-test-report/1","tree_sha":"%s","tier":"full","test_manifest":["skills/mission"]}\n' "$$(git rev-parse 'HEAD^{tree}')"
+
+# POSIX sh では「変数代入の右辺のコマンド置換が失敗した」場合に set -e が発火しない。
+# 分割スクリプトが非 0 で終了しても targets="" の代入自体は成功してしまうため、
+# 直後の test -n が唯一の防壁になる（これが無いと引数なし pytest へ退化する）。
+# この test -n は test_actions_cost_guard.py が固定しており、除去すると CI が落ちる。
+test-shard: $(REQUIREMENTS_STAMP)
+	@set -eu; \
+	targets="$$($(PYTHON) scripts/ci_shard_targets.py --index $(SHARD_INDEX) --total $(SHARD_TOTAL) --targets "$(PYTEST_TARGETS)")"; \
+	test -n "$$targets"; \
+	$(VENV_PYTHON) -m pytest -q -n auto --dist loadfile $$targets
+	@printf '{"schema":"mission-test-report/1","tree_sha":"%s","tier":"shard","shard":"%s/%s","test_manifest":["skills/mission"]}\n' "$$(git rev-parse 'HEAD^{tree}')" "$(SHARD_INDEX)" "$(SHARD_TOTAL)"
+
+test-e2e: $(REQUIREMENTS_STAMP)
+	$(VENV_PYTHON) -m pytest -q -n $(MISSION_TEST_WORKERS) --dist loadfile skills/mission -k 'e2e or operational'
+	@printf '{"schema":"mission-test-report/1","tree_sha":"%s","tier":"e2e","test_manifest":["skills/mission","-k","e2e or operational"]}\n' "$$(git rev-parse 'HEAD^{tree}')"

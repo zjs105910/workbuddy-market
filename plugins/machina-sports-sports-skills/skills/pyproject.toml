@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sports-skills"
+version = "0.36.0"
+description = "Lightweight Python SDK for sports data — football, F1, NFL, NBA, WNBA, NHL, MLB, tennis, CFB, CBB, golf, volleyball, prediction markets, betting analysis, and news"
+readme = "README_PYPI.md"
+requires-python = ">=3.9.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Machina Sports", email = "hello@machina.gg" },
+]
+keywords = ["prediction-markets", "kalshi", "polymarket", "prophetx", "betting", "odds-comparison", "arbitrage", "sports", "football", "f1", "nfl", "nba", "wnba", "nhl", "mlb", "tennis", "atp", "wta", "cfb", "cbb", "college-football", "college-basketball", "ncaa", "golf", "pga", "lpga", "volleyball", "nevobo", "eredivisie", "news"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "feedparser>=6.0",
+    "tzdata; sys_platform == 'win32'",
+]
+
+[project.urls]
+"Reviewed source" = "https://github.com/machina-sports/sports-skills/tree/ea2f75daf33c7da687af10771f9e635741bb0c1c"
+
+[project.optional-dependencies]
+f1 = ["fastf1>=3.0", "pandas>=2.0"]
+# nfl-data-py is the Python 3.9 provider only: it pins pandas<2, which has no
+# wheels for 3.12+, so installing it there fails to build. On 3.10+ nflreadpy is
+# preferred anyway (see nfl/_nflverse.py::_load_provider).
+# nflreadpy's polars frames need pandas for _coerce_frame.to_pandas().
+# On Python 3.9, preserve nfl-data-py's existing transitive pandas dependency.
+nfl = ["nflreadpy>=0.1; python_version >= '3.10'", "pyarrow>=14; python_version >= '3.10'", "pandas>=2.0; python_version >= '3.10'", "nfl-data-py>=0.3; python_version < '3.10'"]
+nba = []
+wnba = []
+nhl = []
+mlb = []
+tennis = []
+cfb = []
+cbb = []
+golf = []
+polymarket = ["py-clob-client-v2>=1.0.1"]
+all = ["fastf1>=3.0", "pandas>=2.0", "nflreadpy>=0.1; python_version >= '3.10'", "pyarrow>=14; python_version >= '3.10'", "nfl-data-py>=0.3; python_version < '3.10'", "py-clob-client-v2>=1.0.1"]
+# pyarrow: record/replay stores library-loaded frames (nflverse, FastF1) as Parquet.
+dev = ["ruff>=0.9", "pytest>=8.0", "fastf1>=3.0", "pandas>=2.0", "pyarrow>=14"]
+site = ["jinja2>=3.1", "pyyaml>=6.0"]
+
+[project.scripts]
+sports-skills = "sports_skills.cli:main"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+src = ["src"]
+# Vendored byte-exact from machina-templates and pinned by sha256 in
+# canonical/_vendored/VENDORED.json. Autoformatting or auto-fixing it would break
+# the pin, and the fix for a lint finding there belongs upstream.
+extend-exclude = ["src/sports_skills/canonical/_vendored"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",     # line too long — handled by formatter
+    "E741",     # ambiguous variable name — false positives on comprehension vars
+    "SIM102",   # nested if → combined if — often less readable
+    "SIM103",   # return condition directly — readability preference
+    "SIM105",   # contextlib.suppress — try/except/pass is clearer
+    "SIM108",   # ternary operator — readability preference
+    "UP007",    # X | Y union syntax — already used, but don't force it
+    "B007",     # unused loop variable — we use _ convention already
+    "B023",     # function doesn't bind loop var — false positives with closures
+    "B905",     # zip() without strict= — ESPN data lengths aren't guaranteed
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sports_skills"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sports_skills"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/LICENSE",
+    "/README_PYPI.md",
+    "/pyproject.toml",
+    "/src/sports_skills",
+]

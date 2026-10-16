@@ -1,0 +1,437 @@
+"""Pure projections for progress, context, and verification evidence."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+from .commands import (
+    ClearProgress,
+    GenerateContextManifest,
+    GenerateClaimsLedger,
+    RecordVerification,
+    RecordVerificationReceipt,
+    ImportAcceptanceContract,
+    UpdateProgress,
+    VerificationCheck,
+)
+
+
+class EvidenceRuleError(ValueError):
+    """Stable rejection raised by evidence projection rules."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def _text(value: object, code: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or "\x00" in value or (not allow_empty and not value):
+        raise EvidenceRuleError(code)
+    return value
+
+
+def _relative_target(value: object, code: str) -> str:
+    text = _text(value, code)
+    if text.startswith("/") or "\\" in text:
+        raise EvidenceRuleError(code)
+    if any(part in {"", ".", ".."} for part in text.split("/")):
+        raise EvidenceRuleError(code)
+    return text
+
+
+def _progress_bytes(state: Mapping[str, object], progress: dict, iteration: int) -> bytes:
+    """Render one checkpoint from what identifies the operation, and nothing else.
+
+    #747 3a: the checkpoint is published by the unit of work now, so a retry
+    of the same operation has to produce the same bytes -- the operation's
+    identity excludes the semantic time on purpose, and the commit's
+    materialization is compared against what the retry prepares.  A timestamp
+    in the rendered text made the same operation produce different content
+    every second, and the retry was refused as though it were a different one.
+
+    ``updated_at`` therefore stays out of the file.  It is still recorded in
+    the state's ``progress`` record, which is where a reader that wants the
+    time looks; nothing parses it back out of this text.
+    """
+    lines = [
+        f"<!-- mission-progress-meta: session_id={state.get('session_id')} mission_id={state.get('mission_id')} iteration={iteration} -->",
+        "",
+        "# Mission Progress Checkpoint",
+        "",
+        f"- kind: {progress.get('kind')}",
+        f"- total: {progress.get('total')}",
+        f"- completed: {progress.get('completed')}",
+        f"- remaining: {progress.get('remaining')}",
+        f"- batch_size: {progress.get('batch_size')}",
+        f"- last_unit: {progress.get('last_unit') or ''}",
+        f"- artifact_path: {progress.get('artifact_path') or ''}",
+        "",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def project_progress_update(
+    state: Mapping[str, object], command: UpdateProgress
+) -> tuple[dict, bytes]:
+    at = _text(command.at, "timestamp-invalid")
+    if (
+        type(command.total) is not int
+        or type(command.completed) is not int
+        or command.total < 0
+        or not 0 <= command.completed <= command.total
+    ):
+        raise EvidenceRuleError("progress-bounds-invalid")
+    if type(command.iteration) is not int or command.iteration < 0:
+        raise EvidenceRuleError("progress-iteration-invalid")
+    if command.batch_size is not None and (
+        type(command.batch_size) is not int or command.batch_size < 0
+    ):
+        raise EvidenceRuleError("progress-batch-size-invalid")
+    for value, code in (
+        (command.last_unit, "progress-last-unit-invalid"),
+        (command.artifact_path, "progress-artifact-path-invalid"),
+    ):
+        if value is not None:
+            _text(value, code)
+    target = _relative_target(
+        getattr(command.effect, "target", None), "progress-evidence-path-invalid"
+    )
+    progress = {
+        "kind": "batch",
+        "total": command.total,
+        "completed": command.completed,
+        "remaining": command.total - command.completed,
+        "batch_size": command.batch_size,
+        "last_unit": command.last_unit,
+        "artifact_path": command.artifact_path,
+        "updated_at": at,
+        "evidence_path": target,
+    }
+    return progress, _progress_bytes(state, progress, command.iteration)
+
+
+def apply_progress_update(
+    state: Mapping[str, object], command: UpdateProgress
+) -> tuple[dict, bytes]:
+    document = copy.deepcopy(dict(state))
+    progress, content = project_progress_update(document, command)
+    document["progress"] = progress
+    document["updated_at"] = command.at
+    return document, content
+
+
+def apply_progress_clear(
+    state: Mapping[str, object], command: ClearProgress
+) -> dict:
+    at = _text(command.at, "timestamp-invalid")
+    document = copy.deepcopy(dict(state))
+    document.pop("progress", None)
+    document["updated_at"] = at
+    return document
+
+
+# #690: the only value push-score writes.  Comparing against it -- rather
+# than testing the marker for truthiness -- is what keeps a forged or legacy
+# marker from claiming that the projection behind it is trustworthy.
+FINDINGS_SUMMARY_SOURCE = "review-aggregate"
+
+
+# The severities the projection can emit.  Restated here rather than imported
+# so the kernel keeps deciding on its own inputs, and so a value the projection
+# never writes cannot claim that the entry behind it is complete.
+PRIOR_FINDING_SEVERITIES = frozenset({"High", "Medium", "Low"})
+
+# The projection always emits an axis, because the archive validator requires
+# one.  A finding without a usable axis therefore did not come from the
+# producer, whatever the source marker says.
+PRIOR_FINDING_AXES = frozenset(
+    {"mission_achievement", "accuracy", "completeness", "usability"}
+)
+
+
+def _is_usable_prior_finding(item: object) -> bool:
+    """Whether one projected finding is one the producer could have written.
+
+    The conditions mirror what the projection emits, which in turn mirrors what
+    the archive validator accepts.  Requiring more here would report ``partial``
+    for entries the producer legitimately wrote (#690).
+    """
+    if not isinstance(item, Mapping):
+        return False
+    return (
+        isinstance(item.get("id"), str)
+        and item.get("severity") in PRIOR_FINDING_SEVERITIES
+        and item.get("axis") in PRIOR_FINDING_AXES
+    )
+
+
+def context_timestamp_text(at: object) -> str:
+    """Return the manifest timestamp once it is known to be usable text.
+
+    The plan route refuses by this rule before it runs anything, so the rule
+    is named here rather than re-stated there.
+    """
+    return _text(at, "timestamp-invalid")
+
+
+def context_iteration_value(iteration: object) -> int:
+    """Return the manifest iteration once it is known to be a positive int."""
+    if type(iteration) is not int or iteration < 1:
+        raise EvidenceRuleError("context-iteration-invalid")
+    return iteration
+
+
+def context_output_path_text(publication_path: object) -> str:
+    """Return the manifest output path once it is known to be usable text.
+
+    This runs before the path is made relative to the project: a value that
+    is not a path at all is refused by name here, and only a path that would
+    land in the wrong place is refused later by the publication rule.
+    """
+    path_text = _text(publication_path, "context-output-path-invalid")
+    if not Path(path_text).name or Path(path_text).name in {".", ".."}:
+        raise EvidenceRuleError("context-output-path-invalid")
+    return path_text
+
+
+def project_context_manifest(
+    state: Mapping[str, object],
+    *,
+    iteration: object,
+    publication_path: object,
+    at: object,
+) -> tuple[dict, bytes, int]:
+    timestamp = context_timestamp_text(at)
+    iteration = context_iteration_value(iteration)
+    path_text = context_output_path_text(publication_path)
+    prior_findings: list[dict] = []
+    history = state.get("score_history")
+    if history is not None and not isinstance(history, list):
+        raise EvidenceRuleError("context-score-history-invalid")
+    entries = [entry for entry in history or [] if isinstance(entry, Mapping)]
+    supplied = 0
+    for entry in entries:
+        raw = entry.get("findings_summary")
+        if raw is not None and not isinstance(raw, list):
+            raise EvidenceRuleError("context-findings-invalid")
+        findings = raw if isinstance(raw, list) else []
+        # #690: "supplied" has to mean the projection is usable, not merely
+        # that something is present.  A marker alone would let any truthy
+        # value, a missing list, or an unusable element promote the manifest to
+        # "complete" -- and "complete" is what tells a reviewer it may narrow
+        # its search.  Anything short of the shape this projection writes falls
+        # back to "partial", which claims nothing.
+        supplied += (
+            entry.get("findings_summary_source") == FINDINGS_SUMMARY_SOURCE
+            and isinstance(raw, list)
+            and all(_is_usable_prior_finding(item) for item in raw)
+        )
+        prior_findings.extend(
+            copy.deepcopy(dict(item))
+            for item in findings
+            if isinstance(item, Mapping)
+        )
+    if not entries:
+        status = "no-history"
+    elif supplied == len(entries):
+        status = "complete"
+    else:
+        status = "partial"
+    manifest = {
+        "schema": "mission-context-manifest/1",
+        "iteration": iteration,
+        "mission_goal": state.get("mission", ""),
+        "mission_id": state.get("mission_id", ""),
+        "assumptions_path": state.get("assumptions_path", ""),
+        "prior_findings": prior_findings,
+        # "no-history" means nothing has been scored yet; "partial" means at
+        # least one entry carries no producer marker, so an empty list here is
+        # not evidence that the reviewers found nothing.
+        "prior_findings_status": status,
+    }
+    content = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+    record = {
+        "path": path_text,
+        "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+        "generated_at": timestamp,
+    }
+    return record, content, len(prior_findings)
+
+
+def apply_context_manifest(
+    state: Mapping[str, object], command: GenerateContextManifest
+) -> tuple[dict, bytes, int]:
+    document = copy.deepcopy(dict(state))
+    record, content, findings_count = project_context_manifest(
+        document,
+        iteration=command.iteration,
+        publication_path=getattr(command.effect, "publication_path", None),
+        at=command.at,
+    )
+    records = document.get("context_manifests")
+    records = copy.deepcopy(records) if isinstance(records, Mapping) else {}
+    records[str(command.iteration)] = record
+    document["context_manifests"] = records
+    return document, content, findings_count
+
+
+def apply_claims_ledger(state: Mapping[str, object], command: GenerateClaimsLedger) -> dict:
+    timestamp = _text(command.at, "timestamp-invalid")
+    if type(command.iteration) is not int or command.iteration < 1:
+        raise EvidenceRuleError("claims-ledger-iteration-invalid")
+    if not isinstance(command.doc_digest, str) or not __import__("re").fullmatch(r"sha256:[0-9a-f]{64}", command.doc_digest):
+        raise EvidenceRuleError("claims-ledger-doc-digest-invalid")
+    claim = command.effect
+    if not isinstance(claim.publication_path, str) or not claim.publication_path or Path(claim.publication_path).name != claim.target:
+        raise EvidenceRuleError("claims-ledger-effect-claim-invalid")
+    document = copy.deepcopy(dict(state))
+    records = document.get("claims_ledgers")
+    records = copy.deepcopy(records) if isinstance(records, Mapping) else {}
+    records[str(command.iteration)] = {"path": claim.publication_path, "digest": claim.digest,
+                                        "doc_digest": command.doc_digest, "generated_at": timestamp}
+    document["claims_ledgers"] = records
+    return document
+
+
+def project_verification_entry(command: RecordVerification) -> dict:
+    at = _text(command.at, "verification-timestamp-invalid")
+    if type(command.iteration) is not int:
+        raise EvidenceRuleError("verification-iteration-invalid")
+    if type(command.checks) is not tuple:
+        raise EvidenceRuleError("verification-checks-invalid")
+    if command.kind not in ("execution", "implementation-read"):
+        raise EvidenceRuleError("verification-kind-invalid")
+    checks = []
+    for check in command.checks:
+        if type(check) is not VerificationCheck:
+            raise EvidenceRuleError("verification-check-invalid")
+        if not isinstance(check.name, str) or not check.name or "\x00" in check.name:
+            raise EvidenceRuleError("verification-check-name-invalid")
+        if type(check.ok) is not bool:
+            raise EvidenceRuleError("verification-check-ok-invalid")
+        if check.detail is not None and not isinstance(check.detail, str):
+            raise EvidenceRuleError("verification-check-detail-invalid")
+        checks.append({"name": check.name, "ok": check.ok, "detail": check.detail})
+    implementation_checks = [
+        check["name"].startswith("implementation-verified:") for check in checks
+    ]
+    if command.kind == "implementation-read" and not all(implementation_checks):
+        raise EvidenceRuleError("verification-kind-check-mismatch")
+    if command.kind == "execution" and any(implementation_checks):
+        raise EvidenceRuleError("verification-kind-check-mismatch")
+    failed_count = sum(1 for check in checks if not check["ok"])
+    status = "not-run" if not checks else "failed" if failed_count else "passed"
+    return {
+        "iteration": command.iteration,
+        "kind": command.kind,
+        "status": status,
+        "checks": checks,
+        "failed_count": failed_count,
+        "recorded_at": at,
+    }
+
+
+def apply_verification_record(
+    state: Mapping[str, object], command: RecordVerification
+) -> tuple[dict, dict]:
+    document = copy.deepcopy(dict(state))
+    entry = project_verification_entry(command)
+    history = document.get("verification_history")
+    history = copy.deepcopy(history) if isinstance(history, list) else []
+    history.append(entry)
+    document["verification_history"] = history
+    document["updated_at"] = entry["recorded_at"]
+    return document, entry
+
+
+_RECEIPT_FIELDS = {
+    "schema", "contract_digest", "criterion_id", "candidate_digest",
+    "verifier_policy_digest", "verifier_definition_digest", "argv",
+    "relative_cwd", "started_at", "finished_at", "exit_code", "timed_out",
+    "executed_count", "output_digest", "status", "runner_provenance",
+    "repro_input_digest", "observed_output_bytes", "output_truncated", "block_reason",
+}
+
+
+def project_verification_receipt(command: RecordVerificationReceipt) -> dict:
+    at = _text(command.at, "verification-receipt-timestamp-invalid")
+    try:
+        receipt = command.receipt.thaw()
+    except AttributeError as exc:
+        raise EvidenceRuleError("verification-receipt-invalid") from exc
+    if not isinstance(receipt, dict) or set(receipt) != _RECEIPT_FIELDS:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if receipt.get("schema") != "mission-verification-receipt/1" or receipt.get("status") not in {"passed", "failed", "blocked"}:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    for key in ("contract_digest", "candidate_digest", "verifier_policy_digest", "verifier_definition_digest", "output_digest"):
+        if not isinstance(receipt.get(key), str) or __import__("re").fullmatch(r"sha256:[0-9a-f]{64}", receipt[key]) is None:
+            raise EvidenceRuleError("verification-receipt-invalid")
+    if not isinstance(receipt.get("criterion_id"), str) or not receipt["criterion_id"]:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if not isinstance(receipt.get("argv"), list) or not receipt["argv"] or not all(isinstance(item, str) and item for item in receipt["argv"]):
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if not isinstance(receipt.get("relative_cwd"), str) or not receipt["relative_cwd"]:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if type(receipt.get("timed_out")) is not bool or receipt.get("exit_code") is not None and type(receipt["exit_code"]) is not int:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if receipt.get("executed_count") is not None and (type(receipt["executed_count"]) is not int or receipt["executed_count"] < 0):
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if type(receipt.get("observed_output_bytes")) is not int or receipt["observed_output_bytes"] < 0 or type(receipt.get("output_truncated")) is not bool:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if receipt.get("repro_input_digest") is not None and (not isinstance(receipt["repro_input_digest"], str) or __import__("re").fullmatch(r"sha256:[0-9a-f]{64}", receipt["repro_input_digest"]) is None):
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if receipt["status"] == "blocked":
+        if not isinstance(receipt.get("block_reason"), str) or not receipt["block_reason"]:
+            raise EvidenceRuleError("verification-receipt-invalid")
+    elif receipt.get("block_reason") is not None:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if not isinstance(receipt.get("runner_provenance"), str) or not receipt["runner_provenance"]:
+        raise EvidenceRuleError("verification-receipt-invalid")
+    if receipt["status"] == "passed" and (receipt["timed_out"] or receipt["exit_code"] != 0):
+        raise EvidenceRuleError("verification-receipt-invalid")
+    return {**copy.deepcopy(receipt), "recorded_at": at}
+
+
+def apply_verification_receipt(state: Mapping[str, object], command: RecordVerificationReceipt) -> tuple[dict, dict]:
+    document = copy.deepcopy(dict(state))
+    entry = project_verification_receipt(command)
+    history = document.get("verification_receipts")
+    if history is None:
+        history = []
+    elif not isinstance(history, list) or not all(isinstance(item, dict) for item in history):
+        raise EvidenceRuleError("verification-receipt-history-invalid")
+    else:
+        history = copy.deepcopy(history)
+    history.append(entry)
+    document["verification_receipts"] = history
+    document["updated_at"] = entry["recorded_at"]
+    return document, entry
+
+
+def project_acceptance_contract(command: ImportAcceptanceContract) -> dict:
+    from acceptance_contract import validate
+    at = _text(command.at, "acceptance-contract-timestamp-invalid")
+    if not isinstance(command.contract, type(command.contract)):
+        raise EvidenceRuleError("acceptance-contract-invalid")
+    try:
+        contract = validate(command.contract.thaw())
+    except (AttributeError, ValueError) as exc:
+        raise EvidenceRuleError("acceptance-contract-invalid") from exc
+    return {**contract, "imported_at": at}
+
+
+def apply_acceptance_contract(state: Mapping[str, object], command: ImportAcceptanceContract) -> tuple[dict, dict]:
+    document = copy.deepcopy(dict(state))
+    if "acceptance_contract" in document:
+        raise EvidenceRuleError("acceptance-contract-already-imported")
+    entry = project_acceptance_contract(command)
+    mission_id = document.get("mission_id") or document.get("session_id")
+    if entry["mission_id"] != mission_id:
+        raise EvidenceRuleError("acceptance-contract-mission-mismatch")
+    document["acceptance_contract"] = entry
+    document["updated_at"] = entry["imported_at"]
+    return document, entry

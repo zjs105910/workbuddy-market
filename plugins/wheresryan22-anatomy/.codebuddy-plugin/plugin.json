@@ -1,0 +1,19 @@
+{
+ "name": "wheresryan22-anatomy",
+ "version": "2026.10.16.bc943e4",
+ "description": "生成真实世界机器与复杂系统的精细等距插图：交互式 SVG，可缩放可标注，工程科普利器。",
+ "description_en": "An agent skill for creating detailed, interactive isometric illustrations of real-world machines.",
+ "author": {
+  "name": "wheresryan22"
+ },
+ "keywords": [
+  "插图",
+  "等距",
+  "SVG",
+  "可视化"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/wheresryan22/anatomy",
+ "sourceCommit": "bc943e40c59998be5da61f9d39c6a983b1116099"
+}

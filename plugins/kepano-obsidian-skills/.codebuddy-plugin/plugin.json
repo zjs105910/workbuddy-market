@@ -1,0 +1,19 @@
+{
+ "name": "kepano-obsidian-skills",
+ "version": "2026.10.16.3ccff53",
+ "description": "Obsidian 官方出品的代理技能：教代理正确使用 Obsidian CLI 与 Markdown、Bases、JSON Canvas 等开放格式。",
+ "description_en": "Agent skills for Obsidian: teach your agent to use Obsidian CLI and open formats.",
+ "author": {
+  "name": "kepano"
+ },
+ "keywords": [
+  "obsidian",
+  "笔记",
+  "markdown",
+  "官方"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/kepano/obsidian-skills",
+ "sourceCommit": "3ccff5338ea700537839b21900aa5358a0402c98"
+}

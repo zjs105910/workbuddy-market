@@ -1,0 +1,18 @@
+{
+ "name": "multica-ai-andrej-karpathy-skills",
+ "version": "2026.10.16.2c60614",
+ "description": "从 Andrej Karpathy 的观察提炼出的智能体行为改进技能：让编码智能体的工程判断更克制、更接近人类顶尖水平。内容稳定、低频更新。",
+ "description_en": "Skills distilled from Andrej Karpathy's observations to improve agent behavior and engineering judgment. Stable content, low-frequency updates.",
+ "author": {
+  "name": "multica-ai"
+ },
+ "keywords": [
+  "karpathy",
+  "行为",
+  "工程判断",
+  "方法论"
+ ],
+ "category": "开发工具",
+ "homepage": "https://github.com/multica-ai/andrej-karpathy-skills",
+ "sourceCommit": "2c606141936f1eeef17fa3043a72095b4765b9c2"
+}

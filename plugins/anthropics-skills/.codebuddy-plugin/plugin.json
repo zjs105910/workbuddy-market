@@ -1,0 +1,20 @@
+{
+ "name": "anthropics-skills",
+ "version": "2026.10.16.683bc88",
+ "description": "Anthropic 官方 Agent Skills 仓库，含文档处理（docx/pdf/pptx/xlsx）、前端设计、MCP 构建、画布设计、品牌规范等 19 个高质量技能。",
+ "description_en": "Anthropic's official repository of Agent Skills: document processing (docx/pdf/pptx/xlsx), frontend design, MCP building, canvas design, brand guidelines and more.",
+ "author": {
+  "name": "anthropics"
+ },
+ "keywords": [
+  "官方",
+  "文档",
+  "office",
+  "前端",
+  "mcp"
+ ],
+ "category": "官方",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/anthropics/skills",
+ "sourceCommit": "683bc88e56f3e09ba94f7055977f3d3aa499f202"
+}

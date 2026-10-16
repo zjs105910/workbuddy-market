@@ -1,0 +1,49 @@
+{
+  "tool": "cangjie-tools v2.5.0",
+  "published_hashes": {
+    "SKILL.md": "2b7f9dc498d813bc2f89076a284e9441ce1daab6007f7e01d377f64c367de076",
+    "references/capabilities/acceptance.md": "c95e270764fa34fefbb24ee6b8653e3ae4b38d9762ce94d8afee06f9573c7a69",
+    "references/capabilities/decision-heuristics.md": "74ebf03cf603dac09ecf418e07b881b13d4c07c90ea9e34a38516c8a3d64df0f",
+    "references/capabilities/game-selection.md": "850ba9e828e55f393ab4ada801d9f77495b43acf61638777ec74e89dcb52bfda",
+    "references/capabilities/happiness-skill.md": "b4047d88a72c74f91e1e813b1eedc1cddee4879e1895038e0781faefede738e4",
+    "references/capabilities/honesty-communication.md": "69cef084f3e10185b2ab63f3a58a006948dfae0c4bea87d66447e77f883e2b77",
+    "references/capabilities/hourly-rate-time.md": "a858e12cc48c6b827686be55ab2543eaa2c3a65554ea0ce802da6d6ca6d4f784",
+    "references/capabilities/identity-work.md": "a4e61482ba1d1e84d1b379c8154163a3a56281add11ec952d00b7758f512a165",
+    "references/capabilities/judgment-training.md": "6e44845e1c591cbe1f6434e09b5c07cd90808285e7eaa342e37c6411af516088",
+    "references/capabilities/life-meaning.md": "911ddae078dd865efb92287f4149543180767a7f01970a208cbf39bfd659be8c",
+    "references/capabilities/long-term-compounding.md": "20a97bc5468adebcf0f0607309a4eae50198733e0e63c294bb396725b8d7dfc1",
+    "references/capabilities/monkey-mind-meditation.md": "2335825b9e07fb34e4b1c6b390a8c6d92f5bd566e7792d0c6c3edb720c6938b1",
+    "references/capabilities/peer-selection.md": "4cca56330f1176602316e600873f6a96b131986d82cef4cd6a68dd049c7f9276",
+    "references/capabilities/principal-agent.md": "e001396db23522962bb5a34ae908edf1f0950cd80f06e10a4e0f7c292d919837",
+    "references/capabilities/productize-yourself.md": "8d972f2b7211aa2395a998f277445c09dac32c5186c561288bddd9cedeb89baa",
+    "references/capabilities/rational-buddhism.md": "f4568eaa6c5e45596257717eda8fdf64e11acfaf403768bd7e10e6049c04280b",
+    "references/capabilities/reading-metaskill.md": "0ea3ed0867d25c7aad50f9eff99c340b38dbc2a92ba76053581d62fad14c454f",
+    "references/capabilities/screen-detox.md": "6c466d8cbe3a5c5661ca7c780b106ab96ff54c04c4825b7b1f51e2233888db3c",
+    "references/capabilities/self-liberation.md": "5aa9ddbe1f46c6d81e280b6335e4df1958c8adc1d4c5a5a7a19feb4398a814f6",
+    "references/capabilities/wealth-structure.md": "ac8d9b27a899421513115743a395ad98e2a680e00bd7f15bcf25269d80c6a3bb",
+    "references/capability-index.md": "20a3f59308ea7c0d3e07fc14df1b892bc396efee7dea976622fc38a004f42b8a",
+    "references/cheatsheet.md": "6af490d99d3f589def916f4cf79f8b3d9109c966f94621b2da9332acdbe8dec1",
+    "references/glossary.md": "94d128aa788f8b537210e11e46bd151b1f58b9a96b98f653de6b46ea749a433e",
+    "references/overview.md": "5d78538b4a071f8c7c4002220eada80ad4c981dddc71ccff3020655fab18b43a"
+  },
+  "note": "update/重编译前比对 published_hashes；检测到本地手改不得静默覆盖",
+  "bundle_id": "bundle.naval-almanack",
+  "bundle_sha256": "f5b1aa09db30da9a730517a1ae44bec8c9a947b2d4cfd80fb6232288a47b4a04",
+  "variant": "single",
+  "run_id": "run-20260830-103249-05561d",
+  "decision": {
+    "schema_version": 1,
+    "requested": "single",
+    "selected": "single",
+    "decision_policy": "single-first-v1",
+    "skill_budget": 8,
+    "promoted_count": 6,
+    "capability_count": 19,
+    "reasons": [
+      "用户显式选择 single，auto 决策器不覆盖用户选择"
+    ],
+    "alternative": "compact pack（1 个来源路由入口 + 6 个晋级 Skill，共 7 个可发现入口）",
+    "user_confirmed": true,
+    "preserve_strategy_on_update": true
+  }
+}

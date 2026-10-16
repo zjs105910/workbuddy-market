@@ -1,0 +1,19 @@
+{
+ "name": "ayghri-i-have-adhd",
+ "version": "2026.10.16.723af7d",
+ "description": "阻止编码智能体把答案埋进长篇大论的技能：ADHD 友好的直给输出结构，先说答案再谈过程。",
+ "description_en": "A skill to stop your coding agent from burying the answer: ADHD-friendly, straight-to-the-point output.",
+ "author": {
+  "name": "ayghri"
+ },
+ "keywords": [
+  "输出结构",
+  "直给",
+  "adhd",
+  "效率"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/ayghri/i-have-adhd",
+ "sourceCommit": "723af7d9afaf43eb871dbcce6129e2bf80de90d5"
+}

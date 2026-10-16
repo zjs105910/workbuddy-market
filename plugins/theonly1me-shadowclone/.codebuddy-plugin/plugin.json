@@ -1,0 +1,18 @@
+{
+ "name": "theonly1me-shadowclone",
+ "version": "2026.10.16.7ad536d",
+ "description": "把个人工程品味带进每一个编码代理的技能合集：代码风格、架构取舍与评审标准等 44 个技能，来自一线工程师的实战沉淀。",
+ "author": {
+  "name": "theonly1me"
+ },
+ "keywords": [
+  "工程品味",
+  "代码风格",
+  "架构",
+  "技能合集"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/theonly1me/shadowclone",
+ "sourceCommit": "7ad536d74ca3f00b530aa57f1d74a6a23f314566"
+}

@@ -1,0 +1,21 @@
+{
+ "name": "obra-superpowers",
+ "version": "2026.10.16.8ca22db",
+ "description": "一套成体系的软件开发方法论技能包：头脑风暴、写计划、TDD、系统化调试、并行派发子代理、代码审查、收尾分支等 15 个技能，彼此衔接成工作流。",
+ "description_en": "A cohesive software development methodology skill pack: brainstorming, planning, TDD, systematic debugging, parallel subagents, code review and finishing branches.",
+ "author": {
+  "name": "obra"
+ },
+ "keywords": [
+  "方法论",
+  "TDD",
+  "调试",
+  "计划",
+  "代码审查",
+  "子代理"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/obra/superpowers",
+ "sourceCommit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d"
+}

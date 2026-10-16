@@ -1,0 +1,63 @@
+.constellation {
+  isolation: isolate;
+}
+
+.constellation::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.constellation::before {
+  inset: 30px -35px 5px;
+  background:
+    radial-gradient(ellipse at 53% 72%, #be85f13d 0%, transparent 42%),
+    radial-gradient(ellipse at 28% 52%, #8060c32b 0%, transparent 48%),
+    radial-gradient(ellipse at 74% 41%, #59699b1f 0%, transparent 42%),
+    radial-gradient(ellipse at 53% 57%, #7c47822e 0%, transparent 65%);
+  filter: blur(15px);
+}
+
+.tree-root img {
+  width: 31px;
+  height: 31px;
+  filter: drop-shadow(0 0 7px #bca1f38c);
+}
+
+.tree-root span::before {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border: 1px solid #b19bdf26;
+  border-radius: 50%;
+  box-shadow: 0 0 35px #be85f12e;
+}
+
+.tree-root span {
+  box-shadow:
+    0 0 22px #c7a1ff40,
+    0 0 75px #a776de26;
+}
+
+.skill-node:hover .node-gem,
+.skill-node.active .node-gem {
+  box-shadow:
+    0 0 18px #c7a8fa33,
+    0 0 55px #9773d92b;
+}
+
+.skill-node.equipped .node-gem {
+  box-shadow:
+    0 0 16px #c7a8fa38,
+    0 0 40px #a776de38,
+    inset 0 0 12px #c7a8fa0d;
+}
+
+.skill-node.equipped .node-icon {
+  filter: drop-shadow(0 0 4px #d6bfff66);
+}
+
+.skill-node.equipped::after {
+  box-shadow: 0 0 10px #ceadff99;
+}

@@ -1,0 +1,19 @@
+{
+ "name": "alibaba-open-code-review",
+ "version": "2026.10.16.ea5ced2",
+ "description": "阿里巴巴开源的混合架构代码评审：确定性静态检查 + 仓库级上下文理解，在阿里规模久经实战。",
+ "description_en": "Hybrid-architecture code review: deterministic checks plus repository-level context, battle-tested at Alibaba scale.",
+ "author": {
+  "name": "alibaba"
+ },
+ "keywords": [
+  "代码评审",
+  "code-review",
+  "阿里巴巴",
+  "质量"
+ ],
+ "category": "开发工具",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/alibaba/open-code-review",
+ "sourceCommit": "ea5ced22ea3da6e66b261a083ad3b503f9662425"
+}
