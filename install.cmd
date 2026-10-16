@@ -92,6 +92,10 @@ goto cli_done
 :cli_ok
 echo       CLI OK: !WBMEXE!
 :cli_done
+echo       CLI update status:
+if defined WBMEXE call "!WBMEXE!" check-update
+if not defined WBMEXE %PY% -m workbuddy_market check-update
+echo.
 
 if defined UPDATE_ROOT if exist "%DEST%\launcher.py" goto update_root_mode
 if defined UPDATE_ROOT echo [INFO] No existing market root found; falling back to first-install flow.
