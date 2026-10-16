@@ -618,13 +618,13 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
     if failed_new_root.exists():
         raise RootUpdateError(f"失败版本诊断目录已存在，拒绝覆盖：{failed_new_root}")
     txn_id = stamp + "-" + str(os.getpid())
+    state_txn_dir = STATE_HOME / (".rootupdate-stage-" + txn_id)
+    if state_txn_dir.exists():
+        raise RootUpdateError(f"状态暂存路径已存在，拒绝覆盖：{state_txn_dir}")
     work_dir = Path(tempfile.mkdtemp(prefix=".wbm-update-", dir=str(root.parent)))
     archive_path = work_dir / "release.zip"
     stage_dir = work_dir / "unpack"
     stage_dir.mkdir()
-    state_txn_dir = STATE_HOME / (".rootupdate-stage-" + txn_id)
-    if state_txn_dir.exists():
-        raise RootUpdateError(f"状态暂存路径已存在，拒绝覆盖：{state_txn_dir}")
     root_moved = False
     staged_states: list[tuple[Path, Path]] = []
     applied_states: list[tuple[Path, Path]] = []
@@ -801,6 +801,15 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
 def update_root(root: Path, requested_tag: str | None = None, *, force: bool = False) -> int:
     """Serialize explicit root updates with a cross-platform OS-level file lock."""
     root = root.expanduser().resolve()
+    if (
+        os.environ.get("WBM_MARKET_ROOT") is None
+        and os.environ.get("GHPM_MARKET_ROOT") is not None
+        and os.environ.get("WBM_STATE_HOME") is None
+    ):
+        raise RootUpdateError(
+            "检测到仅设置 GHPM_MARKET_ROOT 的旧版状态布局；该模式把运行状态放在市场根内。"
+            "为避免目录替换造成状态路径消失，请先迁移到 WBM_MARKET_ROOT + 外部 WBM_STATE_HOME 后再升级。"
+        )
     state_home = _state_home_for_root(root)
     if state_home == root or root in state_home.parents:
         raise RootUpdateError(
