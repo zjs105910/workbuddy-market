@@ -584,8 +584,11 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
     root.parent.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     backup = root.with_name(f"{root.name}.old-{stamp}")
+    failed_new_root = root.with_name(f"{root.name}.failed-new-{stamp}")
     if backup.exists():
         raise RootUpdateError(f"备份路径已存在，拒绝覆盖：{backup}")
+    if failed_new_root.exists():
+        raise RootUpdateError(f"失败版本诊断目录已存在，拒绝覆盖：{failed_new_root}")
     txn_id = stamp + "-" + str(os.getpid())
     work_dir = Path(tempfile.mkdtemp(prefix=".wbm-update-", dir=str(root.parent)))
     archive_path = work_dir / "release.zip"
@@ -661,7 +664,8 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
                         raise RootUpdateError(
                             "新根上位失败且自动回滚失败；需要人工恢复。\n"
                             f"旧版备份：{backup}\n临时新版：{new_root}\n"
-                            f'  ren "{backup}" "{root}"\n'
+                            f'  move /Y "{backup}" "{root}"\n'
+                            f"新版暂存目录（仅用于排查）：{new_root}\n"
                             f"原始错误：{exc}"
                         ) from exc
                     time.sleep(0.2 * (2 ** attempt))
@@ -672,7 +676,6 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
         if not ok:
             _rollback_state_migrations(applied_states)
             applied_states = []
-            failed_new_root = root.with_name(f"{root.name}.failed-new-{stamp}")
             _restore_root(root, backup, failed_new_root)
             root_moved = False
             new_root_moved = False
@@ -699,7 +702,7 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
         except Exception as exc:
             _rollback_state_migrations(applied_states)
             applied_states = []
-            failed_new_root = work_dir / "failed-new-root"
+            _restore_placeholder_remove = None
             _restore_root(root, backup, failed_new_root)
             root_moved = False
             new_root_moved = False
@@ -748,13 +751,16 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
                         raise RootUpdateError(f"恢复旧根失败：{last_error}")
             except Exception as rollback_exc:
                 keep_work_dir = True
+                commands = []
+                if root.exists():
+                    commands.append(f'move /Y "{root}" "{failed_new_root}"')
+                commands.append(f'move /Y "{backup}" "{root}"')
                 raise RootUpdateError(
                     "升级发生异常，自动回滚失败；需要人工恢复。\n"
                     f"市场根：{root}\n旧版备份：{backup}\n"
-                    f"临时目录：{work_dir}\n"
-                    f'  ren "{root}" "{(work_dir / "failed-new-root")}"\n'
-                    f'  ren "{backup}" "{root}"\n'
-                    f"原始异常：{exc}\n回滚异常：{rollback_exc}"
+                    f"新版诊断目录（如有）：{failed_new_root}\n临时目录：{work_dir}\n"
+                    + "\n".join(f"  {command}" for command in commands)
+                    + f"\n原始异常：{exc}\n回滚异常：{rollback_exc}"
                 ) from rollback_exc
         if isinstance(exc, RootUpdateError):
             raise
@@ -775,6 +781,11 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
     """Serialize explicit root updates with a cross-platform OS-level file lock."""
     root = root.expanduser().resolve()
     state_home = _state_home_for_root(root)
+    if state_home == root or root in state_home.parents:
+        raise RootUpdateError(
+            f"运行状态目录位于市场根内（{state_home}），目录替换无法安全保持状态路径。"
+            "请清除旧的 WBM_STATE_HOME 覆盖或将它指向市场根之外，再重试。"
+        )
     try:
         from .errors import FileLockTimeout
         from .locking import FileLock
