@@ -457,13 +457,16 @@ def _restore_root(root: Path, backup: Path, failed_new_root: Path) -> None:
         if not restored and not errors:
             errors.append(f"{backup} -> {root}: 未能恢复")
     if errors:
+        commands = []
+        if root.exists():
+            commands.append(f'move /Y "{root}" "{failed_new_root}"')
+        commands.append(f'move /Y "{backup}" "{root}"')
         raise RootUpdateError(
             "自动回滚失败，需要人工恢复。\n"
-            f"旧版备份：{backup}\n新版本目录：{failed_new_root}\n"
-            f"请在关闭占用进程后依次执行：\n"
-            f'  ren "{root}" "{failed_new_root.name}"\n'
-            f'  ren "{backup}" "{root}"\n'
-            "错误详情：\n  " + "\n  ".join(errors)
+            f"旧版备份：{backup}\n新版本目录/诊断目录：{failed_new_root}\n"
+            f"请在关闭占用进程后执行以下命令（仅当前根仍存在时才需要第一条）：\n"
+            + "\n".join(f"  {command}" for command in commands)
+            + "\n错误详情：\n  " + "\n  ".join(errors)
         )
 
 
@@ -472,9 +475,6 @@ def _state_home_for_root(root: Path) -> Path:
     explicit = os.environ.get("WBM_STATE_HOME")
     if explicit:
         return Path(explicit).expanduser().resolve()
-    if os.environ.get("WBM_MARKET_ROOT") is None and os.environ.get("GHPM_MARKET_ROOT") is not None:
-        # Compatibility with the old selftest/harness layout.
-        return root.resolve()
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", root.resolve().name).strip("-") or "market"
     digest = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
     return (Path.home() / ".workbuddy-market" / "markets" / f"{name[:40]}-{digest}").resolve()
@@ -672,7 +672,7 @@ def _update_root_unlocked(root: Path, requested_tag: str | None = None, *, force
         if not ok:
             _rollback_state_migrations(applied_states)
             applied_states = []
-            failed_new_root = work_dir / "failed-new-root"
+            failed_new_root = root.with_name(f"{root.name}.failed-new-{stamp}")
             _restore_root(root, backup, failed_new_root)
             root_moved = False
             new_root_moved = False
