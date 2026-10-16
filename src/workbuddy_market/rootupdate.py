@@ -756,6 +756,11 @@ def update_root(root: Path, requested_tag: str | None = None, *, force: bool = F
             shutil.rmtree(work_dir, ignore_errors=True)
         if not keep_work_dir:
             shutil.rmtree(state_txn_dir, ignore_errors=True)
+        try:
+            if original_cwd.exists():
+                os.chdir(original_cwd)
+        except OSError:
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
