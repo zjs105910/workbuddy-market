@@ -1,0 +1,31 @@
+# 三方发布一致性盯防（v2.36.0 发布体检新增）。
+# 背景：PyPI 上传是发布后手动 twine，漏传不会报错，只会让 PyPI 静默落后
+# （GitHub 已是新版、pipx 用户拿到旧版）。本 workflow 每日把
+# version.py == GitHub 最新正式 Release == PyPI latest 三方比对一次，
+# 并逐件核对 wheel/sdist 的 sha256 与 Release 附件 SHA256SUMS.txt 一致
+# （证明两个渠道分发的是同一份构建产物）。
+# 失败处理：job 红 X + 人话报错；发布后可手动 dispatch 立即验证。
+# 注意：tag push 后 PyPI 上传有手工延迟，本 workflow 不挂在 release 链路上，
+# 只做每日盯防，避免「刚发版还没传 PyPI」的窗口期误报。
+name: Release sync check
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # UTC 02:00 = 北京时间 10:00，每日一次
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Check version.py == GitHub Release == PyPI (version + artifact hashes)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 提高 API 限额，脚本不回显
+        run: python scripts/check_release_sync.py
