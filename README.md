@@ -12,6 +12,20 @@
 
 *A local-first plugin marketplace for WorkBuddy: package local Skills, explore community and GitHub sources, review declared permissions and compatibility, and manage installs through hash verification and recoverable transactions.*
 
+## 🚀 一句话安装（Windows 10/11）
+
+想通过视频评论区快速安装？打开 **Windows PowerShell**，复制并执行下面这一整行：
+
+```powershell
+$ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd'; $f=Join-Path $env:TEMP 'workbuddy-market-install.cmd'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $f; if ((Get-Item $f).Length -lt 1000) { throw '安装器下载不完整；请前往 https://github.com/zjs105910/workbuddy-market/releases/latest 手动下载 install.cmd' }; & $env:ComSpec /d /c "call `"$f`""
+```
+
+- **安装后怎么选？** 首次向导中，直接按回车是只浏览；输入 `2` 才会注册到 WorkBuddy。
+- **不想粘贴命令？** [直接下载 install.cmd 后双击运行](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)。
+- **先检查再运行？** [查看安装脚本源码](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)。
+
+> 此命令会下载并运行本项目公开的安装脚本。需要 Windows 10/11、可访问 GitHub 和 Python 包源的网络环境；网络限制、设备策略或 Python 安装失败等情况仍可能导致安装中断。
+
 ## 30 秒了解它
 
 - **管理自己的 Skills**：将本机技能打包、同步，并注册到 WorkBuddy 插件面板。
@@ -32,17 +46,10 @@
 
 ## 快速上手（Windows）
 
-### 评论区一句话安装（Windows 10/11）✅
+### 一键安装（Windows 10/11）
 
-**适合视频评论区直接复制**：在 Windows PowerShell 中粘贴执行下面这一行。它会从本项目最新正式 Release 下载 `install.cmd` 并启动安装器；安装器会检测/安装 Python、安装/升级 CLI、下载市场本体、运行 doctor 体检，再启动首次向导。
+上方已提供可复制的一句话 PowerShell 安装命令。也可以[直接下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd) 后双击运行。安装器会检测/安装 Python、安装或升级 CLI、下载市场本体并运行体检；首次向导中回车=只浏览，输入 `2`=注册进 WorkBuddy。
 
-```powershell
-$ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd'; $f=Join-Path $env:TEMP 'workbuddy-market-install.cmd'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $f; if ((Get-Item $f).Length -lt 1000) { throw '安装器下载不完整；请前往 https://github.com/zjs105910/workbuddy-market/releases/latest 手动下载 install.cmd' }; & $env:ComSpec /d /c "call `"$f`""
-```
-
-> 适用于 Windows PowerShell；需要设备能够访问 GitHub 和 Python 包源。这行命令会下载并运行开源安装脚本。想先检查内容，可打开 [install.cmd 源码](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)；不想在终端执行命令，也可以直接[下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)，再双击运行。
-
-首次向导中，**直接回车=只浏览，输入 2=注册进 WorkBuddy**。这安装的是包含网页界面、CLI 和管理能力的**完整市场**；下方的 `/plugin marketplace add ...` 是另一条轻量入口，用于将仓库内置插件目录接入宿主插件面板。安装器可重复运行以升级。
 ### 没有 Git？三步跑起来（免 Git，需 Python 3.10+） ✅
 
 > 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)（认准标题为 `WorkBuddy Market vX.Y.Z` 的条目；`registry-artifacts-*` 是插件产物 Pre-release，不是本体），点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
