@@ -32,16 +32,17 @@
 
 ## 快速上手（Windows）
 
-### 只想下载一个文件？一键安装（推荐） ✅
+### 评论区一句话安装（Windows 10/11）✅
 
-**[👉 点此直接下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)**（浏览器会立即开始下载；想先看一眼内容再下，也可以[打开文件页面](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)手动下载）。
+**适合视频评论区直接复制**：在 Windows PowerShell 中粘贴执行下面这一行。它会从本项目最新正式 Release 下载 `install.cmd` 并启动安装器；安装器会检测/安装 Python、安装/升级 CLI、下载市场本体、运行 doctor 体检，再启动首次向导。
 
-下载完成后**双击**即可。它会自动完成：检测/安装 Python → 装 pipx → 装并升级 `workbuddy-market` CLI → 下载市场本体到 `%USERPROFILE%\workbuddy-market` → 运行 doctor 体检 → 启动首次向导（**回车=只浏览，2=注册进 WorkBuddy**）。
+```powershell
+$ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd'; $f=Join-Path $env:TEMP 'workbuddy-market-install.cmd'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $f; if ((Get-Item $f).Length -lt 1000) { throw '安装器下载不完整；请前往 https://github.com/zjs105910/workbuddy-market/releases/latest 手动下载 install.cmd' }; & $env:ComSpec /d /c "call `"$f`""
+```
 
-> 双击时 Windows 会弹「无法验证发布者」的安全警告——因为脚本没有购买数字签名（开源项目的常规情况），点**运行(R)**即可；脚本内容是纯文本，可在上面的文件页面逐行核对。
+> 适用于 Windows PowerShell；需要设备能够访问 GitHub 和 Python 包源。这行命令会下载并运行开源安装脚本。想先检查内容，可打开 [install.cmd 源码](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)；不想在终端执行命令，也可以直接[下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)，再双击运行。
 
-这就是**完整版**：四问预览、哈希校验、事务与可恢复卸载全都在。可重复运行（每一步幂等，顺带升级 CLI）。
-
+首次向导中，**直接回车=只浏览，输入 2=注册进 WorkBuddy**。这安装的是包含网页界面、CLI 和管理能力的**完整市场**；下方的 `/plugin marketplace add ...` 是另一条轻量入口，用于将仓库内置插件目录接入宿主插件面板。安装器可重复运行以升级。
 ### 没有 Git？三步跑起来（免 Git，需 Python 3.10+） ✅
 
 > 1. **下载**：打开 [Releases 最新版](https://github.com/zjs105910/workbuddy-market/releases/latest)（认准标题为 `WorkBuddy Market vX.Y.Z` 的条目；`registry-artifacts-*` 是插件产物 Pre-release，不是本体），点 **Source code (zip)**（或直接下 [main 分支 ZIP](https://github.com/zjs105910/workbuddy-market/archive/refs/heads/main.zip)）；
