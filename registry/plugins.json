@@ -31,10 +31,10 @@
         "method": "manual"
       },
       "license": "Apache-2.0",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/anthropics-skills-2026.10.15.683bc88.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/anthropics-skills-2026.10.21.683bc88.zip",
       "packageHash": "f6d25bc38b91b9b7b0eb89cea3d5bd5647f6deb6c7b74be05ae14ff4b39eaf5e",
-      "manifestHash": "3f61ec45a98080f1d25ced178e7b620a168099ff33d7a78acd05b959e891eb28",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/anthropics-skills-2026.10.15.683bc88.zip.attestation.json"
+      "manifestHash": "e647bfb8ba2b02e869deafa30ef7a5a838bfe37044b302638b83c9564f77675f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/anthropics-skills-2026.10.21.683bc88.zip.attestation.json"
     },
     {
       "repo": "obra/superpowers",
@@ -65,10 +65,10 @@
         "reviewedAt": "2026-10-06",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/obra-superpowers-2026.10.15.8ca22db.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/obra-superpowers-2026.10.21.8ca22db.zip",
       "packageHash": "49022cf9fb61ae9e1bd512339dda1f2b7ca1590a43326ff68838b30f5e234146",
-      "manifestHash": "f825e6aa503a08a903f3c8db7f6e5a11237b1b36b30be02d0980ae6d90eadf86",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/obra-superpowers-2026.10.15.8ca22db.zip.attestation.json"
+      "manifestHash": "c8cff57eb3fac40424d48d255cf79bbb566c66ae41289beebd76e4a35ea46096",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/obra-superpowers-2026.10.21.8ca22db.zip.attestation.json"
     },
     {
       "repo": "mattpocock/skills",
@@ -185,10 +185,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/nexu-io-open-design-2026.10.15.53231d4.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nexu-io-open-design-2026.10.21.53231d4.zip",
       "packageHash": "4939cbeecf2f0e8ad80ac9e31fac608af47c3329a9c7682acabb0feecb93e4af",
-      "manifestHash": "0ef11b9702bceefe7ce6deab8367dc00f217516cb381c18869bf41c27b11abc4",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/nexu-io-open-design-2026.10.15.53231d4.zip.attestation.json"
+      "manifestHash": "2d2bcda31b4e83f61dae6f3503a7616f6b70164cb16b9aff130a20176fcb83d7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nexu-io-open-design-2026.10.21.53231d4.zip.attestation.json"
     },
     {
       "repo": "Leonxlnx/taste-skill",
@@ -218,10 +218,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Leonxlnx-taste-skill-2026.10.15.b482f7a.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Leonxlnx-taste-skill-2026.10.21.b482f7a.zip",
       "packageHash": "a3fbb3d7139bdaf39fac29e33458a7d1a245d1a71011c6d3de58a8a3a0df3a1d",
-      "manifestHash": "f64119ea74022bec280c0a10d78e0b22785af6e1c71deac99271bf07239f663e",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Leonxlnx-taste-skill-2026.10.15.b482f7a.zip.attestation.json"
+      "manifestHash": "e95f99c057e6619ff85cce2d8275009a36549853c74e4bbeef70b682400d5c39",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Leonxlnx-taste-skill-2026.10.21.b482f7a.zip.attestation.json"
     },
     {
       "repo": "K-Dense-AI/scientific-agent-skills",
@@ -251,10 +251,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/K-Dense-AI-scientific-agent-skills-2026.10.15.92ace75.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/K-Dense-AI-scientific-agent-skills-2026.10.21.92ace75.zip",
       "packageHash": "15f9ace2d42a1bc000ae9346f6988e8d8b4bf66b9b01a5de134cebd7e729543c",
-      "manifestHash": "859d0bd052133c9b74b154d6758f048ea0acc1fdab601c56182c53f806a133a4",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/K-Dense-AI-scientific-agent-skills-2026.10.15.92ace75.zip.attestation.json"
+      "manifestHash": "25d224d616c5f61ae3243e7143f71161090ac5d5b713115ba76ca22fb95070f5",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/K-Dense-AI-scientific-agent-skills-2026.10.21.92ace75.zip.attestation.json"
     },
     {
       "repo": "vercel-labs/agent-browser",
@@ -284,10 +284,10 @@
         "reviewedAt": "2026-10-06",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/vercel-labs-agent-browser-2026.10.15.0207911.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-agent-browser-2026.10.21.0207911.zip",
       "packageHash": "c46aa58fdb41ba3ac890d7cd4adf4897e93b79e7c1528c86af39f009e891410e",
-      "manifestHash": "2075d1eb56f87908886051b9450c834e77e83c1081346e9d489e44d2b856dd43",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/vercel-labs-agent-browser-2026.10.15.0207911.zip.attestation.json"
+      "manifestHash": "45ac3a87abe27391c1dd5ccdbaa69cb67d7f5b3d540a6ed829e7a8bc298721e7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-agent-browser-2026.10.21.0207911.zip.attestation.json"
     },
     {
       "repo": "wshobson/agents",
@@ -319,10 +319,10 @@
         "reviewedAt": "2026-10-06",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/wshobson-agents-2026.10.15.46891e7.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/wshobson-agents-2026.10.21.46891e7.zip",
       "packageHash": "1bdcb4826dbf3a4b1e1817422fb7c644abe009c2b8792ae512117bc7ea5439e5",
-      "manifestHash": "c96b3187bc7d94a5c26a946f2a67af4fbd3538b9cc5cee636c1377a05fee8455",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/wshobson-agents-2026.10.15.46891e7.zip.attestation.json"
+      "manifestHash": "33669b72be0780ae8a4a01d6ef7fdfc576f283bfeb0ee2b40f3dc5e230a1ae0f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/wshobson-agents-2026.10.21.46891e7.zip.attestation.json"
     },
     {
       "repo": "affaan-m/ECC",
@@ -352,10 +352,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/affaan-m-ECC-2026.10.15.ef648e0.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/affaan-m-ECC-2026.10.21.ef648e0.zip",
       "packageHash": "c5d68e69f75ff688ffbfd6a32927f9a3e8011145631313691ec466b71d2aa334",
-      "manifestHash": "cb71d287658afcdeddff7df7ea1a8ae5363dba585e9d890b05cdc05d18e56ab9",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/affaan-m-ECC-2026.10.15.ef648e0.zip.attestation.json"
+      "manifestHash": "b5e4e91bc67e56c824df3d4a8f1ee366f523ba77c506e9669c03b9568c62b592",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/affaan-m-ECC-2026.10.21.ef648e0.zip.attestation.json"
     },
     {
       "repo": "multica-ai/andrej-karpathy-skills",
@@ -383,10 +383,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/multica-ai-andrej-karpathy-skills-2026.10.15.2c60614.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/multica-ai-andrej-karpathy-skills-2026.10.21.2c60614.zip",
       "packageHash": "fb3e0652ff73647da9ad6e75e2ab11964a73c9cf5fa0b513dce154516612a485",
-      "manifestHash": "422e661d7f58a82e2236f6999c6425ec6eaff1b7e0f2ef6f696947b2e7bd52d9",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/multica-ai-andrej-karpathy-skills-2026.10.15.2c60614.zip.attestation.json"
+      "manifestHash": "bf86e635493214b69e04f51796f325a37490db8ffc81bc8f143e9333bf723bc2",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/multica-ai-andrej-karpathy-skills-2026.10.21.2c60614.zip.attestation.json"
     },
     {
       "repo": "DietrichGebert/ponytail",
@@ -415,10 +415,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/DietrichGebert-ponytail-2026.10.15.552acd5.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/DietrichGebert-ponytail-2026.10.21.552acd5.zip",
       "packageHash": "98f9b66d0dfe8d24e5603442980d6ce5608efe9e6db99012ce7408836b9429f7",
-      "manifestHash": "0e38fb11ba3515459fc521102af0c3e2dc6675f1da6e2a89d140f66aed1368bd",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/DietrichGebert-ponytail-2026.10.15.552acd5.zip.attestation.json"
+      "manifestHash": "1b77d99124f310ae5f224770a629aece86d8c49e8acd9a7b390c2b8b528aac83",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/DietrichGebert-ponytail-2026.10.21.552acd5.zip.attestation.json"
     },
     {
       "repo": "tt-a1i/archify",
@@ -447,10 +447,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/tt-a1i-archify-2026.10.15.73aaa06.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tt-a1i-archify-2026.10.21.73aaa06.zip",
       "packageHash": "5457bccb966e99953eb511152f3a30a08688dc594a920562669773494e9221be",
-      "manifestHash": "89073b9ad102f8d6e6c779c2b1a64c64aff0a0d2af256e2d81a8b91917b4c625",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/tt-a1i-archify-2026.10.15.73aaa06.zip.attestation.json"
+      "manifestHash": "03ad29f4c95c79de8ad1dccf297c1628eab664402f0744ca27f4e639b5fc1cd7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tt-a1i-archify-2026.10.21.73aaa06.zip.attestation.json"
     },
     {
       "repo": "ayghri/i-have-adhd",
@@ -479,10 +479,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/ayghri-i-have-adhd-2026.10.15.723af7d.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/ayghri-i-have-adhd-2026.10.21.723af7d.zip",
       "packageHash": "920ab92ec20080a976129f524a65745ec24ba8edc78291ddaa53e990459c8ee1",
-      "manifestHash": "1c70b408243ced24ce177207eceb2a390a3fba18b51fa7076be4c5ba23a12b40",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/ayghri-i-have-adhd-2026.10.15.723af7d.zip.attestation.json"
+      "manifestHash": "9afb4dd03faae023f0f4d0eaa9621f766d19254f251b545699a3751a447cd6ee",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/ayghri-i-have-adhd-2026.10.21.723af7d.zip.attestation.json"
     },
     {
       "repo": "blader/humanizer",
@@ -511,10 +511,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/blader-humanizer-2026.10.15.225a6f3.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/blader-humanizer-2026.10.21.225a6f3.zip",
       "packageHash": "352a24311e16d58d5eb2dc606f3f94b3d5a220119db85c4c0be45f6584815b1c",
-      "manifestHash": "9dd3445f9bb73b74454d2d40798daf42aaef73a7937a12ab282e34a491868608",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/blader-humanizer-2026.10.15.225a6f3.zip.attestation.json"
+      "manifestHash": "35f7fec8f89a8d4fccadf7dedc6182fea221bbc5ecd7f0112a1ca5c9455c5075",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/blader-humanizer-2026.10.21.225a6f3.zip.attestation.json"
     },
     {
       "repo": "coreyhaines31/marketingskills",
@@ -544,10 +544,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/coreyhaines31-marketingskills-2026.10.15.b9ba399.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/coreyhaines31-marketingskills-2026.10.21.b9ba399.zip",
       "packageHash": "24271b89399a78440c861800d52dcf965e830359478bf548bcb6a2c13b75382f",
-      "manifestHash": "ed8dc2d7ffd781a82f55a14e86a9b039813871b956c4b1628ecc13804f83808e",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/coreyhaines31-marketingskills-2026.10.15.b9ba399.zip.attestation.json"
+      "manifestHash": "ee9060af93aeab1d43b5f21ede806de3864d31e5cf5a5a9fb61adcb8a2b5c558",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/coreyhaines31-marketingskills-2026.10.21.b9ba399.zip.attestation.json"
     },
     {
       "repo": "Imbad0202/academic-research-skills",
@@ -604,10 +604,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/cathrynlavery-diagram-design-2026.10.15.f4547ee.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/cathrynlavery-diagram-design-2026.10.21.f4547ee.zip",
       "packageHash": "4e8c3c6bf8614d798cb4f7dfd1427a268a30e73ade2d376e1cf757e452345cde",
-      "manifestHash": "810fa3419244676784b3d18919a03382b06ebc552317e32d44e3eb2aa2b02926",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/cathrynlavery-diagram-design-2026.10.15.f4547ee.zip.attestation.json"
+      "manifestHash": "cf416e5d6757c95ffe46cf4d2a3813d8d7926be265c9f6a70fd6de3fb04d759b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/cathrynlavery-diagram-design-2026.10.21.f4547ee.zip.attestation.json"
     },
     {
       "repo": "zhaoxuya520/reverse-skill",
@@ -637,10 +637,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/zhaoxuya520-reverse-skill-2026.10.15.cab634b.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/zhaoxuya520-reverse-skill-2026.10.21.cab634b.zip",
       "packageHash": "5f60fa5e051b4c53f7d82d003d2a5d44fdd19640bad4b34b917d6c4cf4094e4e",
-      "manifestHash": "a1a352af37977714d1326a40edd84ae5f4fea742394034c0b2aa1e307652cb8b",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/zhaoxuya520-reverse-skill-2026.10.15.cab634b.zip.attestation.json"
+      "manifestHash": "da313c1218ba55c45ff8586a2d311c51ba5afe9a562e54d9ad9717f35c5eaa74",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/zhaoxuya520-reverse-skill-2026.10.21.cab634b.zip.attestation.json"
     },
     {
       "repo": "mukul975/Anthropic-Cybersecurity-Skills",
@@ -670,10 +670,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/mukul975-Anthropic-Cybersecurity-Skills-2026.10.15.54a7988.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/mukul975-Anthropic-Cybersecurity-Skills-2026.10.21.54a7988.zip",
       "packageHash": "25cc568f4e4796c5ce202ef1761bc57e4fc23e18309c0c830b7e6ba142a4db73",
-      "manifestHash": "7b5fa32defa12f83a4014a2372a0925fe42aa1fbfa2f09d03db1a6466a15c90e",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/mukul975-Anthropic-Cybersecurity-Skills-2026.10.15.54a7988.zip.attestation.json"
+      "manifestHash": "fc1c15e731bec291250d4da6febac933a7e35ea98df06c206db9f015056269dc",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/mukul975-Anthropic-Cybersecurity-Skills-2026.10.21.54a7988.zip.attestation.json"
     },
     {
       "repo": "virgiliojr94/book-to-skill",
@@ -702,10 +702,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/virgiliojr94-book-to-skill-2026.10.15.e180fc4.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/virgiliojr94-book-to-skill-2026.10.21.e180fc4.zip",
       "packageHash": "169b13f11d124950c96a440458216a2d3789702d789f75a7f8120b7c36672ec8",
-      "manifestHash": "bb0bdac8b382dd54ac0139600b99ec274b39192cffd7bed2757be83902c41a96",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/virgiliojr94-book-to-skill-2026.10.15.e180fc4.zip.attestation.json"
+      "manifestHash": "c28266ace77ca64a30533e6a6465269a6200159d539ea006d726b1b29b09ecbe",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/virgiliojr94-book-to-skill-2026.10.21.e180fc4.zip.attestation.json"
     },
     {
       "repo": "Nutlope/hallmark",
@@ -734,10 +734,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Nutlope-hallmark-2026.10.15.13ac0ec.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Nutlope-hallmark-2026.10.21.13ac0ec.zip",
       "packageHash": "e56c6c9f2fb85c4e41d5f790f765c884b320d47717183d483416c198220efce8",
-      "manifestHash": "d1cb33e99984cb3405042060f4c49af49b0fb532513c119e9c690c9e9227d30b",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Nutlope-hallmark-2026.10.15.13ac0ec.zip.attestation.json"
+      "manifestHash": "0613ad0f8f05f51a998f4d82fe51b94152f2301ea70e3311119944876313ea3e",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Nutlope-hallmark-2026.10.21.13ac0ec.zip.attestation.json"
     },
     {
       "repo": "OthmanAdi/planning-with-files",
@@ -766,10 +766,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/OthmanAdi-planning-with-files-2026.10.15.41f60ae.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/OthmanAdi-planning-with-files-2026.10.21.41f60ae.zip",
       "packageHash": "1283d9a19c6d91c57f8d36bacfa51d81356f76bc8f3e7fad4556829e61b296f1",
-      "manifestHash": "4891436a474398af0f3ae177864127fefe969baf41877e005b6f8eda356d5ea6",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/OthmanAdi-planning-with-files-2026.10.15.41f60ae.zip.attestation.json"
+      "manifestHash": "965524a2bf594f8e58bf672241709167ae2b4eb14d465dd90eae6f6ded9e8ade",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/OthmanAdi-planning-with-files-2026.10.21.41f60ae.zip.attestation.json"
     },
     {
       "repo": "phuryn/pm-skills",
@@ -799,10 +799,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/phuryn-pm-skills-2026.10.15.8607e3b.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/phuryn-pm-skills-2026.10.21.8607e3b.zip",
       "packageHash": "f02fee73bb82eb07e148cd6fcc1601171d839b48a06041c69c77d7d0824aed27",
-      "manifestHash": "903b1af6434489edef44eb85da1064ec130ef51bfb1d28f38fe1b37491f0e4d3",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/phuryn-pm-skills-2026.10.15.8607e3b.zip.attestation.json"
+      "manifestHash": "7072fc2bca121eb65081798ee453a6c3985dc45a845e29e3cc4fe36328382c5f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/phuryn-pm-skills-2026.10.21.8607e3b.zip.attestation.json"
     },
     {
       "repo": "JimLiu/baoyu-skills",
@@ -831,10 +831,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/JimLiu-baoyu-skills-2026.10.15.1567581.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/JimLiu-baoyu-skills-2026.10.21.1567581.zip",
       "packageHash": "842b771cec75878d0b378fe0572ee370e85c191779ab695b05b5ecc801d80417",
-      "manifestHash": "faded17e1eff96436b15266ebbfe609282545799393cbdcbf68b9b28f6169465",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/JimLiu-baoyu-skills-2026.10.15.1567581.zip.attestation.json"
+      "manifestHash": "f1fd6d6020e8e6d560653dcf79db58099abd44e9262ce80c141811e48f215fa1",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/JimLiu-baoyu-skills-2026.10.21.1567581.zip.attestation.json"
     },
     {
       "repo": "titanwings/distilly",
@@ -863,10 +863,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/titanwings-distilly-2026.10.15.b830d3d.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/titanwings-distilly-2026.10.21.b830d3d.zip",
       "packageHash": "6365b5c93d4f80f52f25a5aa740d72eaf73f57a8aa2885e85f7c8edf49629f89",
-      "manifestHash": "0d64281de0a66fcc0af79890559be1dfc262ff7d3618ba58c3452d2bbba363de",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/titanwings-distilly-2026.10.15.b830d3d.zip.attestation.json"
+      "manifestHash": "f6229b7a9de0ece1a5d985e633d8d8a76759073b57c02527b7489418126c9129",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/titanwings-distilly-2026.10.21.b830d3d.zip.attestation.json"
     },
     {
       "repo": "alchaincyf/huashu-design",
@@ -896,10 +896,10 @@
         "reviewedAt": "2026-10-07",
         "method": "manual"
       },
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/alchaincyf-huashu-design-2026.10.15.0830494.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/alchaincyf-huashu-design-2026.10.21.0830494.zip",
       "packageHash": "ccd8a90e41136a481be372da74ab96c3bdf350e60747d0f57b61318609f7fd9b",
-      "manifestHash": "f1823310827e745dc5ec8a3bce7bc3093863ec0d793c295247b511f9239627d3",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/alchaincyf-huashu-design-2026.10.15.0830494.zip.attestation.json"
+      "manifestHash": "40031ffa22aa34320ea279f75c1c6e3a865a51ede744866c1b2748cff95b87bb",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/alchaincyf-huashu-design-2026.10.21.0830494.zip.attestation.json"
     },
     {
       "repo": "machina-sports/sports-skills",
@@ -927,10 +927,10 @@
       "pushedAt": "2026-10-12",
       "latestSha": "39092bbb6f146cc9d5631dabcf53f57f601fde6c",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/machina-sports-sports-skills-2026.10.15.5bb9d1d.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/machina-sports-sports-skills-2026.10.21.5bb9d1d.zip",
       "packageHash": "1dcad5910899821ae97a9d7a36b1e4bb9a84471fd4507988f15c11f147ba5f84",
-      "manifestHash": "89d3c33270445e12fb728be4fdd4f1c01e7a0c88b260f9c81648ccffc1a8cd5a",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/machina-sports-sports-skills-2026.10.15.5bb9d1d.zip.attestation.json"
+      "manifestHash": "850ffebed7303aca3092bc794c4ccb50cb24a464fbdfdaffbc9de0581bf3aca7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/machina-sports-sports-skills-2026.10.21.5bb9d1d.zip.attestation.json"
     },
     {
       "repo": "stefanoskarakasis/Product-Marketing-Skills",
@@ -959,10 +959,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "b51b8049ae7a78e74e5e97ec0e93ad5d2ba7ca95",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/stefanoskarakasis-Product-Marketing-Skills-2026.10.15.ec0108f.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/stefanoskarakasis-Product-Marketing-Skills-2026.10.21.ec0108f.zip",
       "packageHash": "3dbed20d4e8783acdaa7b532c941b843bebf343de42c3f6b1512fc81fe756022",
-      "manifestHash": "98d4309b33849e140daa20dcb856c4239b33ab2fef36f8a77e9fec7f3c10b25c",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/stefanoskarakasis-Product-Marketing-Skills-2026.10.15.ec0108f.zip.attestation.json"
+      "manifestHash": "a0be7c819d89af1c8ea4b4e1852a95ad3708f8cebc72cabf3a8c31c19f442fc1",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/stefanoskarakasis-Product-Marketing-Skills-2026.10.21.ec0108f.zip.attestation.json"
     },
     {
       "repo": "tackeyy/mission",
@@ -990,10 +990,10 @@
       "pushedAt": "2026-10-12",
       "latestSha": "2a443a241d86738669414eb4eaac8826ba5b2d02",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/tackeyy-mission-2026.10.15.4274db6.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tackeyy-mission-2026.10.21.4274db6.zip",
       "packageHash": "b7e0b8fd8d61c5b04e520061d5f17c95a3986713470d34b21624ab1655a74342",
-      "manifestHash": "a8f4cd813e29f27c5267aa0269fed3e22a18ab422c0258bab8918eef655dc6f9",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/tackeyy-mission-2026.10.15.4274db6.zip.attestation.json"
+      "manifestHash": "8a3ba63a72767b7c76fff8fb9c69978fce2837c56fa0664ac8eaf23547c81584",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tackeyy-mission-2026.10.21.4274db6.zip.attestation.json"
     },
     {
       "repo": "victorrentea/human-review",
@@ -1021,10 +1021,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "fb57fa417647baa8c61c2086aa0787ededf6f653",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/victorrentea-human-review-2026.10.15.0071f98.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/victorrentea-human-review-2026.10.21.0071f98.zip",
       "packageHash": "2f14596945765bfddbe43db607df31acb8f507f8bbae8398bab0ee5549d5671d",
-      "manifestHash": "07812ca81276031bf875bee19ffb3c5ab88b9abaaca9527f17fc537e12d07701",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/victorrentea-human-review-2026.10.15.0071f98.zip.attestation.json"
+      "manifestHash": "47c95da5018b57c67418c4c6773a071afbb037cf219903bfd600b5d72e3fcd6e",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/victorrentea-human-review-2026.10.21.0071f98.zip.attestation.json"
     },
     {
       "repo": "buidangminh23/spacing-skill",
@@ -1052,10 +1052,10 @@
       "pushedAt": "2026-10-15",
       "latestSha": "44d9ecfb1bacf21b06d79f79aca2d8a3a87d2c9f",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/buidangminh23-spacing-skill-2026.10.15.ddfa2a4.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/buidangminh23-spacing-skill-2026.10.21.ddfa2a4.zip",
       "packageHash": "a9583deb1d528184dde7d98f62958346571c1c9ccde7904031f48ec917356e1e",
-      "manifestHash": "4ab1f459405f8e2f6f1f76b3964578256b6565892637a2d7cf5cc25b69981d08",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/buidangminh23-spacing-skill-2026.10.15.ddfa2a4.zip.attestation.json"
+      "manifestHash": "f854bc60cbf0f9e23dc9edccf05fdb134dc1cf6cc18403ccd49c300f9b78c62b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/buidangminh23-spacing-skill-2026.10.21.ddfa2a4.zip.attestation.json"
     },
     {
       "repo": "skywain/trip-planner-skill",
@@ -1083,10 +1083,10 @@
       "pushedAt": "2026-10-10",
       "latestSha": "3f957770c6978180e3a626f5751dabb06c4657de",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/skywain-trip-planner-skill-2026.10.15.3f95777.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/skywain-trip-planner-skill-2026.10.21.3f95777.zip",
       "packageHash": "6e802c70da70a580bbc2f7b8f5e29858c8971c4b3a6b76ce05ea1e6b6452b85e",
-      "manifestHash": "9704d76e6f07afe060d076fc0ebccd9c323414d4fcd7f03b4726c61b32368e19",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/skywain-trip-planner-skill-2026.10.15.3f95777.zip.attestation.json"
+      "manifestHash": "354dc9b320ff72e8230396cbd6c7ec78163d121c64f3545bab9136f5f04271e7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/skywain-trip-planner-skill-2026.10.21.3f95777.zip.attestation.json"
     },
     {
       "repo": "beggarticksarthurtatum121/reddit-skills",
@@ -1114,10 +1114,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "c639ad005bb76dfa5ed90fbd29358893fbd3f17d",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/beggarticksarthurtatum121-reddit-skills-2026.10.15.0739c5e.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/beggarticksarthurtatum121-reddit-skills-2026.10.21.0739c5e.zip",
       "packageHash": "9ff07280b840c7bd6264060143943ed1b47ba95ba113de6b24d5a263056eec87",
-      "manifestHash": "2dcaee94bb9f42755210743ab5e83a09731d2f59c0cb3a543ff7716ce0f5da6d",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/beggarticksarthurtatum121-reddit-skills-2026.10.15.0739c5e.zip.attestation.json"
+      "manifestHash": "a8a43077450801dac948149d084c32bb93c63ede96b342ddd8dc7aa324e7db52",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/beggarticksarthurtatum121-reddit-skills-2026.10.21.0739c5e.zip.attestation.json"
     },
     {
       "repo": "docsor1212/pubmed-verifier",
@@ -1144,10 +1144,10 @@
       "pushedAt": "2026-10-15",
       "latestSha": "7259e593a47cd0ab67d2f3b35c3107c4eaf2f19b",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/docsor1212-pubmed-verifier-2026.10.15.ae908b7.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/docsor1212-pubmed-verifier-2026.10.21.ae908b7.zip",
       "packageHash": "47f8434d6563953f239d35865e18a598b6f587b3904ccb501e8a3a13370f4117",
-      "manifestHash": "807cf784ea0a888604b0af34ec9b3f7c27d0a53d4d0467bd1d64fe5a26cfdd70",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/docsor1212-pubmed-verifier-2026.10.15.ae908b7.zip.attestation.json"
+      "manifestHash": "6d1a840c71b957bfb425f35af00f8c3f5c709440f91514a00c58279711f2a071",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/docsor1212-pubmed-verifier-2026.10.21.ae908b7.zip.attestation.json"
     },
     {
       "repo": "bsq415/research-rigor-skill",
@@ -1175,10 +1175,10 @@
       "pushedAt": "2026-10-10",
       "latestSha": "f34c27f5dbc7a4a0ea314ba480c51fe5e5c29da9",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/bsq415-research-rigor-skill-2026.10.15.708718a.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/bsq415-research-rigor-skill-2026.10.21.708718a.zip",
       "packageHash": "bbcd6356c5cf1ed7b49831530301e179e67b9811e63b34c08d201a481e8460ed",
-      "manifestHash": "7b1ece153ad40d080610f657fd3c78d863607919545d01f14f4dbba58d923693",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/bsq415-research-rigor-skill-2026.10.15.708718a.zip.attestation.json"
+      "manifestHash": "aff90f1b0b84bcc669d182c2fc1e5b4b3cd22aa248b2cf24f8379923dbe12305",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/bsq415-research-rigor-skill-2026.10.21.708718a.zip.attestation.json"
     },
     {
       "repo": "gal-a/qikly",
@@ -1206,10 +1206,10 @@
       "pushedAt": "2026-10-10",
       "latestSha": "884d7647b47f86c89077c4bff6a9dcde21e988c9",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/gal-a-qikly-2026.10.15.6bd6953.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/gal-a-qikly-2026.10.21.6bd6953.zip",
       "packageHash": "155d2e76ef238dd75baea17c77e2c8f2766f0be3d44212b579928ab750789f79",
-      "manifestHash": "317c6076464ad5e37c124ca78c9fb889cbd623376488675a2d0816f64582cf22",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/gal-a-qikly-2026.10.15.6bd6953.zip.attestation.json"
+      "manifestHash": "5d5853bbed562afcf7968046eff5d08de66be37a63304254d01de1d56195f87b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/gal-a-qikly-2026.10.21.6bd6953.zip.attestation.json"
     },
     {
       "repo": "Kimeur/motion-launch-videos",
@@ -1237,10 +1237,10 @@
       "pushedAt": "2026-10-12",
       "latestSha": "394027b29480602eb0874df0081bcfd0de2a3a49",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Kimeur-motion-launch-videos-2026.10.15.b639fc4.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Kimeur-motion-launch-videos-2026.10.21.b639fc4.zip",
       "packageHash": "7d776130dcf9d6ec67a394589ed03552f466531f3247f87aa96089ac39375ace",
-      "manifestHash": "b2d275a03bc7340ae290fa11864c798c79fecf7415581982fa75176f9d6112e3",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Kimeur-motion-launch-videos-2026.10.15.b639fc4.zip.attestation.json"
+      "manifestHash": "90659877b255153e029686778d71c664b6b87d202bcc2828e991e89ef3ca9751",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Kimeur-motion-launch-videos-2026.10.21.b639fc4.zip.attestation.json"
     },
     {
       "repo": "danieljustus/symaira-eraseme",
@@ -1268,10 +1268,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "3021fdcdc143e1c1e2cf42a3a6517bc2ca49fb92",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/danieljustus-symaira-eraseme-2026.10.15.e29f9dd.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/danieljustus-symaira-eraseme-2026.10.21.e29f9dd.zip",
       "packageHash": "0fab53de17197eaa62c7cc663522ac10df95c0a26f1983cb11a10eef8d5e7a89",
-      "manifestHash": "8e5a5abafee850d9f320105d94b64b86c5534ee1e3c11d29484ae22b342cac79",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/danieljustus-symaira-eraseme-2026.10.15.e29f9dd.zip.attestation.json"
+      "manifestHash": "60208477e6494960b425140410e91b84c0b37833be7d59dad4068c2b67fae28c",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/danieljustus-symaira-eraseme-2026.10.21.e29f9dd.zip.attestation.json"
     },
     {
       "repo": "yschimke/compose-ai-tools",
@@ -1299,10 +1299,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "f48dce326a5cd0857d620668ea01c635dab4df70",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/yschimke-compose-ai-tools-2026.10.15.ddb68af.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/yschimke-compose-ai-tools-2026.10.21.ddb68af.zip",
       "packageHash": "dc6b3a24aa4ca5a709ca0b292ccf5a53cc0fbeb16b66e17f46728f167ebb9235",
-      "manifestHash": "206709414039601abbe14222f60a5cb9dc8fc36a48fa2192d97af467ee546b09",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/yschimke-compose-ai-tools-2026.10.15.ddb68af.zip.attestation.json"
+      "manifestHash": "a4d4b6024044f58915f331c7f0393aa4343f7d9682fe3ccafde326e63f879906",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/yschimke-compose-ai-tools-2026.10.21.ddb68af.zip.attestation.json"
     },
     {
       "repo": "creedants/pstack-t3",
@@ -1330,10 +1330,10 @@
       "pushedAt": "2026-10-15",
       "latestSha": "4ee9e3c73dcca16278ace6879164f0314e6b161d",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/creedants-pstack-t3-2026.10.15.a70a9b8.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/creedants-pstack-t3-2026.10.21.a70a9b8.zip",
       "packageHash": "87f1fb65644e33c08a8a4891e7194126d2a8171d8f8805dad5b843804c5e9e0d",
-      "manifestHash": "24fadff6183dbd563e8e6cde92b5c1d798b9efb3b61614c8d3d0086691e3a601",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/creedants-pstack-t3-2026.10.15.a70a9b8.zip.attestation.json"
+      "manifestHash": "b460f658cb150b0694cc14ccfc97140eccd44e72b75ce2212c9974980cdfabee",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/creedants-pstack-t3-2026.10.21.a70a9b8.zip.attestation.json"
     },
     {
       "repo": "theonly1me/shadowclone",
@@ -1361,10 +1361,10 @@
       "pushedAt": "2026-10-13",
       "latestSha": "1da7f326caa122544cd25332b89e971e95c70b8b",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/theonly1me-shadowclone-2026.10.15.7ad536d.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/theonly1me-shadowclone-2026.10.21.7ad536d.zip",
       "packageHash": "f89d31f8b3d55a9547cea3f3b78de84770e7614d7734339f21f94da50af5fa42",
-      "manifestHash": "a237da1bed40c500221bdefce03f8ef707471dfa20ace0fb496d5104338d1486",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/theonly1me-shadowclone-2026.10.15.7ad536d.zip.attestation.json"
+      "manifestHash": "35013cac083e66eec0279dc042fe970265241b9db0eba2cbcf14582e6a2957be",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/theonly1me-shadowclone-2026.10.21.7ad536d.zip.attestation.json"
     },
     {
       "repo": "bks-lab/open-bridge",
@@ -1419,10 +1419,10 @@
       "pushedAt": "2026-10-15",
       "latestSha": "2f437ff46c8db930fb86b6df7383fd397ee3d63c",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/kurone-kito-idd-skill-2026.10.15.e548b64.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kurone-kito-idd-skill-2026.10.21.e548b64.zip",
       "packageHash": "82a40cfe9e4753ce4e7c601ba017f96511b37291c6e22468d10a0e078a13202d",
-      "manifestHash": "f5aca5367fc0f711d3221a52393c74892d29bd500e05273a506794fb605fbc22",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/kurone-kito-idd-skill-2026.10.15.e548b64.zip.attestation.json"
+      "manifestHash": "fa7825d9266b185a6ba5113e4c740f08b6a3b3dd4e2b4604a29eeb21455d29eb",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kurone-kito-idd-skill-2026.10.21.e548b64.zip.attestation.json"
     },
     {
       "repo": "Marsjunwang/nblane",
@@ -1450,10 +1450,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "896d13701cd8cb79ce3b1c8d467e9b0d5d31670d",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Marsjunwang-nblane-2026.10.15.ebe7055.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Marsjunwang-nblane-2026.10.21.ebe7055.zip",
       "packageHash": "7d97f878d44822214b322da2e00095b2008995e217268c4bd0612f9669499fca",
-      "manifestHash": "d0fcd61fb863a10bc96f23b02cfa28ab1ac7e1b7b625ef6cbfdabb80ff9d261a",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Marsjunwang-nblane-2026.10.15.ebe7055.zip.attestation.json"
+      "manifestHash": "88252f9d3e88a2228b93d40fc2c49c00de50c319dca63a9398a4d0cb4566fc80",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Marsjunwang-nblane-2026.10.21.ebe7055.zip.attestation.json"
     },
     {
       "repo": "Bank848/Claude-Abo",
@@ -1481,10 +1481,10 @@
       "pushedAt": "2026-10-10",
       "latestSha": "59b498d848ada6fe6716d33d8125026406f4abca",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Bank848-Claude-Abo-2026.10.15.59b498d.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Bank848-Claude-Abo-2026.10.21.59b498d.zip",
       "packageHash": "32484c3f83e0703e276ee4cea469853637cdad714615c3071f066b65f29157ff",
-      "manifestHash": "3c3d9129d76254906433e166cce2c25748abdf5ba95f6e4b6b8de605b4ae0cc1",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/Bank848-Claude-Abo-2026.10.15.59b498d.zip.attestation.json"
+      "manifestHash": "2f184a64f721a8c56e642c2675c5606044e7d1b9115008522d9da32b83fb2e6e",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Bank848-Claude-Abo-2026.10.21.59b498d.zip.attestation.json"
     },
     {
       "repo": "morluto/rea",
@@ -1512,10 +1512,10 @@
       "pushedAt": "2026-10-15",
       "latestSha": "b7dcf782aac160a05363dc4ddba23040972f1c9e",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/morluto-rea-2026.10.15.0d89978.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/morluto-rea-2026.10.21.0d89978.zip",
       "packageHash": "421cc287a8a1a0bd675bc88ed18067a88cae9e8d58026460f4b238c4066c87b1",
-      "manifestHash": "b61c6c5f7b447532c0a22d8b4e92565fb88ee32399ef0ee4dd96f074ce189acd",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/morluto-rea-2026.10.15.0d89978.zip.attestation.json"
+      "manifestHash": "74db19d3fd91d99acc6633ff98e03ad2b59aad8afd1bd549bf94a02a602bc386",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/morluto-rea-2026.10.21.0d89978.zip.attestation.json"
     },
     {
       "repo": "frankxai/Starlight-Intelligence-System",
@@ -1543,10 +1543,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "f64e42bd915eed2ba2d96b878facece9e5bc0fa7",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/frankxai-Starlight-Intelligence-System-2026.10.15.af0caef.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/frankxai-Starlight-Intelligence-System-2026.10.21.af0caef.zip",
       "packageHash": "c0d983ebf8d7162071e7d0fd9acdcadf98ef950b675806b5a6a1030b6ce345dc",
-      "manifestHash": "e2526fa77545d38408e16c1ff037bcf6dda3842cbbda1fdfd8aafbd3760d9574",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/frankxai-Starlight-Intelligence-System-2026.10.15.af0caef.zip.attestation.json"
+      "manifestHash": "9e281f330dec81ced8d9eb3ddcebae9f9e5e2015b72e9e91652475dca4dd4a63",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/frankxai-Starlight-Intelligence-System-2026.10.21.af0caef.zip.attestation.json"
     },
     {
       "repo": "ericrisco/rsc-harness",
@@ -1574,10 +1574,10 @@
       "pushedAt": "2026-10-14",
       "latestSha": "5bf06162f682dd61cbf791b4bc340bc353d84e3d",
       "refreshedAt": "2026-10-15",
-      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/ericrisco-rsc-harness-2026.10.15.f866289.zip",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/ericrisco-rsc-harness-2026.10.21.f866289.zip",
       "packageHash": "7934619196af2e7919abdef08ecbc5ea2eb1a912ce7d5162f7bacd858379b2fc",
-      "manifestHash": "aded6f3b635cba24f7beb155c33dddbea500bc669961d20274f886884cf47d9d",
-      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-15/ericrisco-rsc-harness-2026.10.15.f866289.zip.attestation.json"
+      "manifestHash": "1e465643945b703ea4a053f24e2e4b1d93f7e0cefb129fa131a681b0dd771bf7",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/ericrisco-rsc-harness-2026.10.21.f866289.zip.attestation.json"
     },
     {
       "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
@@ -1605,7 +1605,11 @@
       "stars": 135909,
       "pushedAt": "2026-10-15",
       "latestSha": "56ea9cf174ed86786187daa9de0e6247cb0747e4",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nextlevelbuilder-ui-ux-pro-max-skill-2026.10.21.56ea9cf.zip",
+      "packageHash": "b62faa2953bb8278bf0f1d0128a2140d654b216bb3f92d31c700b207e34f278e",
+      "manifestHash": "adc05202de28729eec937a92a39f9ff20df7e3eb613f71e6376dca3492b2f8ed",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nextlevelbuilder-ui-ux-pro-max-skill-2026.10.21.56ea9cf.zip.attestation.json"
     },
     {
       "repo": "thedotmack/claude-mem",
@@ -1633,7 +1637,11 @@
       "stars": 100803,
       "pushedAt": "2026-10-13",
       "latestSha": "fef3402e674bebbf72a23aeb735e91c92cd34afd",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/thedotmack-claude-mem-2026.10.21.fef3402.zip",
+      "packageHash": "aae193a7a6bdbe8f8eb3702ab93a2fc50aedbc575ec6912c73dc12bc27827fb6",
+      "manifestHash": "85bef942e759636d02d25ce4928cd7858da98ae156e399022120351d13f11c0b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/thedotmack-claude-mem-2026.10.21.fef3402.zip.attestation.json"
     },
     {
       "repo": "Egonex-AI/Understand-Anything",
@@ -1660,7 +1668,11 @@
       "stars": 86321,
       "pushedAt": "2026-10-12",
       "latestSha": "f2d0164f72fe678805c34245a6df36acededfebd",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Egonex-AI-Understand-Anything-2026.10.21.f2d0164.zip",
+      "packageHash": "da0106db8551e02be444acc7b432beacf954dffc328abd9186b0fbad8abdf463",
+      "manifestHash": "485dad980556b6757401b54ff20170c137eb985addd80119d9117add5f07a70d",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Egonex-AI-Understand-Anything-2026.10.21.f2d0164.zip.attestation.json"
     },
     {
       "repo": "career-ops-hq/career-ops",
@@ -1687,7 +1699,11 @@
       "stars": 74610,
       "pushedAt": "2026-10-15",
       "latestSha": "7e3eabbb2f2b33e77ebc33dd91d99c1a4c32479b",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/career-ops-hq-career-ops-2026.10.21.7e3eabb.zip",
+      "packageHash": "43affad4130ba7b3a1c4216799c639ef46c97a9d0d049f39e7ea7f7ca9412e5b",
+      "manifestHash": "2e6395782573f76e58c336b8a0d7a712cc3102bdbbf0df010906a04c064612d1",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/career-ops-hq-career-ops-2026.10.21.7e3eabb.zip.attestation.json"
     },
     {
       "repo": "code-yeongyu/oh-my-openagent",
@@ -1740,7 +1756,11 @@
       "stars": 68319,
       "pushedAt": "2026-10-12",
       "latestSha": "e45f5b12bd46440b04f3675af9a77d0718e6a254",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/calesthio-OpenMontage-2026.10.21.e45f5b1.zip",
+      "packageHash": "abc3226af940395bef1bc7e75877d5aca12f7f5bd9433e3373ba6ad7d740b5a6",
+      "manifestHash": "1620f9efced80b69ea98e835fc790b2d8c0467e4276171304a2a75e5981e0e18",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/calesthio-OpenMontage-2026.10.21.e45f5b1.zip.attestation.json"
     },
     {
       "repo": "mvanhorn/last30days-skill",
@@ -1767,7 +1787,11 @@
       "stars": 64316,
       "pushedAt": "2026-10-13",
       "latestSha": "f4dff26b3b14d3c55c5a9dedfc4c7c8c5df2f84a",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/mvanhorn-last30days-skill-2026.10.21.f4dff26.zip",
+      "packageHash": "5593a44e1e9dc1e38680621fe6ca4f8c74a9d61148e6a1231b8ec859ed69f069",
+      "manifestHash": "3be530197b05e73ce8a707da256b8c444de1e6dcaa7565edcadd291260bfb2ec",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/mvanhorn-last30days-skill-2026.10.21.f4dff26.zip.attestation.json"
     },
     {
       "repo": "CherryHQ/cherry-studio",
@@ -1821,7 +1845,11 @@
       "stars": 49560,
       "pushedAt": "2026-09-15",
       "latestSha": "3ccff5338ea700537839b21900aa5358a0402c98",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kepano-obsidian-skills-2026.10.21.3ccff53.zip",
+      "packageHash": "bfd6493012d19aa4db9694d076bc57980b82cd9f7fd882c91bb6c358263051f4",
+      "manifestHash": "db153a1cbcbf4257bbba38d683054d2deaee9c13e4330d816e54b8150a1388d4",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kepano-obsidian-skills-2026.10.21.3ccff53.zip.attestation.json"
     },
     {
       "repo": "Yuan1z0825/nature-skills",
@@ -1848,7 +1876,11 @@
       "stars": 48332,
       "pushedAt": "2026-10-14",
       "latestSha": "19be8d45e0d5233aa44be6d4572e655b9914ff54",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Yuan1z0825-nature-skills-2026.10.21.19be8d4.zip",
+      "packageHash": "de40ecfe9902f657590426c2c2328eb9dba48a4bf6ac30b68a6a9dd700c3821a",
+      "manifestHash": "ba2f294211f3ce1365cd099c55446725945c081697d56806ecde6f3928c42bbb",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Yuan1z0825-nature-skills-2026.10.21.19be8d4.zip.attestation.json"
     },
     {
       "repo": "alibaba/open-code-review",
@@ -1875,7 +1907,11 @@
       "stars": 47217,
       "pushedAt": "2026-10-15",
       "latestSha": "ea5ced22ea3da6e66b261a083ad3b503f9662425",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/alibaba-open-code-review-2026.10.21.ea5ced2.zip",
+      "packageHash": "b53bff6c9df6a669df266cdec941e6c21f98ffefe0b7ad42ff898980f2009ae6",
+      "manifestHash": "434719d1601e80880c2fad60041d5a62207c78b588085b6370528ec69b66657c",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/alibaba-open-code-review-2026.10.21.ea5ced2.zip.attestation.json"
     },
     {
       "repo": "vercel-labs/skills",
@@ -1902,7 +1938,11 @@
       "stars": 34978,
       "pushedAt": "2026-10-09",
       "latestSha": "13e4063a1cf913f5606d57d42ab83a86f5001e04",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-skills-2026.10.21.13e4063.zip",
+      "packageHash": "3e0ca66d7d97bc722b16ccf43aebf1dd889f55843d17f16f609cf83b6d18a901",
+      "manifestHash": "4e3ca75dcb94119cc99282dd9183d72b542c3abb2e193176e9e00fe5c31f085c",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-skills-2026.10.21.13e4063.zip.attestation.json"
     },
     {
       "repo": "iOfficeAI/AionUi",
@@ -1955,7 +1995,11 @@
       "stars": 32437,
       "pushedAt": "2026-10-14",
       "latestSha": "063bee94c3f4df8453406c830b0a7df0f2860278",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-agent-skills-2026.10.21.063bee9.zip",
+      "packageHash": "8f70d60ec52776d510a693674b6bd79dab80cc5d85d9b82f9be86b1b52a86291",
+      "manifestHash": "4c631288b085978dde8b79aef681ea718c8a0ea54817b516ae87b3067676b8ee",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/vercel-labs-agent-skills-2026.10.21.063bee9.zip.attestation.json"
     },
     {
       "repo": "topoteretes/cognee",
@@ -2009,7 +2053,11 @@
       "stars": 32022,
       "pushedAt": "2026-10-13",
       "latestSha": "fb98e593612dee2cec36847666671dba502e60aa",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/iOfficeAI-OfficeCLI-2026.10.21.fb98e59.zip",
+      "packageHash": "480b13f222151ac7007c6d7235314f9fdb78686d278c9067be119751442e12b5",
+      "manifestHash": "3dbbc814eb2820b3c08e577a759bb53bfbf36b9898285f28c3a9356656cb56e0",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/iOfficeAI-OfficeCLI-2026.10.21.fb98e59.zip.attestation.json"
     },
     {
       "repo": "googleworkspace/cli",
@@ -2037,7 +2085,11 @@
       "stars": 31506,
       "pushedAt": "2026-10-06",
       "latestSha": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/googleworkspace-cli-2026.10.21.a3768d0.zip",
+      "packageHash": "24c00eb69a856acbc2fa1bcd539ab366bfb91ee5094ce065eb4970378a36087d",
+      "manifestHash": "9648b1c472ee147e1aa456d95dfd2ab34c1acfc60ee74bc68fcfdfda115f643b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/googleworkspace-cli-2026.10.21.a3768d0.zip.attestation.json"
     },
     {
       "repo": "nanocoai/nanoclaw",
@@ -2091,7 +2143,11 @@
       "stars": 29648,
       "pushedAt": "2026-09-14",
       "latestSha": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/cloudflare-security-audit-skill-2026.10.21.c1c8a8c.zip",
+      "packageHash": "289fa7f4d8ad515a8e211b34f1facc2b37c7cabec8714602bf28f723c07f8a1e",
+      "manifestHash": "fb1946f2190a8f1ae274aa89b4c03f4768573eacf84c06184097ca060b888261",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/cloudflare-security-audit-skill-2026.10.21.c1c8a8c.zip.attestation.json"
     },
     {
       "repo": "alirezarezvani/claude-skills",
@@ -2145,7 +2201,11 @@
       "stars": 27977,
       "pushedAt": "2026-08-07",
       "latestSha": "c91369c449d34755d320a8b81d0734000d99d1ab",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/op7418-guizang-ppt-skill-2026.10.21.c91369c.zip",
+      "packageHash": "886d52fe9715b8321f69a5cf352944d322e86da656b669f86caaf766b423b406",
+      "manifestHash": "b1293e2dee52664c180f9077aaa064d3b3586ce53b734503df46abb6316ad2c2",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/op7418-guizang-ppt-skill-2026.10.21.c91369c.zip.attestation.json"
     },
     {
       "repo": "KKKKhazix/khazix-skills",
@@ -2172,7 +2232,11 @@
       "stars": 21414,
       "pushedAt": "2026-10-01",
       "latestSha": "322346ded8129436b3f64707789a73e732ae24d9",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/KKKKhazix-khazix-skills-2026.10.21.322346d.zip",
+      "packageHash": "0d86db7ae52dc0bca56efacc3c78e7fffe09285698f738e02e43b9d6b5609149",
+      "manifestHash": "6a74bf9e4f558f7928957afb505773fe675f2bb03c037d5e022b62729a5d2795",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/KKKKhazix-khazix-skills-2026.10.21.322346d.zip.attestation.json"
     },
     {
       "repo": "google/skills",
@@ -2199,7 +2263,11 @@
       "stars": 21306,
       "pushedAt": "2026-10-14",
       "latestSha": "b85f257d127c190b9c362ac491eb4f0e58f2e5fb",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/google-skills-2026.10.21.b85f257.zip",
+      "packageHash": "564eed16c8c2ef5f10f1007af1be6a30121c0184b3d90eb02004d2ca2817e418",
+      "manifestHash": "47b6c63c8bb82876217f6909b67943d367cbafc275172f66f98682cf4ea3f29a",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/google-skills-2026.10.21.b85f257.zip.attestation.json"
     },
     {
       "repo": "teng-lin/notebooklm-py",
@@ -2226,7 +2294,11 @@
       "stars": 19741,
       "pushedAt": "2026-10-14",
       "latestSha": "fd7af2cd5c4afccad1da9e7d5ce51c1388193408",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/teng-lin-notebooklm-py-2026.10.21.fd7af2c.zip",
+      "packageHash": "d3e8bd8adb9b57b72b36141175ce2037372b26996087303f41c79004eb6bb15b",
+      "manifestHash": "a85f1be8fc26cfc585c66ac814aa0d96025ad636e350ff4edd3ea8623029b828",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/teng-lin-notebooklm-py-2026.10.21.fd7af2c.zip.attestation.json"
     },
     {
       "repo": "microsoft/SkillOpt",
@@ -2253,7 +2325,11 @@
       "stars": 18382,
       "pushedAt": "2026-10-06",
       "latestSha": "343db229dbd5ddaf9df6b1d5540d8bcdb2604d5c",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/microsoft-SkillOpt-2026.10.21.343db22.zip",
+      "packageHash": "b458d66945c80fe62929b5c5bf6fceb96076582b914610a57a81d92580ab02fb",
+      "manifestHash": "fc33c7f3b7b6ac3396f0497401c57ee27f21a6115dc657a55f466e6a7dd4a678",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/microsoft-SkillOpt-2026.10.21.343db22.zip.attestation.json"
     },
     {
       "repo": "muratcankoylan/Agent-Skills-for-Context-Engineering",
@@ -2280,7 +2356,11 @@
       "stars": 18136,
       "pushedAt": "2026-10-12",
       "latestSha": "9ff0c99108b36d3b886defd825d8ac1f47dba374",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/muratcankoylan-Agent-Skills-for-Context-Engineering-2026.10.21.9ff0c99.zip",
+      "packageHash": "19a683eaee08b4fb5ded9b9433d814a7cd8811543cadfa1154f52a21d1b251d6",
+      "manifestHash": "aa76070c02a096b62965242dff2c6541490e9512d070dd16a517810e731effb3",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/muratcankoylan-Agent-Skills-for-Context-Engineering-2026.10.21.9ff0c99.zip.attestation.json"
     },
     {
       "repo": "larksuite/cli",
@@ -2307,7 +2387,11 @@
       "stars": 17681,
       "pushedAt": "2026-10-15",
       "latestSha": "017b19a793ad71794a02887ede04757f3d82e10d",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/larksuite-cli-2026.10.21.017b19a.zip",
+      "packageHash": "394b0d820da634d1add8407b5af2a458a004c3f381415d0c7b6b91fa9e33eb19",
+      "manifestHash": "ad63018d8618b85d9a3fa16d745c1014d6d685d9f7c79aa5c72069181ad26a7f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/larksuite-cli-2026.10.21.017b19a.zip.attestation.json"
     },
     {
       "repo": "citrolabs/ego-lite",
@@ -2415,7 +2499,11 @@
       "stars": 15541,
       "pushedAt": "2026-09-10",
       "latestSha": "32ac5a02c4e082e4a5628ca810776375e134708e",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/AgriciDaniel-claude-obsidian-2026.10.21.32ac5a0.zip",
+      "packageHash": "02c35c106b5b102576339a3e20b61abe014c9b47b32eaffc9358ff39754a98cf",
+      "manifestHash": "1396ac9f08ca3ca58bbe2bc56338b6e086395bcc94beb15dbfe05cc0d90deba9",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/AgriciDaniel-claude-obsidian-2026.10.21.32ac5a0.zip.attestation.json"
     },
     {
       "repo": "nidhinjs/prompt-master",
@@ -2442,7 +2530,11 @@
       "stars": 14467,
       "pushedAt": "2026-10-12",
       "latestSha": "769bf64d8e11f78fee2d183ad8891f9403f365e6",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nidhinjs-prompt-master-2026.10.21.769bf64.zip",
+      "packageHash": "7c3b39e145ef114b951df0385f8e19bc0c41b42d5235b01df7b83763763f3500",
+      "manifestHash": "c7063d4833f76bcb32042bd7c5bb2ee60fb17f465f33d2405776814413ed8ece",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nidhinjs-prompt-master-2026.10.21.769bf64.zip.attestation.json"
     },
     {
       "repo": "Orchestra-Research/AI-Research-SKILLs",
@@ -2469,7 +2561,11 @@
       "stars": 13575,
       "pushedAt": "2026-10-11",
       "latestSha": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Orchestra-Research-AI-Research-SKILLs-2026.10.21.773a529.zip",
+      "packageHash": "bb30ee700d7c5978aeef30f7903c1c8179d7413deb7c7a1d9172e26988c2cb15",
+      "manifestHash": "67157643d6ce97e96550cd319b2314bb057f636a1fd02a8d1eb9830ee786921f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Orchestra-Research-AI-Research-SKILLs-2026.10.21.773a529.zip.attestation.json"
     },
     {
       "repo": "OrchestratorInc/agent-orchestrator",
@@ -2496,7 +2592,11 @@
       "stars": 13189,
       "pushedAt": "2026-10-15",
       "latestSha": "44acd07e15a4f33bf5dcf5c5c5e7d752325919c4",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/OrchestratorInc-agent-orchestrator-2026.10.21.44acd07.zip",
+      "packageHash": "c109e07c11ec2eef0b36e05f6315799c3b92dc6e9fb6120ce3b5ce34a1478d78",
+      "manifestHash": "eeaac03c3a50607e6b92ba945a9ed5b4ec777b97eecac8d2a70dfffe258c0498",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/OrchestratorInc-agent-orchestrator-2026.10.21.44acd07.zip.attestation.json"
     },
     {
       "repo": "krillinai/OpenCreator",
@@ -2577,7 +2677,11 @@
       "stars": 11878,
       "pushedAt": "2026-10-14",
       "latestSha": "1be15d8064f88fc25216442406d40add8fd23b53",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Jeffallan-claude-skills-2026.10.21.1be15d8.zip",
+      "packageHash": "9ea1793e87930714847fdc1f7ae612a34f0b10d7f9296d40f72939e399ff0f9f",
+      "manifestHash": "7fce9d7d1b2e6342e03515919f81d1ec3d45084a673502be3d64fcd324d9bf57",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/Jeffallan-claude-skills-2026.10.21.1be15d8.zip.attestation.json"
     },
     {
       "repo": "kangarooking/cangjie-skill",
@@ -2604,7 +2708,11 @@
       "stars": 11328,
       "pushedAt": "2026-10-02",
       "latestSha": "a28de55ba881b9928956a55048f743f7a9e3b23e",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kangarooking-cangjie-skill-2026.10.21.a28de55.zip",
+      "packageHash": "fdb21f4cc78fa031218636d3148f5431dcbd3c4c7a037c48bc027a7e6cc51e14",
+      "manifestHash": "5b9534517de8cc864866a8dc8e7ea6df2ec5949719dc94e06919fb6d60ffbd0b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/kangarooking-cangjie-skill-2026.10.21.a28de55.zip.attestation.json"
     },
     {
       "repo": "tigerless-labs/autoharness",
@@ -2631,7 +2739,11 @@
       "stars": 11122,
       "pushedAt": "2026-10-14",
       "latestSha": "6bb7ea55aa6522c118ad4b7f317fce521399750f",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tigerless-labs-autoharness-2026.10.21.6bb7ea5.zip",
+      "packageHash": "485b7f69744dc3313618a5c5a6ead3f3582a078b985b16b8bea7035b728d6bfe",
+      "manifestHash": "478e22f6a35f7206a0c42677c628498ae3097945af772df2ee4135acebcf5ce3",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/tigerless-labs-autoharness-2026.10.21.6bb7ea5.zip.attestation.json"
     },
     {
       "repo": "aden-hive/hive",
@@ -2658,7 +2770,11 @@
       "stars": 11107,
       "pushedAt": "2026-10-14",
       "latestSha": "e44fdd933d011deae34ed6a9eba5773a27dbdf26",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/aden-hive-hive-2026.10.21.e44fdd9.zip",
+      "packageHash": "7b4902753b69a5e842fa88b4f9bb23a7d94c465c756b6807197d451f16e22732",
+      "manifestHash": "d44b5bb4d3f5f2466d38291e00df4b74682ec3619bf9e6f4f8397d36a05d4689",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/aden-hive-hive-2026.10.21.e44fdd9.zip.attestation.json"
     },
     {
       "repo": "wheresryan22/anatomy",
@@ -2685,7 +2801,11 @@
       "stars": 10789,
       "pushedAt": "2026-10-14",
       "latestSha": "bc943e40c59998be5da61f9d39c6a983b1116099",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/wheresryan22-anatomy-2026.10.21.bc943e4.zip",
+      "packageHash": "b9a37e41194e9f28705e787cd6157bc45b86ef28af1f74777883be7902a04589",
+      "manifestHash": "a333a98c89c413fadcaf8c60c94e19a633085466231832b5d764a28dd8f27546",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/wheresryan22-anatomy-2026.10.21.bc943e4.zip.attestation.json"
     },
     {
       "repo": "nicobailon/visual-explainer",
@@ -2739,7 +2859,11 @@
       "stars": 9993,
       "pushedAt": "2026-10-14",
       "latestSha": "ac21644933910419529bcf81efb95a9ca71edf81",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/AgriciDaniel-claude-ads-2026.10.21.ac21644.zip",
+      "packageHash": "8d8f33d673959893937d3c529f6104faad86d6e267c8d19d4475eefa896d58a1",
+      "manifestHash": "34b7bca3609ebe33bfc569047c090cbad79778ee46f6255ff763b93ded58bc1b",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/AgriciDaniel-claude-ads-2026.10.21.ac21644.zip.attestation.json"
     },
     {
       "repo": "genspark-ai/genoffice",
@@ -2766,7 +2890,11 @@
       "stars": 9703,
       "pushedAt": "2026-10-15",
       "latestSha": "2a607bd49bc341f74a60a8fa852183dfb6ce3c1f",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/genspark-ai-genoffice-2026.10.21.2a607bd.zip",
+      "packageHash": "d2ae16f814d6fa4bb76be291713ada3b060b92133e531719467011ef20f1edf6",
+      "manifestHash": "8cc0b19bca1baba565a196db5cc6397be61edc38674cb309830d2292d32fbee9",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/genspark-ai-genoffice-2026.10.21.2a607bd.zip.attestation.json"
     },
     {
       "repo": "chuspeeism/dashi-ppt-skill",
@@ -2793,7 +2921,11 @@
       "stars": 9536,
       "pushedAt": "2026-09-12",
       "latestSha": "21dc7e5fc8c3a0d7f6a94948153dd1ee954f4e64",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/chuspeeism-dashi-ppt-skill-2026.10.21.21dc7e5.zip",
+      "packageHash": "a362d5509544842d0d70482757d1cd7f7e58dd8e90d801318d44168b5d5ce7e5",
+      "manifestHash": "42ed826434cd31e115353e5654e1c2411180dde86d50bbd716432c9280395b37",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/chuspeeism-dashi-ppt-skill-2026.10.21.21dc7e5.zip.attestation.json"
     },
     {
       "repo": "backnotprop/plannotator",
@@ -2820,7 +2952,11 @@
       "stars": 9422,
       "pushedAt": "2026-10-15",
       "latestSha": "72b6c9604879b209ec866e6b0894482861d854f7",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/backnotprop-plannotator-2026.10.21.72b6c96.zip",
+      "packageHash": "663e1888f0858ea17c04163e1324f6f032354dec518bd089817115c39d19071a",
+      "manifestHash": "07c56fe4275e19701b72d8fc1faa3e7de47eb0c625bb1057fd20d70708103983",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/backnotprop-plannotator-2026.10.21.72b6c96.zip.attestation.json"
     },
     {
       "repo": "nexu-io/html-anything",
@@ -2847,7 +2983,11 @@
       "stars": 9126,
       "pushedAt": "2026-10-13",
       "latestSha": "975fb3bcb98f1777781fb4c738902d36e32c8c46",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nexu-io-html-anything-2026.10.21.975fb3b.zip",
+      "packageHash": "d709604bb8f549af335e1ec5e3290f63023c8c94ab48f03c43d6a125a9f1d9cf",
+      "manifestHash": "18d5abc7c017daa836ada08ecfc3d878f8dba803401b0f6d8a15c365dff8672f",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/nexu-io-html-anything-2026.10.21.975fb3b.zip.attestation.json"
     },
     {
       "repo": "google-labs-code/stitch-skills",
@@ -2874,7 +3014,11 @@
       "stars": 8509,
       "pushedAt": "2026-08-17",
       "latestSha": "0337446dadde6f8c94210444e2aa9d546126480f",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/google-labs-code-stitch-skills-2026.10.21.0337446.zip",
+      "packageHash": "bc6cecc0eb7285712551ab9a982eb21a935d33eb3925a22877a416fe99582f43",
+      "manifestHash": "44c2d6b1925b46584d46c5b6314ae336cab1b5f163a59fcb228516885975643e",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/google-labs-code-stitch-skills-2026.10.21.0337446.zip.attestation.json"
     },
     {
       "repo": "YaoApp/yao",
@@ -2900,7 +3044,11 @@
       "stars": 8128,
       "pushedAt": "2026-10-13",
       "latestSha": "ae7524659f04a09c69d6c67e50075668dc5563a4",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/YaoApp-yao-2026.10.21.ae75246.zip",
+      "packageHash": "c8430b72cea43e333476c136479224e77f0d7be8794fe4bffc51c3952ac53789",
+      "manifestHash": "965297db11cbdfcc13de110ff00010f2265ffb5b7081ad2f0f101b83e28253c4",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/YaoApp-yao-2026.10.21.ae75246.zip.attestation.json"
     },
     {
       "repo": "jakubkrehel/skills",
@@ -2927,7 +3075,11 @@
       "stars": 7934,
       "pushedAt": "2026-10-13",
       "latestSha": "4c66b1fa86e9ab70187b43d7da9b6fdb29f2ef63",
-      "refreshedAt": "2026-10-15"
+      "refreshedAt": "2026-10-15",
+      "packageUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/jakubkrehel-skills-2026.10.21.4c66b1f.zip",
+      "packageHash": "d203daef0ce0416c97ebb29b95fdb723fbb8a5112740a26cf3449849ede6e6c6",
+      "manifestHash": "ab785d1c0851d456cdb60c9b7c2b92099dfaf90b3d34aa9962253b34a1ff233a",
+      "attestationUrl": "https://github.com/zjs105910/workbuddy-market/releases/download/registry-artifacts-2026-10-21/jakubkrehel-skills-2026.10.21.4c66b1f.zip.attestation.json"
     }
   ]
 }
