@@ -12,6 +12,20 @@
 
 *A local-first plugin marketplace for WorkBuddy: package local Skills, explore community and GitHub sources, review declared permissions and compatibility, and manage installs through hash verification and recoverable transactions.*
 
+## 🚀 一句话安装（Windows 10/11）
+
+想通过视频评论区快速安装？打开 **Windows PowerShell**，复制并执行下面这一整行：
+
+```powershell
+$ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd'; $f=Join-Path $env:TEMP 'workbuddy-market-install.cmd'; Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $f; if ((Get-Item $f).Length -lt 1000) { throw '安装器下载不完整；请前往 https://github.com/zjs105910/workbuddy-market/releases/latest 手动下载 install.cmd' }; & $env:ComSpec /d /c "call `"$f`""
+```
+
+- **安装后怎么选？** 首次向导中，直接按回车是只浏览；输入 `2` 才会注册到 WorkBuddy。
+- **不想粘贴命令？** [直接下载 install.cmd 后双击运行](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)。
+- **先检查再运行？** [查看安装脚本源码](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)。
+
+> 此命令会下载并运行本项目公开的安装脚本。需要 Windows 10/11、可访问 GitHub 和 Python 包源的网络环境；网络限制、设备策略或 Python 安装失败等情况仍可能导致安装中断。
+
 ## 30 秒了解它
 
 - **管理自己的 Skills**：将本机技能打包、同步，并注册到 WorkBuddy 插件面板。
@@ -32,15 +46,9 @@
 
 ## 快速上手（Windows）
 
-### 只想下载一个文件？一键安装（推荐） ✅
+### 一键安装（Windows 10/11）
 
-**[👉 点此直接下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd)**（浏览器会立即开始下载；想先看一眼内容再下，也可以[打开文件页面](https://github.com/zjs105910/workbuddy-market/blob/main/install.cmd)手动下载）。
-
-下载完成后**双击**即可。它会自动完成：检测/安装 Python → 装 pipx → 装并升级 `workbuddy-market` CLI → 下载市场本体到 `%USERPROFILE%\workbuddy-market` → 运行 doctor 体检 → 启动首次向导（**回车=只浏览，2=注册进 WorkBuddy**）。
-
-> 双击时 Windows 会弹「无法验证发布者」的安全警告——因为脚本没有购买数字签名（开源项目的常规情况），点**运行(R)**即可；脚本内容是纯文本，可在上面的文件页面逐行核对。
-
-这就是**完整版**：四问预览、哈希校验、事务与可恢复卸载全都在。可重复运行（每一步幂等，顺带升级 CLI）。
+上方已提供可复制的一句话 PowerShell 安装命令。也可以[直接下载 install.cmd](https://github.com/zjs105910/workbuddy-market/releases/latest/download/install.cmd) 后双击运行。安装器会检测/安装 Python、安装或升级 CLI、下载市场本体并运行体检；首次向导中回车=只浏览，输入 `2`=注册进 WorkBuddy。
 
 ### 没有 Git？三步跑起来（免 Git，需 Python 3.10+） ✅
 
