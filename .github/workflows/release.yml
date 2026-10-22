@@ -92,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg espeak-ng fonts-noto-cjk
-          python -m pip install --upgrade pip build pytest playwright pillow
+          python -m pip install --upgrade pip build pytest playwright pillow edge-tts
           python -m playwright install --with-deps chromium
 
       - name: Build Python distribution
