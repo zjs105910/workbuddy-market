@@ -22,6 +22,16 @@ export function watchJob(jid, title){
   $("#jobOut").textContent = "";
   $("#jobClose").disabled = true;
   $("#jobClose").onclick = () => { $("#veil").classList.remove("show"); refreshNow(); };
+  // v2.36.1 用户实测「取消不了啊」：后端 /api/job/<id>/cancel（进程树终止 +
+  // canceled 双窗口检查）一直都在，前端从来没接 —— 下载慢时用户只能干等。
+  // 运行中显示「取消任务」，点击即终止整棵 ghpm 进程树。
+  const jc = $("#jobCancel");
+  jc.hidden = false; jc.disabled = false;
+  jc.onclick = async () => {
+    jc.disabled = true;
+    $("#jobLabel").textContent = "取消中…";
+    try{ await api("/api/job/"+jid+"/cancel", {}); }catch(e){ jc.disabled = false; }
+  };
 
   jobs[jid] = setInterval(async () => {
     let j;
@@ -33,6 +43,7 @@ export function watchJob(jid, title){
     if(j.status === "done"){
       clearInterval(jobs[jid]); delete jobs[jid];
       $("#jobClose").disabled = false;
+      $("#jobCancel").hidden = true;
       $("#jobLabel").textContent = (j.ok ? "✓ " : "✗ ") + (j.label || "");
       $("#jobBar").style.width = "100%";
       $("#jobBar").style.background = j.ok ? "var(--ok)" : "var(--bad)";
@@ -52,7 +63,9 @@ export function watchJob(jid, title){
       } else if(j.ok && title.indexOf("移除 ") === 0){
         toast(title+" 完成 · ghpm 已保留备份，可用 ghpm rollback 恢复");
       } else {
-        j.ok ? toast(title+" 完成") : toast(title+" 失败，看输出", true);
+        // v2.36.1：用户主动取消如实说「已取消」，不再显示成失败。
+        j.ok ? toast(title+" 完成")
+             : toast(title+(j.canceled ? " 已取消" : " 失败，看输出"), !j.canceled);
       }
       refreshNow();
     }

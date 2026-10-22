@@ -497,8 +497,9 @@ def main():
                 # 显示」的边沿（旧 toast 的 3.4s 自动隐藏会制造假竞争），
                 # toast 元素的 textContent 在隐藏后仍残留旧文本，必须同时判可见。
                 done_toast = ""
+                canceled_fallback = False
                 try:
-                    for _ in range(180):
+                    for i in range(180):
                         page.wait_for_timeout(1000)
                         showing = page.evaluate(
                             "document.querySelector('#toast')"
@@ -507,15 +508,31 @@ def main():
                             done_toast = page.locator("#toast").inner_text()
                             if "已装入" in done_toast:
                                 break
+                        # v2.36.1 兜底：网络差时工件下载能拖几分钟 —— 2 分钟
+                        # 仍无完成迹象（✓/✗）就点新加的「取消任务」按钮收尾
+                        # （真实旅程：/api/job/<id>/cancel 终止整棵进程树），
+                        # 保证 smoke 不会被单个卡住的任务拖崩。
+                        label = page.locator("#jobLabel").inner_text()
+                        if label.startswith(("✓", "✗")):
+                            break
+                        if i == 120:
+                            try:
+                                page.locator("#jobCancel").click(timeout=3000)
+                                canceled_fallback = True
+                            except Exception:  # noqa: BLE001
+                                pass
                     ck("★ 工件安装完成 toast 说明落盘位置（修复「看不到装在哪」）",
-                       "已装入" in done_toast, done_toast[:80])
+                       "已装入" in done_toast,
+                       done_toast[:80] +
+                       ("；2 分钟无完成迹象，已走取消兜底" if canceled_fallback else ""))
                 except Exception as exc:  # noqa: BLE001
                     ck("★ 工件安装完成 toast 说明落盘位置（修复「看不到装在哪」）",
                        False, str(exc)[:80])
                 # 任务弹窗完成后仍开着（watchJob 语义：后台继续），
-                # 先关掉否则 #veil 会挡住后续所有点击。
+                # 先关掉否则 #veil 会挡住后续所有点击。取消兜底刚把任务
+                # 终结时 jobClose 才从 disabled 变 enabled，放宽等待。
                 try:
-                    page.locator("#jobClose").click(timeout=5000)
+                    page.locator("#jobClose").click(timeout=30000)
                 except Exception:  # noqa: BLE001 —— 弹窗已关就不必再关
                     pass
                 page.wait_for_timeout(300)
