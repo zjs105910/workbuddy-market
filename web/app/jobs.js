@@ -41,8 +41,14 @@ export function watchJob(jid, title){
       // 「本机技能」页的社区安装分区与只读清单也能看到它们。
       // v2.35：移除类任务说明备份去向（ghpm remove 自带备份与回滚）。
       if(j.ok && title.indexOf("安装 ") === 0){
-        toast(title+" 完成 · 已装入 "+((STATE.wbHome||"~/.workbuddy")+"/skills")+
-              "，本机技能页可查看");
+        // v2.36.1：兼容模式可以 0 skill（仅源码副本）——后端 label 带
+        // 「未含 skill」标记，toast 按实际落盘位置如实说，不再写「装入 skills」。
+        if(String(j.label||"").indexOf("未含 skill") >= 0){
+          toast(title+" 完成 · 仓库未含 skill，仅保留源码副本（本机技能页·社区安装可移除）");
+        } else {
+          toast(title+" 完成 · 已装入 "+((STATE.wbHome||"~/.workbuddy")+"/skills")+
+                "，本机技能页可查看");
+        }
       } else if(j.ok && title.indexOf("移除 ") === 0){
         toast(title+" 完成 · ghpm 已保留备份，可用 ghpm rollback 恢复");
       } else {

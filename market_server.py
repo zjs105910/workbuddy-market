@@ -726,7 +726,19 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
             if action == "add" and allow_non_skill:
                 args.append("--allow-non-skill")
             ok = _run_ghpm(args, jid)
-            _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}")
+            # v2.36.1 用户实测：add 成功 ≠ 装进了 skill —— 兼容模式可以
+            # 0 skill（仅源码副本）。完成消息与日志必须带 skill 计数，
+            # 否则「装了个非技能仓库」在当刻看不出来，用户以为出了 bug。
+            note = ""
+            if action == "add" and ok:
+                try:
+                    n = len((core.installed_repos().get(repo) or {})
+                            .get("skill_names") or [])
+                    note = (f" · {n} 个 skill" if n
+                            else " · 未含 skill（仅源码副本，本机技能页可移除）")
+                except Exception:      # noqa: BLE001 —— 计数失败不影响任务结果
+                    pass
+            _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}" + note)
             if action == "update" and ok:
                 # v2.27：ghpm 实测的上游 sha 回写注册表缓存，消除
                 # 「更新完仍显示可更新」的快照滞后假阳性
@@ -738,7 +750,7 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
                     except Exception as exc:      # noqa: BLE001 —— 回写失败不影响任务结果
                         core.log("warn", "registry", f"latestSha 回写失败：{exc}")
             core.log("info" if ok else "error", "job",
-                     f"{action} {repo} {'成功' if ok else '失败'}")
+                     f"{action} {repo} {'成功' if ok else '失败'}{note}")
         finally:
             _RUNNER.release()             # 无论成功、失败还是异常，都要还令牌
 

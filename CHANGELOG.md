@@ -4,6 +4,33 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.36.1 — 2026-10-22（修复：兼容模式 0 skill 仓库在本机技能页「隐形」）
+
+用户实测（录安装视频时发现）：探索 GitHub 以兼容模式（`--allow-non-skill`）
+安装非 Skill 仓库（Go 项目 `linguo2625469/workbuddy2api-panel`），任务报
+「成功」，但本机技能页三处全隐形 —— 社区分组此前对 `skill_names` 为空的
+ghpm 记录整卡跳过，违背「装过的东西看得见、卸得掉」。四层修复：
+
+- **state.py：0 skill 的 ghpm 记录照样出社区卡**（`sourceOnly` 标记 +
+  `sourceDir` 源码副本落点 + 描述明示「仓库未含 Skill，仅保留完整源码
+  副本；移除走 ghpm」）；`installed_repos()` 补记 `source_dir`。
+  带 skill 的记录行为不变；卸载分级 fail-closed 语义不变（ghpm 组没有
+  所有权记录，市场绝不代删，safeToUninstall 恒 False）。
+- **前端（plugins.js / style.css）**：sourceOnly 卡片显示「● 源码已装
+  （0 skill）」+ 黄标「未含 skill · 仅源码副本」，页脚写源码副本路径
+  （家目录缩写为 `~`）；0 skill 隐藏「看 N 个 skill」折叠；「已装好」
+  筛选覆盖 sourceOnly。`.card-foot` 加 `flex-wrap` + code 可断行 ——
+  超长源码路径此前会把「检查更新 / 移除…」按钮挤出卡片外（用户实测
+  截图实锤）。
+- **market_server.py**：add 任务完成消息与日志带 skill 计数 —— 0 个时
+  明示「未含 skill（仅源码副本，本机技能页可移除）」，不再光秃秃一个
+  「成功」；jobs.js 安装完成 toast 按实际落盘位置如实分流。
+- **卸载零新通路**：ghpm remove 对 0 skill 仓库本就可用（删源码副本 +
+  清清单记录，自带备份与事务回滚），卡片「移除…」按钮直接触达。
+- 验证：selftest **811** 项全绿（804 → 811：round27 兼容模式可见性 ×7）；
+  pytest **118** / ui_smoke **49** / ruff 全绿；真浏览器探针实锤
+  workbuddy2api-panel 卡片「移除…」按钮可见可点；三平台 CI + Release 冒烟。
+
 ## 2.36.0 — 2026-10-15（功能：市场本体自更新检查 + 精选市场扩容到 100 条）
 
 - **市场本体自更新检查（只读不装）**：新增 `workbuddy_market/selfupdate.py`

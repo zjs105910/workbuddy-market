@@ -13,8 +13,11 @@ import { cardShot } from "./screenshots.js";
 function pass(p){
   if(filter === "fav") return false;   // 收藏只对社区目录有意义（v2.21）
   if(cat !== "全部" && p.category !== cat) return false;
-  if(filter === "done" && !p.installed) return false;
-  if(filter === "todo" && p.installed) return false;
+  // v2.36.1：兼容模式 0 skill 源码安装（sourceOnly）也算「已装好」——
+  // 装过就要在「已装好」筛选下可见，不能落进「未装完」。
+  const done = p.installed || p.sourceOnly;
+  if(filter === "done" && !done) return false;
+  if(filter === "todo" && done) return false;
   const q = $("#q").value.trim().toLowerCase();
   if(!q) return true;
   const hay = [p.name,p.rawName,p.description,p.category,(p.keywords||[]).join(" ")].join(" ").toLowerCase();
@@ -176,6 +179,9 @@ function cardCommunity(p){
   const u = p.uninstall || {counts:{}};
   const domId = String(p.id).replace(/\//g, "__");
   const ghpm = p.via === "ghpm";
+  // v2.36.1 用户实测：兼容模式装的仓库可以 0 skill（仅源码副本）——
+  // 卡片照样出，状态与页脚按「源码安装」如实说，不再写「位于技能目录」。
+  const srcOnly = !!p.sourceOnly;
   const rows = (p.skillDetail||[]).map(d => {
     const k = d.kind;
     const tag = k === "safe" ? '<span class="tag ok">可卸载</span>'
@@ -195,10 +201,11 @@ function cardCommunity(p){
     ? '<code style="font-size:11px">'+esc(p.rawName)+'</code>' : '';
   const meta = ghpm
     ? repoTag+
-      '<span>ghpm 源码安装</span>'+
+      '<span>ghpm 源码安装'+(srcOnly?'（兼容模式）':'')+'</span>'+
       (p.shaShort ? '<code style="font-size:11px">sha '+esc(p.shaShort)+'</code>' : '')+
       (p.installedAt ? '<span>更新于 '+esc(String(p.installedAt).slice(0,16).replace("T"," "))+'</span>' : '')+
-      '<span>'+p.skills.length+' skill</span>'+
+      (srcOnly ? '<span class="tag warn">未含 skill · 仅源码副本</span>'
+               : '<span>'+p.skills.length+' skill</span>')+
       (overlapN ? '<span>其中 '+overlapN+' 个已收录为本机插件</span>' : '')
     : repoTag+
       '<span>社区安装</span>'+
@@ -207,6 +214,7 @@ function cardCommunity(p){
       '<span>'+p.skills.length+' skill</span>';
   const stTxt = p.installed ? '<span class="state ok">● 已装好 '+esc(p.installedRatio)+'</span>'
               : p.partial   ? '<span class="state warn">● 装了 '+esc(p.installedRatio)+'</span>'
+              : srcOnly     ? '<span class="state ok">● 源码已装（0 skill）</span>'
               : '<span class="state">○ 未安装</span>';
   let btns = "";
   if(ghpm){
@@ -218,7 +226,22 @@ function cardCommunity(p){
     btns += '<button class="tiny danger" data-uninstall="'+attr(p.id)+'">卸载…</button>';
   }
   const where = ghpm ? ' · 由 ghpm 管理' : '';
-  return '<div class="card '+(p.installed?"on":"")+'">'+
+  // v2.36.1：源码路径缩写家目录前缀（STATE.wbHome 实测可用），避免超长
+  // 路径把页脚按钮挤出卡片（配合 .card-foot flex-wrap 双保险）。
+  const shortPath = (s) => {
+    const home = String(STATE.wbHome || "").replace(/[\\/]+$/, "");
+    let t = String(s || "");
+    if (home && t.toLowerCase().indexOf(home.toLowerCase()) === 0)
+      t = "~" + t.slice(home.length).replace(/\\/g, "/");
+    return t;
+  };
+  const loc = srcOnly
+    ? ' · 源码副本'+(p.sourceDir ? ' <code style="font-size:11px">'+esc(shortPath(p.sourceDir))+'</code>' : '由 ghpm 管理')
+    : ' · 位于本机 WorkBuddy 技能目录'+esc(where);
+  const toggle = p.skills.length
+    ? '<div><button class="toggle" data-toggle="'+attr(domId)+'">▾ 看 '+p.skills.length+' 个 skill 的状态</button></div>'
+    : '';
+  return '<div class="card '+((p.installed||srcOnly)?"on":"")+'">'+
     '<div class="card-head">'+
       '<div class="icon">◆</div>'+
       '<div style="flex:1"><h3>'+esc(p.name)+'</h3>'+
@@ -226,9 +249,9 @@ function cardCommunity(p){
     '</div>'+
     '<p class="desc">'+esc(p.description)+'</p>'+
     safetyBar(u)+
-    '<div><button class="toggle" data-toggle="'+attr(domId)+'">▾ 看 '+p.skills.length+' 个 skill 的状态</button></div>'+
+    toggle+
     '<div class="sk" id="sk-'+domId+'">'+rows+'</div>'+
-    '<div class="card-foot">'+stTxt+' · 位于本机 WorkBuddy 技能目录'+esc(where)+btns+'</div>'+
+    '<div class="card-foot">'+stTxt+loc+btns+'</div>'+
   '</div>';
 }
 
