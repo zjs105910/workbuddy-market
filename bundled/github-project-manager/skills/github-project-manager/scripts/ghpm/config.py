@@ -38,6 +38,63 @@ _env_mirrors = [p.strip() for p in (os.environ.get("GHPM_MIRRORS") or "").split(
 MIRROR_PREFIXES = _env_mirrors or list(DEFAULT_MIRRORS)
 if MIRROR_PREFIXES[0] != "":
     MIRROR_PREFIXES = [""] + MIRROR_PREFIXES   # 主源永远排第一
+# 上次成功的下载源记忆（v4.1）：主源仍永远第一，上次成功过的镜像提前。
+LAST_SOURCE_PATH = WB / ".ghpm-last-source"
+
+
+def win_system_proxy() -> str:
+    """探测可用的本机代理，返回 ``http://host:port``；没有 → ""。
+
+    背景（2026-10-22 用户实测）：curl 只认 http_proxy/https_proxy 环境
+    变量，不认 Windows 系统代理；而「一键启动」拉起的进程往往没有这些
+    环境变量 —— 用户明明开着代理，直连 codeload 还是干等超时，
+    只能落到慢镜像上。这里把系统代理读出来显式喂给 curl。
+
+    判定规则（宁可少用、不可错用）：
+    · 读 WinINET 的 ProxyServer（Clash / v2rayN 等会写它），分协议写法
+      取 https=/http= 那段；字符白名单校验，注册表写坏绝不注入 curl；
+    · **不信 ProxyEnable 开关** —— 「关掉系统代理开关但代理进程常驻
+      监听」是常见形态（TUN 模式 / 手动关闭），对候选端口做一次
+      0.8s 的 TCP 探测，**端口活着才算数**：代理没开就当没有，
+      行为与旧版完全一致；
+    · 仅主源 / GitHub API 使用（见 remote._proxy_args）；国内镜像
+      本来就是给无代理链路准备的，不该走代理。
+    """
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion"
+                            r"\Internet Settings") as k:
+            server = str(winreg.QueryValueEx(k, "ProxyServer")[0] or "")
+    except OSError:
+        return ""
+    if not server:
+        return ""
+    # 两种形态："127.0.0.1:7890" 或 "ftp=...;http=...;https=..."（分协议写法）
+    if "=" in server:
+        picked = ""
+        for part in server.split(";"):
+            if part.lower().startswith(("https=", "http=")):
+                picked = part.split("=", 1)[1]
+                break
+        server = picked
+    server = server.strip()
+    # 字符白名单（host:port / [ipv6]:port）：注册表被写坏时绝不把它变成 curl 参数
+    if not re.fullmatch(r"[A-Za-z0-9_.:\[\]-]+", server or ""):
+        return ""
+    if "://" in server:
+        server = urlparse(server).netloc or server
+    host, _, port = server.rpartition(":")
+    if not host or not port.isdigit():
+        return ""
+    try:
+        import socket
+        with socket.create_connection((host.strip("[]"), int(port)), timeout=0.8):
+            return "http://%s:%s" % (host, port)
+    except OSError:
+        return ""
 
 GH_TOKEN = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 

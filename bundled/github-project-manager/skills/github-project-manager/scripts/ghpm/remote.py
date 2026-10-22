@@ -50,6 +50,25 @@ def _looks_like_bad_flag(stderr: str) -> bool:
             or "unknown option" in s or "is not recognized" in s)
 
 
+def _proxy_args(url: str) -> list:
+    """给 curl 的显式代理参数（无需代理时返回 []）。
+
+    · 环境变量已给代理 → curl 自己会认，不加（避免双重指定）；
+    · 仅主源 / GitHub API（*.github.com）注入 Windows 系统代理 ——
+      国内镜像本来就是给无代理链路准备的，走代理反而可能更慢；
+    · 环境变量 GHPM_NO_SYS_PROXY=1 可整体关闭注入（诊断用）。
+    """
+    if any(os.environ.get(v) for v in
+           ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "all_proxy")):
+        return []
+    if os.environ.get("GHPM_NO_SYS_PROXY"):
+        return []
+    if "github.com" not in urlparse(url).netloc:
+        return []
+    px = config.win_system_proxy()
+    return ["-x", px] if px else []
+
+
 def curl_json(url: str):
     """带状态码的 GET。GitHub 的 404 会返回合法 JSON，只看 returncode 会漏判。
     未鉴权只有 60 次/小时，配了 GITHUB_TOKEN 是 5000 次/小时。"""
@@ -57,6 +76,7 @@ def curl_json(url: str):
            "-H", "Accept: application/vnd.github+json"]
     if config.GH_TOKEN and "api.github.com" in url:
         cmd += ["-H", "Authorization: Bearer %s" % config.GH_TOKEN]
+    cmd += _proxy_args(url)
     cmd.append(url)
     r = run(cmd)
     out, code = r.stdout, ""
@@ -97,13 +117,24 @@ def classify_net_error(e) -> tuple:
 def curl_download(url: str, dest: Path) -> None:
     """下载到 dest。必须看 HTTP 状态码：curl -sSL 对 404 页面也返回 0，
     只看 returncode 会把「下到一张错误页」当成成功，最后抛个莫名其妙的
-    「不是有效的 zip 包」。"""
-    base = ["curl", "-sSL", "--max-time", TIMEOUT, "--connect-timeout", "10",
+    「不是有效的 zip 包」。
+
+    v4.1 下载提速（2026-10-22 用户实测「下载太慢」）：
+    · 主源（codeload.github.com）用更快的失败参数 —— connect-timeout 5
+      + retry 1。直连必挂的网络上别干等 30 秒，反正后面有镜像兜底；
+      注入 Windows 系统代理后主源多半直接就通了（见 _proxy_args）。
+    · 镜像保持 connect-timeout 10 + retry 2（镜像本身可达，慢点没关系）。
+    """
+    main_source = "github.com" in urlparse(url).netloc
+    base = ["curl", "-sSL", "--max-time", TIMEOUT,
+            "--connect-timeout", "5" if main_source else "10",
             "-w", "\n__HTTP__%{http_code}", "-o", str(dest)]
-    r = run(base + ["--retry", "2", "--retry-all-errors", url])
+    base += _proxy_args(url)
+    r = run(base + ["--retry", "1" if main_source else "2",
+                    "--retry-all-errors", url])
     if r.returncode != 0 and _looks_like_bad_flag(r.stderr):
         # 老版本 curl（< 7.71）不认 --retry-all-errors，降级重跑
-        r = run(base + [url])
+        r = run(base + ["--retry", "1" if main_source else "2", url])
     code = _http_code(r.stdout)
     if r.returncode != 0:
         raise RuntimeError("下载失败 %s (http=%s): %s"
@@ -555,11 +586,29 @@ def fetch_repo_infos(repos, ttl: float = 0, label: str = "检查",
 
 # ---------- ZIP 下载（多镜像回退） ----------
 
+def _load_last_good_source() -> str:
+    """上次成功用过的镜像前缀（"" = 没有 / 主源成功 / 读失败）。"""
+    try:
+        return Path(config.LAST_SOURCE_PATH).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _save_last_good_source(prefix: str) -> None:
+    from .util import atomic_write_bytes
+    try:
+        atomic_write_bytes(Path(config.LAST_SOURCE_PATH), prefix)
+    except Exception:
+        pass      # 记忆写失败不影响安装，下次最多多试一个慢镜像
+
+
 def download_repo_zip(repo: str, branch: str, dest: Path, on_attempt=None,
                       validate=None) -> None:
     """按 MIRROR_PREFIXES 依次尝试下载 codeload ZIP 到 dest。
 
     主源永远排第一；每个源都要看 HTTP 状态码（见 curl_download）。
+    v4.1 记忆重排：主源失败时，**上次成功过的镜像**提到其余镜像前面
+    （主源安全设计不变——成功记录只影响镜像之间的先后）。
 
     validate(dest) 用来判断「下到的是不是真 ZIP」：镜像回源失败时经常
     返回 HTTP 200 + 一张 HTML 错误页，只看状态码会把错误页当成下载成功，
@@ -568,7 +617,12 @@ def download_repo_zip(repo: str, branch: str, dest: Path, on_attempt=None,
     全部失败时抛 RuntimeError(E_NETWORK)。
     """
     tried, last_err = [], ""
-    for i, prefix in enumerate(config.MIRROR_PREFIXES):
+    prefixes = list(config.MIRROR_PREFIXES)
+    last_good = _load_last_good_source()
+    if last_good and last_good in prefixes and last_good != prefixes[0]:
+        prefixes.remove(last_good)
+        prefixes.insert(1, last_good)
+    for i, prefix in enumerate(prefixes):
         url = prefix + (config.CODELOAD % (repo, branch))
         label = "主源 codeload" if prefix == "" else ("镜像 " + urlparse(prefix).netloc)
         if on_attempt:
@@ -578,6 +632,8 @@ def download_repo_zip(repo: str, branch: str, dest: Path, on_attempt=None,
             curl_download(url, Path(dest))
             if validate:
                 validate(dest)
+            if prefix != "":
+                _save_last_good_source(prefix)
             return
         except HttpError as e:
             last_err = str(e)[:120]
