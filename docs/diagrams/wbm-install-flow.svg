@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wbm-install-flow-title wbm-install-flow-desc" id="wbm-install-flow-root">
+        <title id="wbm-install-flow-title">安装前防线：从预览到事务落盘</title>
+        <desc id="wbm-install-flow-desc">流程图：一次安装先经过来源与风险预览、破坏性扫描与 SHA-256 校验的 fail-closed 判定，未通过即拒绝，通过后以事务日志落盘并可经回收站恢复。</desc>
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #wbm-install-flow-root { --color-paper:   #f5f5f5;   
+      --color-ink:     #2d3142;   
+      --color-muted:   #4f5d75;   
+      --color-accent:  #eb6c36;   
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif SC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace; }
+      #wbm-install-flow-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #wbm-install-flow-root .diagram-container { width: 100%; overflow-x: auto; }
+      #wbm-install-flow-root .diagram-container { overflow-x: visible; }</style>
+          <marker id="wbm-install-flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="wbm-install-flow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          <marker id="wbm-install-flow-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- arrows (before nodes) -->
+        <line x1="440" y1="96" x2="440" y2="136" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow)"/>
+        <line x1="440" y1="200" x2="440" y2="240" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow)"/>
+        <line x1="440" y1="304" x2="440" y2="344" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow)"/>
+        <line x1="440" y1="432" x2="440" y2="472" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow)"/>
+        <line x1="440" y1="536" x2="440" y2="576" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow)"/>
+        <line x1="544" y1="388" x2="680" y2="388" fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#wbm-install-flow-arrow-accent)"/>
+
+        <!-- arrow labels -->
+        <rect x="448" y="444" width="36" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="466" y="456" fill="#7a8399" font-size="12" font-weight="500" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">通过</text>
+
+        <rect x="580" y="366" width="66" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="613" y="378" fill="#eb6c36" font-size="12" font-weight="500" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">未通过</text>
+
+        <!-- start oval -->
+        <rect x="340" y="48" width="200" height="48" rx="24" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="76" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">选择安装</text>
+
+        <!-- step: preview -->
+        <rect x="340" y="136" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="164" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">来源与风险预览</text>
+        <text x="440" y="184" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">安装前四问 · 权限 · 兼容</text>
+
+        <!-- step: scan + hash -->
+        <rect x="340" y="240" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="268" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">破坏性扫描 · SHA-256</text>
+        <text x="440" y="288" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fail-closed · ScanError</text>
+
+        <!-- decision diamond -->
+        <polygon points="336,388 440,344 544,388 440,432" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">扫描与哈希通过？</text>
+
+        <!-- step: transaction -->
+        <rect x="340" y="472" width="200" height="64" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="500" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">事务日志 · 执行安装</text>
+        <text x="440" y="520" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">tx_begin · credentials first</text>
+
+        <!-- end oval -->
+        <rect x="340" y="576" width="200" height="48" rx="24" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="440" y="604" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">完成 · 回收站兜底</text>
+
+        <!-- fail node (focal, security) -->
+        <rect x="680" y="356" width="176" height="64" rx="6" fill="#f5f5f5"/>
+        <rect x="680" y="356" width="176" height="64" rx="6" fill="#eb6c36" fill-opacity="0.05" stroke="#eb6c36" stroke-opacity="0.50" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="768" y="384" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">拒绝安装 · 不放行</text>
+        <text x="768" y="404" fill="#eb6c36" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fail-closed</text>
+
+        <!-- annotation callouts -->
+        <text x="680" y="456" fill="#7a8399" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif SC',serif">查不到、看不懂、哈希不符 —— 一律不放行。</text>
+        <text x="680" y="600" fill="#7a8399" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif SC',serif">误操作可回退：恢复只认 tree_hash，不匹配即 conflict。</text>
+
+        <!-- legend -->
+        <line x1="40" y1="656" x2="1240" y2="656" stroke="#2d3142" stroke-opacity="0.10" stroke-width="0.8"/>
+        <text x="40" y="674" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+        <rect x="120" y="664" width="24" height="12" rx="12" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+        <text x="152" y="674" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">开始 / 结束</text>
+        <rect x="260" y="664" width="12" height="12" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+        <text x="278" y="674" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">步骤</text>
+        <polygon points="366,670 374,664 382,670 374,676" fill="#ffffff" stroke="#2d3142" stroke-width="0.8"/>
+        <text x="390" y="674" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">判定</text>
+        <rect x="440" y="664" width="12" height="12" rx="2" fill="#eb6c36" fill-opacity="0.05" stroke="#eb6c36" stroke-opacity="0.50" stroke-width="0.8" stroke-dasharray="4,4"/>
+        <text x="458" y="674" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">安全边界（fail-closed）</text>
+
+      </svg>

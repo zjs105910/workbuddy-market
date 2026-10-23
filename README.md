@@ -33,6 +33,10 @@ $ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market
 - **安装过程更可追溯**：安装前有来源与风险预览；支持内容校验、事务恢复和回收站。
 - **本机优先**：网页服务只监听 `127.0.0.1`；你的私有市场配置和本机技能内容不随仓库提交。
 
+![WorkBuddy Market 架构总览](docs/diagrams/wbm-architecture.svg)
+
+> 架构一图流：CLI 负责注册与分发，Web UI（仅 `127.0.0.1`）经哈希校验与事务回收站装卸技能，社区目录与版本分发来自 GitHub 与 PyPI。更多图见 [docs/diagrams/](docs/diagrams/)（[安装前防线](docs/diagrams/wbm-install-flow.html) · [三方发版同步](docs/diagrams/wbm-release-sync.html)）。
+
 ## 演示与下载
 
 先看约 80 秒的可复现产品演示，再选择适合你的安装方式。正式版 Release 会同时提供横屏与竖屏演示视频、字幕、manifest、Python 安装包和 SHA-256 校验文件。

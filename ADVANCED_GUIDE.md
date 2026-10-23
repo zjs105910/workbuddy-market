@@ -431,6 +431,10 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ## 七、安全边界
 
+![安装前防线：从预览到事务落盘](docs/diagrams/wbm-install-flow.svg)
+
+> 一条链路看懂防线：预览（四问）→ 破坏性扫描 + SHA-256（fail-closed，未通过一律不放行）→ 事务日志落盘 → 回收站兜底，恢复只认 `tree_hash`。
+
 这个工具会碰的文件就这几个，全都有备份或回收站兜底：
 
 | 文件/目录                                          | 操作                         | 兜底                                              |

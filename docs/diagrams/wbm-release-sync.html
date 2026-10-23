@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三方发版一致性校验</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;   /* white-smoke */
+      --color-ink:     #2d3142;   /* jet-black */
+      --color-muted:   #4f5d75;   /* blue-slate */
+      --color-accent:  #eb6c36;   /* atomic-tangerine */
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif SC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Release Sync · WBM-03</p>
+    <h1>三方发版一致性校验</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wbm-release-sync-title wbm-release-sync-desc">
+        <title id="wbm-release-sync-title">三方发版一致性校验</title>
+        <desc id="wbm-release-sync-desc">数据流图：校验脚本每天将 version.py、GitHub 最新 Release 与 PyPI latest 三方比对，并逐件核对 wheel/sdist 哈希，任何不一致都以退出码 1 fail-closed 报错。</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- arrows (before nodes) -->
+        <path d="M264,128 H348 Q356,128 356,136 V252 Q356,260 364,260 H448" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <line x1="264" y1="288" x2="448" y2="288" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <path d="M264,448 H348 Q356,448 356,440 V324 Q356,316 364,316 H448" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <line x1="656" y1="288" x2="744" y2="288" fill="none" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
+        <line x1="164" y1="320" x2="164" y2="416" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+
+        <!-- arrow labels -->
+        <rect x="364" y="186" width="52" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="390" y="198" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">VERSION</text>
+
+        <rect x="340" y="266" width="36" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="358" y="278" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TAG</text>
+
+        <rect x="364" y="374" width="52" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="390" y="386" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">LATEST</text>
+
+        <rect x="664" y="266" width="76" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="702" y="278" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">FAIL-CLOSED</text>
+
+        <rect x="172" y="360" width="84" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="214" y="372" fill="#7a8399" font-size="12" font-weight="500" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">产物哈希比对</text>
+
+        <!-- nodes -->
+        <!-- version.py (store) -->
+        <rect x="64" y="96" width="200" height="64" rx="6" fill="#f5f5f5"/>
+        <rect x="64" y="96" width="200" height="64" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <rect x="72" y="102" width="44" height="12" rx="2" fill="transparent" stroke="rgba(79,93,117,0.50)" stroke-width="0.8"/>
+        <text x="94" y="111" fill="rgba(79,93,117,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SOURCE</text>
+        <text x="164" y="134" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">version.py</text>
+        <text x="164" y="150" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">src/workbuddy_market</text>
+
+        <!-- GitHub Release (external) -->
+        <rect x="64" y="256" width="200" height="64" rx="6" fill="#f5f5f5"/>
+        <rect x="64" y="256" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <rect x="72" y="262" width="44" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+        <text x="94" y="271" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GITHUB</text>
+        <text x="164" y="294" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">GitHub Release</text>
+        <text x="164" y="310" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">push tag v* · SHA256SUMS</text>
+
+        <!-- PyPI (external) -->
+        <rect x="64" y="416" width="200" height="64" rx="6" fill="#f5f5f5"/>
+        <rect x="64" y="416" width="200" height="64" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <rect x="72" y="422" width="32" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+        <text x="88" y="431" fill="rgba(45,49,66,0.55)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PYPI</text>
+        <text x="164" y="454" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">PyPI</text>
+        <text x="164" y="470" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">twine upload · manual</text>
+
+        <!-- checker (focal) -->
+        <rect x="448" y="232" width="208" height="112" rx="6" fill="#f5f5f5"/>
+        <rect x="448" y="232" width="208" height="112" rx="6" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1.2"/>
+        <rect x="456" y="238" width="52" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+        <text x="482" y="247" fill="rgba(235,108,54,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CHECKER</text>
+        <text x="552" y="282" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">三方一致性校验</text>
+        <text x="552" y="304" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">check_release_sync.py</text>
+        <text x="552" y="322" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">daily cron · dispatch</text>
+
+        <!-- exit node (security) -->
+        <rect x="744" y="256" width="176" height="64" rx="6" fill="#f5f5f5"/>
+        <rect x="744" y="256" width="176" height="64" rx="6" fill="rgba(235,108,54,0.05)" stroke="rgba(235,108,54,0.50)" stroke-width="1.2" stroke-dasharray="4,4"/>
+        <text x="832" y="284" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif" text-anchor="middle">不一致 → exit 1</text>
+        <text x="832" y="304" fill="#eb6c36" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">fail-closed</text>
+
+        <!-- annotation callout -->
+        <text x="448" y="388" fill="#7a8399" font-size="14" font-style="italic" font-family="'Instrument Serif','Noto Serif','Noto Serif SC',serif">一致即 PASS —— 两个渠道分发同一份构建产物。</text>
+
+        <!-- legend -->
+        <line x1="40" y1="548" x2="920" y2="548" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="566" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+        <rect x="120" y="556" width="12" height="12" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="0.8"/>
+        <text x="138" y="566" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">本地事实源</text>
+        <rect x="250" y="556" width="12" height="12" rx="2" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="0.8"/>
+        <text x="268" y="566" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">远端渠道</text>
+        <rect x="380" y="556" width="12" height="12" rx="2" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="0.8"/>
+        <text x="398" y="566" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">焦点</text>
+        <rect x="470" y="556" width="12" height="12" rx="2" fill="rgba(235,108,54,0.05)" stroke="rgba(235,108,54,0.50)" stroke-width="0.8" stroke-dasharray="4,4"/>
+        <text x="488" y="566" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">失败出口</text>
+        <line x1="590" y1="562" x2="614" y2="562" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4"/>
+        <text x="620" y="566" fill="#4f5d75" font-size="12" font-family="'Geist','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">只读查询</text>
+
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

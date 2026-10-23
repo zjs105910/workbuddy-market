@@ -49,6 +49,13 @@ python -m pip index versions workbuddy-market   # 或查 pypi.org/project/workbu
 每次发布后核对：GitHub Release tag = `version.py` 的 `MARKET_VERSION` =
 PyPI 最新版，三者一致才算发布闭环。
 
+![三方发版一致性校验](diagrams/wbm-release-sync.svg)
+
+上图的比对已自动化：`.github/workflows/release-sync.yml` 每日 02:00 UTC cron
+（也支持手动 dispatch）运行 `scripts/check_release_sync.py` —— 三方版本比对 +
+wheel/sdist sha256 与 Release `SHA256SUMS.txt` 逐件核对，网络失败一律
+fail-closed。发布后可手动 dispatch 立即验证，不必等次日。
+
 ## 发布失败如何处理
 
 - 测试失败：不要强行发布。根据 Actions 失败步骤修复问题，推送修复 commit，再创建新的正确版本 tag 前确认 changelog/版本号同步。
