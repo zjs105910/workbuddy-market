@@ -1,0 +1,246 @@
+---
+title: コントリビュート
+sidebar:
+  order: 13
+---
+
+OCR は Apache-2.0 ライセンスのオープンソースプロジェクトです。バグ報告、ドキュメント修正、
+コード貢献を歓迎します。本ページはクイックリファレンスです。正式版は
+[`CONTRIBUTING.md`](https://github.com/alibaba/open-code-review/blob/main/CONTRIBUTING.md) にあります。
+
+## 貢献の方法
+
+Go を書かなくても貢献できます。
+
+- **バグ報告**——再現手順を添えて
+  [GitHub issue](https://github.com/alibaba/open-code-review/issues/new/choose) を作成してください。
+- **機能リクエスト**——
+  [Discussions](https://github.com/alibaba/open-code-review/discussions/categories/ideas)
+  に投稿するか、feature-request issue を作成してください。
+- **ドキュメント**——誤字、不足している例、リンク切れ——これらの PR は通常、最も早くマージされます。
+- **他の PR のレビュー**——メンテナー以外からのコメントは、レビュアーの負担軽減に役立ちます。
+- **コード**——バグ修正、パフォーマンス改善、新機能。
+
+## ローカル開発環境のセットアップ
+
+### 前提条件
+
+- [Go ≥ 1.26.9](https://go.dev/dl/)
+- [Git](https://git-scm.com/)
+- [Make](https://www.gnu.org/software/make/)
+
+### ソースコードの取得
+
+```bash
+# GitHub で Fork し、次に:
+git clone https://github.com/<your-username>/open-code-review.git
+cd open-code-review
+git remote add upstream https://github.com/alibaba/open-code-review.git
+
+make build       # dist/opencodereview を書き出す（Windows では dist/opencodereview.exe）
+make test        # LC_ALL=C go test -v -race -count=1 ./...
+```
+
+> `upstream` remote は読み取り専用です。`origin`（あなたの fork）にプッシュし、そこから PR を出してください。
+
+### ローカルビルドの実行
+
+```bash
+./dist/opencodereview review --preview        # macOS / Linux
+.\dist\opencodereview.exe review --preview   # Windows (PowerShell / cmd)
+```
+
+便宜のため、`dist/opencodereview` を指すシンボリックリンクを `~/bin/ocr-dev` に置いておくと、
+任意のリポジトリで `ocr-dev` を呼び出せます。
+
+### Make target
+
+| Target | 作用 |
+|---|---|
+| `make build` | 現在のプラットフォーム向けにビルド → `dist/opencodereview`（Windows では `dist/opencodereview.exe`）。 |
+| `make build-darwin-amd64` | macOS Intel 向けのクロスコンパイル。 |
+| `make build-darwin-arm64` | macOS Apple Silicon 向けのクロスコンパイル。 |
+| `make build-linux-amd64` | Linux x86_64 向けのクロスコンパイル。 |
+| `make build-linux-arm64` | Linux ARM64 向けのクロスコンパイル。 |
+| `make build-windows-amd64` | Windows x86_64 向けのクロスコンパイル。 |
+| `make build-windows-arm64` | Windows ARM64 向けのクロスコンパイル。 |
+| `make build-all` | 6 つすべてのクロスコンパイルバイナリ（linux/darwin/windows × amd64/arm64）。 |
+| `make sha256sum` | ビルド成果物の `sha256sum.txt` を生成。 |
+| `make dist` | `clean → build-all → sha256sum`。CI が実行する内容。 |
+| `make test` | race 検出を有効にしてテストを実行。 |
+| `make clean` | `dist/` を削除。 |
+
+## ブランチとコミットの規約
+
+### ブランチのプレフィックス
+
+| プレフィックス | 用途 |
+|---|---|
+| `feat/` | 新機能 |
+| `fix/` | バグ修正 |
+| `docs/` | ドキュメントのみ |
+| `refactor/` | 挙動を変えないリファクタリング |
+| `test/` | テストのみの変更 |
+| `chore/` | ビルド / CI / ツール |
+
+```bash
+git checkout main
+git pull upstream main
+git checkout -b feat/anthropic-streaming
+```
+
+### コミットメッセージ
+
+[Conventional Commits](https://www.conventionalcommits.org/) フォーマット:
+
+```
+<type>(<scope>): <short summary>
+
+[optional body explaining the why]
+```
+
+例:
+
+```
+feat(agent): add support for custom tool definitions
+fix(llm): handle timeout errors in Anthropic API calls
+docs(readme): clarify endpoint resolution priority
+refactor(viewer): extract task-card rendering into helper
+```
+
+**PR タイトル**も同じフォーマットを使うと、生成される changelog に整然と表示されます。
+
+## プロジェクト構成
+
+```
+open-code-review/
+├── cmd/opencodereview/        # CLI エントリーポイント——引数解析、ディスパッチ
+├── internal/
+│   ├── agent/                 # レビューエージェントのロジック、サブエージェントのディスパッチ
+│   ├── config/                # テンプレート、ルール、ホワイトリスト、埋め込み JSON
+│   ├── diff/                  # Git diff の解析、3 つのモード
+│   ├── gitcmd/                # Git サブプロセスランナー
+│   ├── llm/                   # LLM client（Anthropic と OpenAI）、エンドポイント解決
+│   ├── model/                 # データ構造（LlmComment、Diff……）
+│   ├── pathutil/              # パスユーティリティ
+│   ├── release/               # Release notes の生成
+│   ├── session/               # JSONL セッションライター
+│   ├── stdout/                # ミュート可能な stdout writer
+│   ├── suggestdiff/           # 提案 diff のレンダリング
+│   ├── telemetry/             # OpenTelemetry の設定 + ヘルパー
+│   ├── tool/                  # ツールレジストリ + provider の実装
+│   └── viewer/                # 埋め込み HTTP UI
+├── pages/                     # WebUI マーケティングページ（独立した React app）
+├── plugins/                   # Claude Code slash コマンド
+├── extensions/                # エディタ拡張（VS Code）
+├── examples/                  # CI レシピ（GitHub Actions、GitLab CI）
+├── skills/                    # Agent SDK skill manifest
+├── scripts/                   # NPM postinstall + クロスプラットフォームビルドスクリプト
+├── npm/                       # 各プラットフォーム向け optional dependency パッケージ
+└── bin/                       # NPM wrapper（Node）
+```
+
+ほとんどの貢献は `internal/agent/`、`internal/tool/`、`internal/llm/` に触れます。
+`cmd/opencodereview/` の CLI レイヤーは意図的に薄く保たれています——引数を解析してから
+agent パッケージへディスパッチします。
+
+## AI支援開発
+
+開発を AI に手伝ってもらうこと自体はまったく問題なく、それで貢献が楽になるならむしろ歓迎します。受け入れられないのは、モデルが生成したコードを読まないまま提出し、その冗長さや誤りを一切直さないことです。そうした提出はレビューのやり取りを滞らせ、プルリクエストを前に進めにくくします。
+
+AI を開発に使った場合は、下記のルールに従ってください。
+
+### ルール:
+
+1. **初期のIssueまたはPull Requestで、AI/LLMを使用したこと、および使用したツール/モデルなどを開示しなければなりません。**
+2. AIが書いたすべてのコードを理解し、AIが何をしたのか把握する必要があります。
+3. レビュアーが変更の理由を尋ねた場合は、自分が書いたものであれAIが書いたものであれ、自分で説明できなければなりません。メンテナーからの質問やレビューコメントへの回答の内容は、あなた自身の理解に基づくものでなければなりません。AI/LLMは翻訳や文章の推敲にのみ使用でき、回答そのものを生成させてはいけません。
+4. PR内に `AI生成 -> 修正 -> 修正 -> 修正` のような繰り返しのサイクルが現れてはなりません。これは、AIが生成したコードをレビューせず、問題が発生するたびにAIに修正させて繰り返している可能性を示しています。
+5. メンバーにレビューを依頼する前に、AI/LLMが生成したコード、テキストなどのすべての内容を必ず自分でレビューする必要があります。
+6. 「Assisted-by」「Co-developed-by」または類似のトレーラーを使ってコミットをAI/LLMに帰属させてはなりません。
+7. 冗長なコミットメッセージを書かないでください。重要な情報は、折りたたまれたコミットメッセージではなく、PRの説明に記載してください。
+8. 上記のすべてを行うことを望まない場合、または行うことができない場合は、IssueまたはPull Requestをクローズしてください。
+
+ありがとうございます！
+
+## ライセンスヘッダー
+
+すべてのソースファイル（`.go`、`.js`、`.mjs`、`.ts`、`.tsx`、`.kt`、`.kts`、`.sh`、`.py`、`.css`）にはSPDXライセンスヘッダーが必要です。新しいファイルを作成した後、以下を実行してください：
+
+```bash
+make license-add
+```
+
+このコマンドは必要なヘッダーを自動的に追加します。CIはヘッダーが不足しているPRを拒否します。
+
+## コード品質チェック
+
+PR を出す前に:
+
+```bash
+make check      # フォーマット、リント、ライセンスヘッダーの検証
+make test       # race 有効、CI では push のたびに実行される
+make build      # バイナリがビルドできることのスモークテスト
+```
+
+CI は push のたびに同じ一式を実行するため、予期せぬ結果になることはありません。
+
+## 新しいツールの追加
+
+ツールは 2 つの部分から成ります。
+
+1. [`internal/config/toolsconfig/tools.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/toolsconfig/tools.json)
+   内の **JSON 定義**: name、description、そして LLM が見る JSON-schema 引数。
+2. `internal/tool/definitions.go` に登録される **Go provider**（実際の実装を含む）。
+
+両方が揃って初めて、新しいツール名が機能します。既存の 6 つは[ツール](../tools/)にあり、
+テンプレートとして使えます。
+
+## 新しいルールパターンの追加
+
+`internal/config/rules/system_rules.json` を編集して新しい glob をルールドキュメントにマッピングし、
+`internal/config/rules/rule_docs/` 下に対応する markdown を追加します。ルールドキュメントは
+パターンごとに 1 ファイルで保存されます（英語）。`language` 設定は system prompt に
+「その言語で応答せよ」という指示を 1 行追加するだけです。rule-doc ファイルは切り替えません。
+
+## PR のフロー
+
+1. **大きな変更はまず issue を作成してください。** 事前に方向性を合わせておく方が、
+   コードレビューで初めて相違に気づくよりも良いです。
+2. **1 つの PR につき 1 つの論理的変更。** 無関係な修正が 2 つあるなら、PR を 2 つ出してください。
+3. **テストを更新してください。** 挙動の変更にはテストのカバレッジが必要です——`make test` は必ず通ること。
+4. **ドキュメントを更新してください。** 変更が引数、config key、レビューパイプラインに影響する場合は、
+   本ドキュメントサイト（[`docs/`](https://github.com/alibaba/open-code-review) 内）と関連するインラインヘルプの
+   両方を更新してください。
+5. **PR テンプレートを記入してください。** メンテナーがレビューします。通常は数営業日以内です。
+
+## PR を早くレビューしてもらうためのヒント
+
+PR を素早くレビュー・マージしてもらいたいですか？以下のプラクティスが役立ちます：
+
+- **CLA に早めに署名する** — 多くの初回コントリビューターが CLA ボットのコメントを見落として手続きが止まっています。ボットが表示されたらすぐに Contributor License Agreement に署名してください——CLA 未署名の PR はマージできません。
+- **すべての CI チェックをパスさせる** — CI が失敗している PR はレビューされません。プッシュ前にローカルで `make test` と `make build` を実行して、問題を早期に発見してください。
+- **変更を焦点を絞って小さく保つ** — 一つのことだけを行う PR は、無関係な変更が混在する PR よりもはるかにレビューしやすいです。小さい PR はレビューが早く、修正の往復も少なくなります。
+- **明確で正確な説明を書く** — *何を*変更し、*なぜ*変更したかを説明してください。説明は実際の diff と一致している必要があります——両者が一致しないとレビュアーの信頼を失います。開発中にスコープが変わった場合は、レビュー依頼前に説明を更新してください。
+- **動作変更にはテストを含める** — テストのない新機能やバグ修正は疑問を生じさせます。テストは正確性を示し、レビュアーが意図された動作を理解する助けになります。
+- **既存のコードパターンに従う** — 周囲のコードのスタイル、命名規則、アーキテクチャに合わせてください。一貫性はレビュアーの認知負荷を減らし、スタイルのみのレビューコメントを避けられます。
+- **フィードバックに迅速に対応する** — レビュアーが変更を求めた場合、素早く対応してレビューサイクルを短く保ちましょう。意見が異なる場合は、コメントを無視するのではなく、理由を説明してください。
+
+## コントリビューターライセンス契約（CLA）
+
+本プロジェクトは Alibaba Open Source CLA を必要とします。初めて PR を出すと bot がリンクを貼ります——
+電子署名してください（1 分程度）。以降の PR では再署名は不要です。
+
+## 初めての貢献ですか？
+
+[`good first issue`](https://github.com/alibaba/open-code-review/labels/good%20first%20issue)
+または [`help wanted`](https://github.com/alibaba/open-code-review/labels/help%20wanted)
+のラベルが付いた issue を探してください。ほとんどは小規模で自己完結しており、issue の説明に
+着手に十分なコンテキストがあります。
+
+## 関連項目
+
+- [アーキテクチャ](../architecture/)——`internal/agent/` を変更する前に必要なメンタルモデル。
+- [ツール](../tools/)——既存のツールがどのようなものか。
+- 完全な貢献ガイド:
+  [CONTRIBUTING.md](https://github.com/alibaba/open-code-review/blob/main/CONTRIBUTING.md)

@@ -1,0 +1,19 @@
+{
+  "name": "@shadowclone/review",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/agents": "workspace:*",
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/redact": "workspace:*",
+    "smol-toml": "^1.8.0",
+    "zod": "^4.5.4"
+  }
+}

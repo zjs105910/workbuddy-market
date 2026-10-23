@@ -1,0 +1,20 @@
+{
+ "name": "vercel-labs-agent-browser",
+ "version": "2026.10.23.0207911",
+ "description": "Vercel 出品的浏览器自动化 CLI，官方 CodeBuddy 插件同源。首次使用自动安装，提供网页交互、截图、表单填写能力。",
+ "description_en": "Vercel's browser automation CLI for AI agents (same source as the official CodeBuddy plugin): page interaction, screenshots and form filling.",
+ "author": {
+  "name": "vercel-labs"
+ },
+ "keywords": [
+  "浏览器",
+  "自动化",
+  "vercel",
+  "截图",
+  "表单"
+ ],
+ "category": "自动化",
+ "license": "Apache-2.0",
+ "homepage": "https://agent-browser.dev",
+ "sourceCommit": "0207911f1bd4d0393eddaa90f2e50f96e0fb8974"
+}

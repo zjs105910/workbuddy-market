@@ -1,0 +1,19 @@
+{
+ "name": "google-labs-code-stitch-skills",
+ "version": "2026.10.23.0337446",
+ "description": "Google Labs Stitch 官方技能库：配合 Stitch MCP 服务器使用的 16 个技能，遵循 Agent Skills 开放规范。",
+ "description_en": "Agent Skills designed to work with the Stitch MCP server, following the Agent Skills open spec.",
+ "author": {
+  "name": "google-labs-code"
+ },
+ "keywords": [
+  "google",
+  "stitch",
+  "官方",
+  "合集"
+ ],
+ "category": "合集",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/google-labs-code/stitch-skills",
+ "sourceCommit": "0337446dadde6f8c94210444e2aa9d546126480f"
+}

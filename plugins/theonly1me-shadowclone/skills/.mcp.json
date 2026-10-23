@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "shadowclone": {
+      "command": "bun",
+      "args": [
+        "run",
+        "./packages/mcp/src/server.ts"
+      ]
+    }
+  }
+}

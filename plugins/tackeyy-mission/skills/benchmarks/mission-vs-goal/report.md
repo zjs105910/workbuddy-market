@@ -1,0 +1,1235 @@
+# mission vs goal-only pilot report
+
+Status: measured on 2026-06-27 as a controlled local Codex CLI pilot.
+Additional Claude Code official `/goal` attempts were run on 2026-06-28 JST
+and are reported separately below. A tail-cohort run
+(`2026-07-07-claude-goal-vs-mission-tail-v1`, 5 planted-defect tasks, both arms)
+completed on 2026-07-07 JST and is reported in the Tail Cohort section below.
+
+This is not a general model benchmark and not a blind human evaluation. The
+quality and evidence scores below are automated heuristic scores from the local
+runner. Raw records and artifacts are checked into this directory so the result
+can be audited.
+
+## Executive Summary
+
+We ran all 20 paired benchmark executions from starting commit `0148f16`: 10
+`goal_only` runs and 10 `mission` runs.
+
+Both arms completed every task and passed every local validator. In this
+controlled pilot, the `mission` arm produced higher automated quality and
+evidence scores, while taking more wall-clock time.
+
+The safe takeaway is narrow:
+
+> In this controlled local 10-task pilot, `mission` did not improve completion
+> or validator pass rate because both arms reached 100%. It did improve the
+> automated evidence/completion-quality score, at the cost of longer runtime.
+
+## Measurement Scope
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Measurement date | 2026-06-27 | Current local Codex CLI run. |
+| Run id | `2026-06-27-codex-cli-local` | `results/2026-06-27-codex-cli-local.jsonl`. |
+| Starting commit | `0148f16` | `git ls-remote origin refs/heads/main` before pilot. |
+| Fixed pilot tasks defined | 10 / 10 | `benchmarks/mission-vs-goal/tasks.json`. |
+| Benchmark arms defined | 2 / 2 | `goal_only`, `mission`. |
+| Expected paired runs | 20 | 10 tasks x 2 arms. |
+| Paired benchmark runs completed | 20 / 20 | Raw JSONL has 20 records. |
+| Goal-only runs completed | 10 / 10 | Raw JSONL records. |
+| Mission runs completed | 10 / 10 | Raw JSONL records. |
+| Result artifacts captured | 100 files | `artifacts/2026-06-27-codex-cli-local/`. |
+| Quality score method | automated heuristic | `quality_score_method=automated_heuristic_not_blind_human`. |
+| Comparative performance claim readiness | limited | Only valid for this controlled local task set and scoring method. |
+
+## Results
+
+| Metric | goal_only | mission | Delta |
+|---|---:|---:|---:|
+| Completion rate | 10 / 10 | 10 / 10 | 0 |
+| Validator pass rate | 10 / 10 | 10 / 10 | 0 |
+| Average quality score | 4.00 / 5 | 4.50 / 5 | +0.50 |
+| Average intervention count | 0.00 | 0.00 | 0 |
+| Resume success rate | 1 / 1 | 1 / 1 | 0 |
+| Average evidence completeness | 3.80 / 5 | 4.70 / 5 | +0.90 |
+| Average elapsed minutes | 1.28 | 2.99 | +1.71 |
+
+## Claude Code Official `/goal` Smoke
+
+Status: attempted on 2026-06-28 JST as a controlled Claude Code CLI print-mode
+smoke. The comparison target is the official Claude Code built-in `/goal`
+command, not the earlier local `goal_only` baseline. Claude Code command and
+skill documentation are published at <https://code.claude.com/docs/en/commands>
+and <https://code.claude.com/docs/en/skills>.
+
+This smoke produced evidence, but it is **not** a completed performance
+comparison: the `/mission` arm stopped before writing its task artifact because
+Claude Code returned workspace API usage limit error 400. The raw error states
+that access resumes on 2026-07-01 at 00:00 UTC.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Measurement date | 2026-06-28 JST | Raw records completed at 2026-06-27T16:34:57Z. |
+| Run id | `2026-06-28-claude-goal-vs-mission-smoke-v2` | `results/2026-06-28-claude-goal-vs-mission-smoke-v2.jsonl`. |
+| Starting commit | `38cc7907e5e35fcd9fa23022a1fcf03f756df99b` | Runner argument. |
+| Task file | `tasks.complex.json` | One smoke task: `complex-cross-file-feature`. |
+| Arms | 2 | `claude_code_goal_command`, `mission`. |
+| Records completed | 2 / 2 | Summary JSON has two records. |
+| `/goal` artifact completion | 1 / 1 | Artifact exists and validator heuristic passed. |
+| `/mission` artifact completion | 0 / 1 | No artifact; API usage limit stopped the run. |
+| `/goal` cost | USD 0.93959825 | Raw Claude result JSON. |
+| `/mission` cost before stop | USD 1.05234325 | Raw Claude result JSON. |
+| Quality score method | automated heuristic | Not blind human review. |
+| Marketing comparison readiness | blocked | The `/mission` arm did not receive a full comparable attempt. |
+
+Smoke result:
+
+| Metric | claude_code_goal_command | mission | Interpretation |
+|---|---:|---:|---|
+| Completion rate | 1 / 1 | 0 / 1 | `/mission` failed due to workspace API limit, not a validated task-quality failure. |
+| Validator pass rate | 1 / 1 | 0 / 1 | The `/mission` validator could not run because no artifact was written. |
+| Average quality score | 4.00 / 5 | 1.00 / 5 | Automated placeholder score from artifact presence; not a capability conclusion. |
+| Average evidence completeness | 4.00 / 5 | 1.00 / 5 | Same limitation as above. |
+| Average elapsed minutes | 1.97 | 2.06 | `/mission` elapsed time ended at API-limit stop. |
+
+Safe interpretation:
+
+> The official Claude Code `/goal` smoke harness ran one complex task and wrote
+> an auditable artifact. The comparable `/mission` arm was blocked by Claude
+> Code workspace API limits before artifact completion, so this smoke does not
+> support a marketing claim that either arm is better.
+
+In short, this smoke does not support a marketing claim that either arm is better.
+
+Unsafe interpretation:
+
+> `mission` lost to official `/goal`.
+
+That would be unsupported because the failed `/mission` record is an
+infrastructure/API-limit stop, not a completed task-quality measurement.
+
+Follow-up preparation completed after this smoke:
+
+- `run_claude_goal_vs_mission.py` now records `run_status`,
+  `blocked_reason`, `failure_kind`, and `comparable_attempt` for future runs.
+- `official-goal-rerun-runbook.md` defines the 2026-07-01 09:00 JST smoke gate
+  and full paired pilot procedure.
+- Future reports must separate `completed`, `failed`, and `blocked` records
+  before making any capability claim.
+
+## Claude Code Official `/goal` Rerun After API Limit Increase
+
+Status: executed on 2026-06-28 JST after the Claude API limit was increased.
+This produced one completed comparable smoke task, then a 10-task full attempt
+that hit Claude Code workspace API usage limits. The full attempt is therefore
+not a completed performance comparison.
+
+### Smoke gate
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-06-28-claude-goal-vs-mission-smoke-v3` | `results/2026-06-28-claude-goal-vs-mission-smoke-v3.jsonl`. |
+| Starting commit | `ed98b0e00169f0e0b35ce629a206ffcb7af4d0a3` | Runner argument. |
+| Task file | `tasks.complex.json` | One smoke task: `complex-cross-file-feature`. |
+| Records completed | 2 / 2 | Summary JSON has two records. |
+| Blocked records | 0 / 2 | Both records have `run_status=completed`. |
+| Quality score method | automated heuristic | Not blind human review. |
+| Total Claude cost recorded | USD 3.78852475 | Raw Claude result JSON files. |
+| Marketing comparison readiness | smoke-only | One comparable task is too small for broad performance claims. |
+
+Smoke result:
+
+| Metric | claude_code_goal_command | mission | Interpretation |
+|---|---:|---:|---|
+| Completed comparable records | 1 / 1 | 1 / 1 | Both arms completed the same smoke task. |
+| Completion rate | 1 / 1 | 1 / 1 | Tie on the single measured task. |
+| Validator pass rate | 1 / 1 | 1 / 1 | Tie on the single measured task. |
+| Average quality score | 4.00 / 5 | 4.00 / 5 | Automated heuristic score; not blind human review. |
+| Average evidence completeness | 4.00 / 5 | 4.00 / 5 | Tie on the single measured task. |
+| Average elapsed minutes | 1.70 | 6.50 | `/mission` took 4.80 minutes longer in this smoke. |
+
+Safe interpretation:
+
+> After the API limit increase, a one-task Claude Code official `/goal` vs
+> `/mission` smoke completed on both arms. Both arms passed completion and
+> validator checks under the automated heuristic scorer; `/mission` took longer.
+
+Unsafe interpretation:
+
+> `mission` is better than official `/goal`.
+
+This remains unsupported because the completed comparable sample is one task.
+
+### Full 10-task attempt
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-06-28-claude-goal-vs-mission-complex-v1` | `results/2026-06-28-claude-goal-vs-mission-complex-v1.jsonl`. |
+| Starting commit | `ed98b0e00169f0e0b35ce629a206ffcb7af4d0a3` | Runner argument. |
+| Task file | `tasks.complex.json` | 10 complex tasks. |
+| Expected records | 20 | 10 tasks x 2 arms. |
+| Records written | 20 / 20 | Summary JSON has 20 records. |
+| Completed comparable records | 0 / 20 | Every record has `run_status=blocked`. |
+| Blocked records | 20 / 20 | Every record has `blocked_reason=api_usage_limit`. |
+| Total Claude cost recorded | USD 0.81484175 | Raw Claude result JSON files. |
+| Marketing comparison readiness | blocked | No comparable full-run task-quality attempt completed. |
+
+Full attempt result:
+
+| Metric | claude_code_goal_command | mission | Interpretation |
+|---|---:|---:|---|
+| Records | 10 | 10 | Full attempt wrote the expected record count. |
+| Completed comparable records | 0 / 10 | 0 / 10 | All records were API-limit blocked. |
+| Blocked records | 10 / 10 | 10 / 10 | Not a task-quality result. |
+| Comparable completion rate | n/a | n/a | Denominator is zero after excluding blocked records. |
+| Comparable validator pass rate | n/a | n/a | Denominator is zero after excluding blocked records. |
+
+Safe interpretation:
+
+> The one-task smoke became comparable after the API limit increase, but the
+> full 10-task Claude Code official `/goal` vs `/mission` run still exhausted
+> workspace API usage limits. The full run does not support a marketing claim
+> about which arm is better.
+
+Unsafe interpretation:
+
+> Both arms failed all 10 complex tasks.
+
+That would be unsupported because every full-run record was blocked by
+workspace API usage limits before a comparable task-quality attempt.
+
+## Cost-Controlled Incremental Rerun
+
+Status: executed on 2026-06-28 JST after an additional Claude API budget increase.
+To avoid rerunning the already measured first smoke task, the runner was updated
+with `--task-ids` and `--stop-on-blocked`. The incremental run targeted two
+previously unmeasured complex tasks and capped each Claude invocation with
+`--max-budget-usd 3.0`.
+
+This is a useful cost-capped operational comparison, but it is **not** a full
+quality comparison for `mission`: both `/mission` records hit the configured
+per-invocation budget cap before Claude Code returned success.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-06-28-claude-goal-vs-mission-incremental-v1` | `results/2026-06-28-claude-goal-vs-mission-incremental-v1.jsonl`. |
+| Starting commit | `d1cef1d5bd0166b5d61939c8d93ce0060c05507f` | Runner argument. |
+| Task file | `tasks.complex.json` | Selected tasks only. |
+| Selected tasks | 2 | `complex-failing-test-triage`, `complex-review-thread-resolution`. |
+| Expected records | 4 | 2 tasks x 2 arms. |
+| Records written | 4 / 4 | Summary JSON has 4 records. |
+| Per-invocation cost cap | USD 3.00 | Runner argument `--max-budget-usd 3.0`. |
+| API usage-limit blocked records | 0 / 4 | No record has `blocked_reason=api_usage_limit`. |
+| Max-budget blocked records | 2 / 4 | Both `/mission` records have `blocked_reason=max_budget_usd`. |
+| Total Claude cost recorded | USD 9.39057695 | Raw Claude result JSON files. |
+| `/goal` cost recorded | USD 3.31969425 | Sum of `/goal` raw Claude result JSON files. |
+| `/mission` cost recorded | USD 6.07088270 | Sum of `/mission` raw Claude result JSON files. |
+
+Incremental result:
+
+| Metric | claude_code_goal_command | mission | Interpretation |
+|---|---:|---:|---|
+| Records | 2 | 2 | Same two selected tasks were attempted. |
+| Completed comparable records | 2 / 2 | 0 / 2 | `/mission` records are excluded from task-quality comparison because they hit the configured budget cap. |
+| Completion rate | 2 / 2 | 0 / 2 | Under the USD 3.00 cap, `/goal` completed both tasks; `/mission` did not return success. |
+| Validator pass rate | 2 / 2 | 0 / 2 | `/mission` artifacts existed, but Claude Code returned `error_max_budget_usd`, so the runner did not count them complete. |
+| Average elapsed minutes | 3.87 | 7.56 | `/mission` ran longer before hitting the budget cap. |
+| Average quality score | 4.00 / 5 | n/a | `/mission` comparable denominator is zero after excluding max-budget blocked records. |
+
+Safe interpretation:
+
+> In a cost-capped incremental run with a USD 3.00 per-invocation cap, official
+> `/goal` completed and passed both selected complex tasks. `/mission` produced
+> artifacts but hit the configured Claude Code max-budget cap on both selected
+> tasks, so those records are budget-blocked rather than completed task-quality
+> measurements.
+
+Unsafe interpretation:
+
+> `mission` produced lower-quality answers than official `/goal`.
+
+That would be unsupported because the two `/mission` incremental records ended
+with `error_max_budget_usd`, not a completed validator result.
+
+## Lightweight Mission Profile Rerun
+
+Status: executed on 2026-06-28 JST to test whether `/mission` can be compared
+under a smaller cost envelope. The runner now supports `--mission-profile light`,
+which keeps the `/mission` prompt to one concise plan/write/check pass and uses
+`--mission-max-iter 1`.
+
+This is the first completed cost-controlled comparison where both official
+`/goal` and `/mission` completed the same previously unmeasured complex task.
+It is still only N=1, so it supports a profile-level hypothesis, not a broad
+performance claim.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-06-28-claude-goal-vs-mission-light-v1` | `results/2026-06-28-claude-goal-vs-mission-light-v1.jsonl`. |
+| Starting commit | `d6f12d739a521046e1dc1d198e671a162a803e9c` | Runner argument. |
+| Task file | `tasks.complex.json` | Selected task only. |
+| Selected task | 1 | `complex-failing-test-triage`. |
+| Mission profile | `light` | `mission_profile=light`, `--mission-max-iter 1`. |
+| Expected records | 2 | 1 task x 2 arms. |
+| Records written | 2 / 2 | Summary JSON has 2 records. |
+| Blocked records | 0 / 2 | Both records have `run_status=completed`. |
+| Total Claude cost recorded | USD 5.01240250 | Raw Claude result JSON files. |
+| `/goal` cost recorded | USD 3.00670750 | `/goal` raw Claude result JSON. |
+| `/mission` light cost recorded | USD 2.00569500 | `/mission` raw Claude result JSON. |
+
+Lightweight result:
+
+| Metric | claude_code_goal_command | mission light | Interpretation |
+|---|---:|---:|---|
+| Completed comparable records | 1 / 1 | 1 / 1 | Both arms completed the same selected task. |
+| Completion rate | 1 / 1 | 1 / 1 | Tie on this task. |
+| Validator pass rate | 1 / 1 | 1 / 1 | Tie on this task. |
+| Average quality score | 4.00 / 5 | 4.00 / 5 | Automated heuristic score, not blind human review. |
+| Average evidence completeness | 4.00 / 5 | 4.00 / 5 | Tie on this task. |
+| Average elapsed minutes | 9.56 | 5.27 | `mission` light was 4.29 minutes faster on this task. |
+| Recorded Claude cost | USD 3.00670750 | USD 2.00569500 | `mission` light used USD 1.00101250 less on this task. |
+
+Safe interpretation:
+
+> On one previously unmeasured complex triage task, a lightweight `/mission`
+> profile and official `/goal` both completed and passed the automated
+> validator. In this single measured task, `mission` light was faster and lower
+> cost than official `/goal`.
+
+Unsafe interpretation:
+
+> `mission` is cheaper and faster than official `/goal`.
+
+That would be unsupported because the completed light-profile sample is one
+task. The defensible next step is to run a 3-5 task light-profile pilot with the
+same per-invocation cost cap and no recycled tasks.
+
+## Lightweight Mission Profile Rerun on Quality Cohort
+
+Status: executed on 2026-07-03 JST to extend the light-profile evidence from
+N=1 to three additional paired tasks. This run used the quality-critical cohort
+with `--mission-profile light`, not the heavier `quality` profile. The goal was
+to compare official `/goal` and `/mission` light under a bounded budget while
+preserving quality-marker scoring.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-07-03-claude-goal-vs-mission-quality-light-v1` | `results/2026-07-03-claude-goal-vs-mission-quality-light-v1.jsonl`. |
+| Starting commit | `1863e02b4cb49bc78399d423ad82c2176627ecdd` | Runner argument. |
+| Task file | `tasks.quality.json` | Quality-critical cohort, run with light mission profile. |
+| Selected tasks | 3 | `quality-multi-cause-regression-triage`, `quality-security-secret-handling-plan`, `quality-bilingual-claim-consistency`. |
+| Mission profile | `light` | `--mission-profile light`, `--mission-max-iter 1`. |
+| Expected records | 6 | 3 tasks x 2 arms. |
+| Records written | 6 / 6 | Summary JSON has 6 records. |
+| Blocked records | 0 / 6 | No record has `blocked_reason`. |
+| Quality score method | automated heuristic | Not blind human review. |
+| Total Claude cost recorded | USD 7.51945750 | Raw Claude result JSON files. |
+| `/goal` cost recorded | USD 3.11103025 | Sum of `/goal` raw Claude result JSON files. |
+| `/mission` light cost recorded | USD 4.40842725 | Sum of `/mission` raw Claude result JSON files. |
+
+Task-level result:
+
+| Task | Arm | Completion | Validator pass | Human quality score | Quality marker score | Cost | Elapsed | Blocked / failure reason |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `quality-multi-cause-regression-triage` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | USD 1.17585050 | 3.10 min | none |
+| `quality-multi-cause-regression-triage` | `mission` light | true | true | 5.00 | 1.00 | USD 1.66316525 | 3.58 min | none |
+| `quality-security-secret-handling-plan` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | USD 0.74217350 | 1.98 min | none |
+| `quality-security-secret-handling-plan` | `mission` light | true | true | 5.00 | 1.00 | USD 1.35611750 | 3.06 min | none |
+| `quality-bilingual-claim-consistency` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | USD 1.19300625 | 2.37 min | none |
+| `quality-bilingual-claim-consistency` | `mission` light | true | true | 5.00 | 1.00 | USD 1.38914450 | 2.78 min | none |
+
+Aggregate result:
+
+| Metric | claude_code_goal_command | mission light | Interpretation |
+|---|---:|---:|---|
+| Completed comparable records | 3 / 3 | 3 / 3 | Both arms completed all selected tasks. |
+| Completion rate | 3 / 3 | 3 / 3 | Tie on completion. |
+| Validator pass rate | 3 / 3 | 3 / 3 | Tie on validator pass. |
+| Average quality score | 5.00 / 5 | 5.00 / 5 | Tie under automated heuristic scoring. |
+| Average quality marker score | 1.00 | 1.00 | Tie; all tracked quality markers were matched. |
+| Average elapsed minutes | 2.48 | 3.14 | `/mission` light was 0.66 minutes slower on average. |
+| Recorded Claude cost | USD 3.11103025 | USD 4.40842725 | `/mission` light cost USD 1.29739700 more across the three tasks. |
+
+Safe interpretation:
+
+> On three additional quality-critical tasks run with the light profile, official
+> `/goal` and `/mission` light both completed every task, passed every automated
+> validator, and matched all configured quality markers. In this run, `/mission`
+> light was slower and cost more than official `/goal`.
+
+Unsafe interpretation:
+
+> `/mission` light is always higher quality than official `/goal`.
+
+That is unsupported. The automated quality and marker scores tied in this
+three-task run, and the scorer is a heuristic rather than blind human review.
+
+## Tail Cohort Run (tail-first-failure)
+
+Status: executed on 2026-07-07 JST. This is the first completed run using the
+`tasks.tail.json` cohort (5 planted-defect tasks). Both arms used model
+`claude-sonnet-5` via a PATH shim that injected `--model claude-sonnet-5` into
+every `claude` invocation; `modelUsage` in each `claude-result.json` confirms
+`claude-sonnet-5` on all records.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-07-07-claude-goal-vs-mission-tail-v1` | `results/2026-07-07-claude-goal-vs-mission-tail-v1.jsonl`. |
+| Starting commit | `3591f9947cddb9028538f8d333a0eeb6545b726e` | Runner argument. |
+| Task file | `tasks.tail.json` | Planted-defect tail cohort, 5 tasks. |
+| Mission profile | `full` | Default workflow; no `--mission-profile` override. |
+| Expected records | 10 | 5 tasks x 2 arms. |
+| Records written | 10 / 10 | JSONL has 10 records. |
+| Blocked records | 0 / 10 | All records have `run_status=completed`. |
+| Quality score method | `automated_heuristic_form_stripped_not_blind_human` | Automated heuristic; not blind human review. |
+| model_id | `claude-sonnet-5` | All 10 records. |
+| Total Claude cost recorded | USD 23.6366052 | Sum of both arms across 5 tasks. |
+| `/goal` cost recorded | USD 2.8077291 | Sum of 5 goal records. |
+| `/mission` cost recorded | USD 20.8288761 | Sum of 5 mission records. |
+
+Task-level result:
+
+| Task | Arm | Completion | Validator pass | Quality score | Marker score | Forbidden hits | Cost | Elapsed |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `tail-config-spec-drift` | `claude_code_goal_command` | true | true | 4.86 | 0.86 | 0 | USD 0.49555495 | 1.88 min |
+| `tail-config-spec-drift` | `mission` | true | true | 4.86 | 0.86 | 0 | USD 2.62527390 | 8.78 min |
+| `tail-incident-log-triage` | `mission` | true | true | 5.00 | 1.00 | 0 | USD 5.53930740 | 18.87 min |
+| `tail-incident-log-triage` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | 0 | USD 0.51823745 | 1.90 min |
+| `tail-bilingual-release-drift` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | 0 | USD 0.56775820 | 2.22 min |
+| `tail-bilingual-release-drift` | `mission` | true | true | 5.00 | 1.00 | 0 | USD 3.66627435 | 13.70 min |
+| `tail-metrics-reconciliation` | `mission` | true | true | 5.00 | 1.00 | 0 | USD 3.63863340 | 11.58 min |
+| `tail-metrics-reconciliation` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | 0 | USD 0.66852725 | 3.26 min |
+| `tail-dependency-upgrade-impact` | `claude_code_goal_command` | true | true | 5.00 | 1.00 | 0 | USD 0.55765120 | 2.37 min |
+| `tail-dependency-upgrade-impact` | `mission` | true | true | 5.00 | 1.00 | 0 | USD 5.35938705 | 14.42 min |
+
+Aggregate result:
+
+| Metric | claude_code_goal_command | mission | Interpretation |
+|---|---:|---:|---|
+| Completed comparable records | 5 / 5 | 5 / 5 | Both arms completed all 5 tasks. |
+| Completion rate | 5 / 5 | 5 / 5 | Tie on completion. |
+| Validator pass rate | 5 / 5 | 5 / 5 | Tie on validator pass. |
+| Average quality score | 4.97 / 5 | 4.97 / 5 | Tie under automated heuristic scoring. |
+| Average quality marker score | 0.97 | 0.97 | Tie; one task drove both arms below 1.0. |
+| Forbidden marker hits | 0 | 0 | No decoy false positives on either arm. |
+| Total elapsed minutes | 11.63 | 67.35 | `/mission` ran ~5.8x longer in wall-clock time. |
+| Average elapsed minutes | 2.33 | 13.47 | Per-task average. |
+| Total recorded Claude cost | USD 2.8077291 | USD 20.8288761 | `/mission` cost ~7.4x more. |
+
+The `/mission` arm ran the full review loop — plan, review, score, iteration gate — on
+all five tasks. The internal composite score produced by `mission-state.py aggregate-reviews`
+and `push-score` cleared the 4.0 pass gate at iteration 1 in all five runs:
+`tail-config-spec-drift` (4.29), `tail-incident-log-triage` (4.53),
+`tail-bilingual-release-drift` (4.54), `tail-metrics-reconciliation` (5.00), and
+`tail-dependency-upgrade-impact` (4.28). No second iteration was triggered in any run.
+
+**Marker false negative and secondary re-score (secondary analysis; primary JSONL unchanged):**
+On `tail-config-spec-drift`, both arms' artifacts correctly identified the
+`health_check_interval_s` drift (spec 15 vs beta 75). The goal artifact contains
+`` `HEALTH_CHECK_INTERVAL_SECONDS=75` `` and the mission artifact contains
+`` `75` (same unit, seconds) ``, but the six configured patterns
+(`"75 seconds"`, `"75s"`, `"= 75"`, `": 75"`, `"75 vs 15"`, `"15 vs 75"`) failed to
+substring-match either phrasing. The marker pattern has been extended in
+`tasks.tail.json` to also include `"seconds=75"`, `"(75"`, and `` "75`" ``.
+Applying the updated task definitions to the 10 saved artifact files gives:
+`tail-config-spec-drift` both arms 0.86 → **1.0** (marker now matched); all other
+eight records unchanged at 1.0. Re-scored averages: both arms 0.97 → **1.0**,
+re-scored quality scores both 4.97 → **5.00**. The primary JSONL scores remain
+as-recorded (0.86 / 4.86 for `tail-config-spec-drift`); these are the
+secondary-analysis figures.
+
+Safe interpretation:
+
+> On five planted-defect tasks designed as first-pass recall challenges, both
+> arms tied on all automated content-recall metrics under the primary scorer, with
+> zero decoy false positives on either arm. The `/mission` arm ran its full
+> plan-review-score loop, cleared its own 4.0 pass gate at iteration 1 in all
+> five runs, and cost ~5.8x more wall-clock time and ~7.4x more in recorded USD
+> than the `/goal` arm. N=5, one model, closed-world fixtures where all evidence
+> fits in a few short files; production case studies (`docs/CASE_STUDIES.md`)
+> document the open-world tail where the gate binds.
+
+Unsafe interpretation:
+
+> `mission` is worse than `/goal` because it cost more with the same score.
+
+> The review loop is useless because it did not improve the automated score.
+
+Neither is supported: N=5 on a closed-world fixture set where both arms could
+find the same short files; the designed first-pass failures did not reproduce in
+this run. The `/mission` arm demonstrably ran the full loop and passed its own
+gate — the gate is a correctness guard that can bind on open-world work even
+when it did not bind here.
+
+### Pattern-Fix Validation Smoke (2026-07-10)
+
+Status: run on 2026-07-10 JST. This is a single-task smoke to validate that the marker
+pattern fix applied after the tail-v1 run (adding `"seconds=75"`, `"(75"`, and `` "75`" ``
+to the `"Drift: health interval 75s"` patterns in `tasks.tail.json`) resolves the false
+negative observed in v1. In v1, both arms correctly identified the
+`health_check_interval_s` drift but none of the six original patterns matched the artifact
+text. This smoke re-runs only `tail-config-spec-drift` against the updated pattern set.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-07-10-claude-goal-vs-mission-tail-smoke-v2` | `results/2026-07-10-claude-goal-vs-mission-tail-smoke-v2.jsonl`. |
+| Starting commit | `4fdb222b6073cef22676206625ccc61b83c9f658` | Runner argument. |
+| Task file | `tasks.tail.json` | Planted-defect tail cohort. |
+| Task | `tail-config-spec-drift` | Single task; N=1 per arm. |
+| Mission profile | `full` | Default workflow. |
+| Expected records | 2 | 1 task x 2 arms. |
+| Records written | 2 / 2 | JSONL has 2 records. |
+| Blocked records | 1 / 2 | Mission arm: `blocked_reason=api_usage_limit`. |
+| Comparable records | 1 / 2 | Goal arm completed; mission arm excluded. |
+| Quality score method | `automated_heuristic_form_stripped_not_blind_human` | Automated heuristic; not blind human review. |
+| model_id | `claude-sonnet-5` | Both records. |
+| Total Claude cost recorded | USD 4.27159565 | Sum of both arms. |
+
+Result:
+
+| Arm | Completion | Validator pass | Marker score | Forbidden hits | Cost | Elapsed | Comparable |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `claude_code_goal_command` | true | true | 1.00 | 0 | USD 0.57630950 | 1.76 min | yes |
+| `mission` | false | false | null (blocked) | 0 | USD 3.69528615 | 11.80 min | no |
+
+Artifact evidence (mission arm): although the `/mission` run ended with
+`run_status=blocked` (`api_usage_limit`), the partially written `artifact.md` contains
+`HEALTH_CHECK_INTERVAL_SECONDS=75`, which matches the new pattern `"seconds=75"`.
+The marker was found in the artifact content; the block occurred before Claude Code
+returned success.
+
+v1 comparison (task: `tail-config-spec-drift`):
+
+| Metric | v1 (2026-07-07) | smoke-v2 (2026-07-10) |
+|---|---:|---|
+| Goal arm marker score | 0.86 (6 / 7) | 1.00 (7 / 7) — pattern fix confirmed |
+| Mission arm marker score | 0.86 (6 / 7) | null / blocked — not comparable |
+
+Safe interpretation:
+
+> The `/goal` arm completed the re-run and matched all 7 quality markers (score 1.00),
+> including `"Drift: health interval 75s"`, which was missed by the primary scorer in v1.
+> The pattern fix (`"seconds=75"`, `"(75"`, `` "75`" ``) resolves the false negative on
+> the comparable arm. The `/mission` arm was blocked by a workspace API usage limit before
+> returning success, so its marker score is not comparable; artifact inspection shows the
+> health-interval drift was correctly identified in the partial output. N=1 task, one model,
+> one comparable arm.
+
+Unsafe interpretation:
+
+> The pattern fix proves the false negative is fully resolved on both arms.
+
+That is unsupported for the mission arm: the block stopped the mission run before a
+comparable validator result, and a single run per arm does not guarantee the result on
+future executions.
+
+## Quality-Focused Critical Task Attempt
+
+Status: attempted on 2026-06-28 JST after adding a `quality` mission profile and
+a fresh `tasks.quality.json` cohort. This profile is designed to test the task
+types where `/mission` should have the best chance to show higher quality:
+evidence maps, rejected hypotheses, stop/proceed decisions, residual risks, and
+unsafe-claim control.
+
+The paired comparison did **not** complete. The official `/goal` arm hit Claude
+Code workspace API usage limits before returning success, so the `/mission` arm
+was not run. This is a blocked infrastructure/account result, not evidence that
+either arm produced higher quality.
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-06-28-claude-goal-vs-mission-quality-v1` | `results/2026-06-28-claude-goal-vs-mission-quality-v1.jsonl`. |
+| Starting commit | `e443bb421cdc58418085790b1fb6733dd3ef89f5` | Runner argument. |
+| Task file | `tasks.quality.json` | Fresh quality-critical cohort. |
+| Selected task | 1 | `quality-critical-release-governance`. |
+| Mission profile | `quality` | `--mission-profile quality`, `--mission-max-iter 2`. |
+| Expected records | 2 | 1 task x 2 arms. |
+| Records written | 1 / 2 | stopped early after `/goal` blocked. |
+| Blocked records | 1 / 1 | `/goal` has `blocked_reason=api_usage_limit`. |
+| `/mission` records | 0 | Not run because `--stop-on-blocked` conserved API budget. |
+| `/goal` cost before stop | USD 1.01481150 | raw Claude result JSON. |
+| Quality-marker comparison | unavailable | blocked records are excluded from comparable quality-marker aggregates. |
+
+Safe interpretation:
+
+> A quality-focused benchmark profile and fresh critical task cohort now exist,
+> but the first official `/goal` vs `/mission` quality attempt was blocked by
+> Claude Code workspace API usage limits before a comparable pair completed.
+
+Unsafe interpretation:
+
+> `mission` quality is higher than official `/goal` on the quality-critical task.
+
+That is unsupported. The task was not paired through both arms.
+
+## Measurement validity warning: permission-mode contamination (found by the 2026-07-23 audit)
+
+Every run from 2026-07-21 onward (`tail-v2` / `tail-v2-retry` / the fable5
+runs / `openworld-v1` / `discriminating-smoke` / `discriminating-v1`) executed
+with the runner's `--permission-mode acceptEdits` **forcibly downgraded to
+default**: launching the runner from a Claude Code session propagated
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` into the child `claude -p` processes (the
+warning appears in every record's stderr). `tail-v1` (2026-07-07) ran in the
+intended mode.
+
+Impact:
+
+- **Within-run arm comparisons remain valid** — the downgrade applied
+  symmetrically to both arms.
+- **Cross-run comparisons are confounded** — the apparent overhead
+  improvement (5.8x at tail-v1 → 2.9x at tail-v2 → 1.07x at
+  discriminating-v1) cannot be separated from the permission-mode change and
+  must not be attributed to mission improvements.
+- **The mechanism behind the two goal budget exhaustions in
+  discriminating-v1 is unresolved** — the blocked goal runs spent 76 turns
+  and 12.6M cache-read tokens without ever creating the output file;
+  permission friction may have amplified the divergence, so the failures
+  must not be attributed to task difficulty alone.
+- Detection guard and prevention are tracked in #268 (record-level
+  `permission_mode_degraded`, and `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` at
+  runner launch).
+
+Until a re-run under a clean permission mode completes, treat the
+completion-rate finding in the discriminating-v1 section below as
+preliminary.
+
+## Portfolio + discriminating v3 run (post-v2.1.0, 2026-08-02)
+
+Two clean runs (all records `permission_mode_degraded=false`, `--parallel 3`,
+identical $10/30min constraints, CLI 2.1.220) at commit `73abd72`, which
+includes v2.1.0 (adaptive routing #276/#304, critic-scope enforcement #309,
+2-reviewer tier #266, audit findings F1-F6).
+
+**portfolio-v1** (16 records, all completed, quality tied at marker 1.0):
+goal total 7.23 min / $4.34 vs mission 43.54 min / $16.41 = **6.0x time /
+3.8x cost — V1 (≤1.3x) failed.** Root cause verified in state: adaptive
+routing never fired on the Simple tasks — routing is evaluated only from
+`init`'s complexity argument, and the orchestrator path that classifies
+after init (`set complexity=Simple`) bypasses it (#325).
+
+**discriminating-v3** (10 records, all completed, quality tied at 1.0 —
+V2 failed): goal avg 1.45 min / $0.61 vs mission 11.06 min / $3.12 =
+**7.6x / 5.1x — V3 (≤2.5x) failed.** Goal itself got ~1.4x faster under
+CLI 2.1.220 clean conditions, widening the relative gap.
+
+Two notable facts: (1) a real quality-gate save — release-ledger mission
+scored composite 3.58 at iter1 (below threshold), remediated, and passed at
+4.25 on iter2, catching internal-quality defects the markers cannot see
+(at 23.95 min / $6.13 vs goal 1.83 min / $0.66); (2) the #309 guidance-layer
+enforcement was bypassed on that same run (`critic_has_new_scope` stayed
+None at iter2 — the orchestrator did not consult `next` before reviewing),
+so a hard gate is tracked in #326.
+
+Verdict: V1 / V2 / V3 all failed at this time. The quality ceiling of
+sonnet-5 has now survived three independently designed cohorts; single-shot
+speed parity is architecturally unreachable while independent review exists.
+Mission's proven value remains the completion gate (see the 3.58→4.25 save),
+tail insurance, governance, budget guard, and resume. The winning axes are
+completing the routing (#325 — eliminating losses rather than winning) and
+gated completion quality.
+
+Unsafe interpretation:
+
+> The improvements were pointless.
+
+Unsupported: absolute mission times improved substantially (Complex 13-21
+min in the contaminated era → 5-8 min now); the relative gap widened because
+goal's single-pass architecture sped up faster than mission's multi-pass
+floor can shrink.
+
+### portfolio-v2 (V1 re-measurement after #325/#326, 2026-08-02)
+
+Re-measured at commit `17cedf1` (with the #325 next-driven routing gate and
+#326 scope hard gate). 16 records, all completed, 0 degraded, quality tied
+at marker 1.0 everywhere.
+
+**V1 re-verdict: failed (7.6x time / 4.4x cost — statistically flat vs the
+6.0x of v1 at N=1/cell).** State ground truth: routing fired on only **1 of
+3** Simple tasks — simple-typo completed inline (1.46 min = goal 0.63 +
+~0.8 min entrance overhead, though it misused the `evidence-submitted` halt
+category), while simple-lookup and simple-diff spawned the planner without
+consulting `next` and ran the full loop. The guidance layer is bypassed by
+the same "next not consulted" pattern as #309/#326. The one firing shows
+routing can bring Simple missions to goal + ~0.8 min; command-level
+hardening (`set complexity=Simple` executing the routing verdict directly)
+is tracked in #330.
+
+Unsafe interpretation:
+
+> #325 was ineffective.
+
+Unsupported: the gate itself works (unit-verified); non-firing stems from
+orchestrator next-consumption discipline, closable at the command layer
+(#330). The 1.46-min firing is evidence of reachability.
+
+### portfolio-v3 (final V1 verdict after #330, 2026-08-02)
+
+Commit `3460c41` (with the #330 command-layer hard routing). 16 records, all
+completed, 0 degraded, quality tied at marker 1.0. Totals: goal 7.17 min /
+$4.11 vs mission 36.97 min / $13.83 = **5.16x / 3.37x** — the best of three
+portfolio rounds, but V1 (≤1.3x) is conclusively not met.
+
+**Routing fired 0/3, and the root cause is now definitive:** all three
+Simple mission states carry `force_mission=True` — the benchmark's own
+mission-arm prompt demands the loop ("Use the /mission plugin workflow with
+auditable state") and requires loop-shaped headings
+(Mission/Plan/Execution/Review/Score), so an obedient orchestrator forces
+the mission. **The measurement design suppresses the very feature it tries
+to measure**; the product routing (three layers: init #276 / set #330 /
+next #325, unit-verified) is not at fault. Additionally, this cohort's
+Simple tasks are ~30-second tasks for goal, so the ~0.8-1 min routing
+entrance overhead makes ≤1.3x structurally unreachable regardless. The
+bench revision (routing-permissive prompt + minutes-scale Simple tasks) is
+tracked in #333.
+
+Side observation: std-contract / std-policy missions finished in
+1.85-1.9 min ($0.79-0.86) via orchestrator-chosen single-pass execution,
+while std-metrics ran a 6.37-min full loop in the same run — orchestrator
+behavioral variance remains large.
+
+Unsafe interpretation:
+
+> Routing does not work.
+
+Unsupported: all three layers are unit-verified and v2 recorded one live
+firing (1.46 min = goal + 0.8 min). Non-firing is caused by the benchmark
+prompt inducing `--force-mission`; without that instruction, routing fires.
+
+### portfolio-v4 (legitimate V1 re-measurement after #333, 2026-08-02) — routing parity achieved
+
+Commit `623d4d7` (#333: routing-permissive prompt + first-class
+`mission_routed` + minutes-scale Simple tasks). 16 records, all completed,
+0 degraded, quality tied at marker 1.0 everywhere.
+
+**Routing fired 3/3 (first complete firing), and the Simple layer hit the
+pre-declared parity band: goal 2.90 min vs mission 3.42 min = 1.18x**
+(cost $0.52-0.57 vs $0.60-0.70, near parity). Routed missions cost only
+0.1-0.3 min of entrance overhead over goal — the first measured arm-parity
+result in this program: using mission on Simple tasks no longer loses to
+goal.
+
+Whole-portfolio V1 (≤1.3x) remains unmet (4.22x / 2.83x), but the residual
+is the intended cost of the gated loop on Standard/Complex tasks — the
+deliberate quality-gate trade (see the 3.58→4.25 gate save), not a defect.
+The "eliminate losses" strategy is now measured and validated.
+
+Unsafe interpretation:
+
+> Mission now beats goal on speed.
+
+Unsupported: what was achieved is parity (1.18x) on the routed Simple
+layer; gated-loop layers still cost 2.7-9.5x, orchestrator variance remains
+large (2.99-10.16 min within one layer), and this is N=1/cell.
+
+
+### portfolio-v5-speed (Standard+Complex re-measurement after #338/#339/#341, 2026-08-02)
+
+Commit `5c6a1d4` (after merging #338 parallel verifiability, #339 turn
+compression / plan-inline, and #341 bench role pinning). Paired 10 records over
+Standard 3 + Complex 2 (Simple excluded — routing already verified). All
+completed, degraded 0, marker 1.0 tied on every record.
+
+Key observations: (1) #341 fired completely (`evidence_only_records: 0`) — the
+cx-ledger mission arm ran a true full-tier loop for the first time (14.38 min /
+8.9x), revealing v4's 2.99 min (1.53x) as an under-measurement by a
+checker-style run; the honest Complex full-loop band is 7.6-8.9x. (2) #338
+parallel spawn fired on 1 of 5 records; the one parallel record (std-policy,
+API 354s > wall 288s) was the fastest Standard run at 4.84 min (~half of v4's
+10.16 min for the same task). (3) #339 did not fire — 26-53 turns, no
+reduction; the orchestrator skipped `next`, the same bypass measured in
+portfolio-v2. (4) std-contract went to iteration 2 (gate rework, 18.27 min) —
+excluded from speed comparison but reproducing the gate's working value inside
+the benchmark. Interpretation guard: this is the fourth measured confirmation
+that guidance-layer instructions fire unreliably — the mechanisms work when
+adopted (the one parallel record was ~2x faster), but spawn parallelism and
+turn structure cannot be forced from the command layer, so the harness is the
+binding constraint.
+
+Primary data: `results/2026-08-02-portfolio-v5-speed.jsonl` /
+`results/2026-08-02-portfolio-v5-speed-summary.json` /
+`artifacts/2026-08-02-portfolio-v5-speed/`
+
+### portfolio-v6-repeats3 (repeats=3 re-measurement attempt, 2026-08-07) — partially invalidated by spend limit
+
+Commit `5ac06b3`. Same 5 tasks as v5-speed (3 Standard + 2 Complex) x 2 arms x
+repeats=3 = 30 records. **The org's monthly API spend limit (HTTP 429) killed 12
+records instantly** (elapsed 0.04-0.08 min), 3 mission records were blocked at the
+`--max-budget-usd 6.0` cap, and 1 record failed the validator. The summary's arm
+aggregates (e.g. goal completion 0.53) include 429 contamination and **must not be
+used for arm comparison**. Runner-side fixes are filed as #357 (classify 429 as
+blocked-external + auto-stop) and #358 (per-arm budget caps).
+
+Salvageable observations from the 6 mission records that completed before the limit:
+
+| task | v6 (iter) | v5-speed (iter) | reading |
+|---|---|---|---|
+| std-contract | 6.29 min (1) | 18.27 min (2) | **confirms v5's 18.27 was an iter-2 outlier**; at iter=1 it is faster than v4 (9.27) |
+| std-metrics | 6.55 min (1) | 6.02 min (1) | reproduced (low variance) |
+| std-policy | 5.08 min (1) | 4.84 min (1) | reproduced (low variance) |
+| cx-ledger | 13.62 min (1, full) | 14.38 min (1, full) | **full-tier loop cost is reproducible (13.6-14.4 min)** |
+
+- Zero iter=2 among the 6 comparable mission records; marker 1.0 held on every
+  completed record.
+- Mission full-profile per-record cost reached $5-6 (v5 mean $3.07 -> v6 $4.71);
+  the $6 cap censored 3 records. Budget calibration is #358.
+- The repeats=3 variance determination will be re-run after the spend limit resets,
+  on a runner with #357/#358 applied.
+
+Primary data: `results/2026-08-07-portfolio-v6-repeats3.jsonl` /
+`results/2026-08-07-portfolio-v6-repeats3-summary.json` /
+`artifacts/2026-08-07-portfolio-v6-repeats3/`
+
+### portfolio-v7 (repeats=3 variance determination, 2026-08-07) — runner with #357/#358
+
+Commit `1e8bdc3` (after #357 spend-limit auto-stop + #358 per-arm budgets + #362).
+Same tasks as v5-speed, re-measured in two parts: v7a = 3 Standard tasks x
+repeats 3 (18 records, full completion), v7b = 2 Complex tasks x repeats 3 (10 of
+12 records, auto-stopped at the spend limit), v7c = a fill attempt (window not yet
+recovered; auto-stopped at record 1/4, $0 spent). Budgets: goal $3 / mission $10
+(#358 calibration). Quality tied at marker 1.0 on every completed record.
+
+Standard (v7a, mission n=9): mean 9.98 min / median 10.58 / range 6.26-14.08.
+iter=2 fired 2 of 9 (both std-metrics). Goal mean 1.11 min → ~9.0x. Every
+v5-speed value (metrics 6.02 / policy 4.84 / contract 18.27 at iter=2) lies inside
+this distribution; single-run differences are explained by repeat variance.
+
+Complex (v7b, mission comparable n=4): cx-config 11.04 / 12.99 min (standard
+tier), cx-ledger 17.41 / 17.58 min (full tier) — consistent with v5/v6, so the
+**13.6-17.6 min full-tier loop is a reproducible real cost**. Goal mean 1.59 min.
+
+Operational observations:
+
+1. **#357 fired twice in production**: v7b classified the 429 as blocked-external
+   at record 10/12 and stopped launching; v7c stopped at record 1/4 with $0 spent.
+   The v6-style 12-record waste did not recur.
+2. **The #358 $10 calibration was essential**: mission per-record cost ranged
+   $4.71-9.31, so the old $6 cap would have blocked 6 of v7a's 9 records.
+   budget_blocked_records is 0.
+3. Filling the Complex cells to n=3 would require waiting out the usage window;
+   n=2 (spread 0.2-2.0 min) is accepted as final.
+
+Primary data: `results/2026-08-07-portfolio-v7a-std-repeats3.jsonl` /
+`results/2026-08-07-portfolio-v7b-cx-repeats3.jsonl` /
+`results/2026-08-07-portfolio-v7c-cx-fill.jsonl` (with adjacent -summary.json)
+
+### portfolio-v8a (Standard re-measurement, 2026-08-07) — gate-regression check after #350-#355
+
+Commit `05d08c5` (after merging #350 reviewer-window enforcement, #351 artifact lint,
+#352 bounded-context observability, #353 reviewer-output observability, #354 session
+lease, and #355 goal dispatch). Same Standard 3 tasks x repeats 3 as v7a (18 records),
+budgets goal $3 / mission $10. Mission completed 7/9; the remaining 2 records
+(std-metrics rep3 / std-policy rep3) were auto-stopped by #357 on api_spend_limit
+(blocked, non-comparable). All completed records tie at marker 1.0 quality.
+
+Standard (mission comparable n=7): mean 9.26 min / median 8.46 / range 6.78-13.28.
+On par with v7a (mean 9.98 / median 10.58 / range 6.26-14.08) — **the verification
+and observability gates added by #350-#353 introduce no speed regression**. iter=2
+fired 0/7 (v7a: 2/9; within iteration-distribution noise). Goal mean 1.11 min →
+about 8.4x. Mission per-record cost $5.25-9.31, inside the #358 $10 calibration.
+
+Observed gate activity (state inspection, n=7):
+
+0. **#350 reviewer-window enforcement: parallel firing rate 7/7 = 100%**
+   (last_parallel_execution true everywhere, unknown 0%; fully converged from the
+   1/5 machine-observed rate at v5-speed).
+1. **#353 reviewer-output observation recorded in every run** (2
+   reviewer_output_records per run). Zero WARNs (20KB/0.7 thresholds never exceeded).
+2. **#354 session lease granted in every run** (lease_id / fencing_epoch / expiry).
+   Zero contention or fencing rejections.
+3. **#351 artifact lint was `skipped` in every run.** Bench mission sessions never
+   record `artifact_path` in state, so the lint never executed (a zero firing rate
+   means "no observation opportunity", not "no violations"). Gate promotion requires
+   artifact_path adoption first.
+4. **#352 bounded context never became applicable.** All completed runs finished at
+   iter=1, below the trigger condition (iter>=2 with no new critic scope).
+5. **#357 fired twice in live conditions** during this run as well, stopping cleanly
+   with no wasted records.
+
+Primary data: `results/2026-08-07-portfolio-v8a-std-post-gates.jsonl`
+(with adjacent -summary.json) / `artifacts/2026-08-07-portfolio-v8a-std-post-gates/`
+
+### portfolio-v8b2 (Complex re-measurement, 2026-08-07) — closes out Issue #371
+
+Commit `05d08c5`. Continues v8a (Standard) above with 2 Complex tasks x repeats 3
+(12/12 recorded, no spend limit, 1 budget blocked). Budgets: goal $3 / mission $10.
+
+| task | v7 (before) | v8b2 (after) | verdict |
+|---|---|---|---|
+| cx-config (standard tier) | 11.04 / 12.99 | 11.14 / 12.46 / 12.63 | parity |
+| cx-ledger (full tier) | 17.41 / 17.58 | 18.93 / 26.24 (+1 budget blocked at 15.31 min/$10.12) | wider tail (small n, keep observing) |
+
+Observations:
+
+1. Parallel observation matches v8a: zero unknown (#350 gate); completed records
+   state `parallel_execution: true` with no false/serial mentions.
+2. Quality tied at marker 1.0 on every completed record; zero iter=2 firings.
+3. cx-ledger full-tier per-record cost rose to $8.6-10.1 and the $10 cap censored
+   one record (burn 0.66 USD/min); full-tier cap calibration is a #358 runbook
+   follow-up.
+4. **Overall Issue #371 verdict**: Standard median -20% (v8a) plus Complex parity
+   means the #350-#354 gates are speed-neutral to speed-positive. Decomposing the
+   cx-ledger tail (26.24 min) waits for #352/#353 stats alongside #372.
+
+Primary data: `results/2026-08-07-portfolio-v8b2-cx-post-gates.jsonl` (with
+-summary.json) / `artifacts/2026-08-07-portfolio-v8b2-cx-post-gates/`
+
+
+
+
+## Discriminating cohort clean re-run (discriminating-v2) — correcting the v1 findings
+
+Status: executed 2026-07-23 JST under clean permission conditions (the #268
+contamination eliminated). Starting commit `3643943` includes #266
+(Complex=standard, 2 reviewers), the #268 guard, and #270 parallel execution.
+`--parallel 3`, identical constraints for both arms (USD 10 budget / 30-min
+budget-minutes / 2400s timeout). **All 10 records mechanically verified
+`permission_mode_degraded=false`** (first production use of the #268 guard).
+Wall clock ~33 minutes at 3 workers.
+
+Aggregate: goal completed 5/5 at 1.18-3.12 min / USD 0.68-0.95 per task;
+mission completed 5/5 at 7.50-13.72 min / USD 2.17-5.27. All 10 records
+scored marker 1.00 / forbidden 0 / quality 5.0.
+
+### Corrections to the v1 findings
+
+1. **"Goal tends to exhaust its budget" — retracted.** The two v1-blocked
+   tasks completed easily under clean conditions (release-ledger: 3.12 min /
+   USD 0.95; contract-drift: 2.38 min / USD 0.84). The v1 exhaustions were
+   artifacts of the permission-mode contamination.
+2. **"Speed ≈ goal (1.07x)" — retracted.** Clean comparable averages: goal
+   1.96 min vs mission 10.53 min = **5.4x**. The v1 parity was an illusion
+   created by contamination inflating goal runtimes 3-10x.
+3. **"Within-run arm comparisons remain valid under symmetric contamination"
+   — corrected.** Exposure was symmetric but the effect was asymmetric
+   (goal inflated 3-10x, mission ~1.5x), so v1's within-run arm conclusions
+   are also invalid. No arm-level conclusion from the 7/21-7/22 runs
+   (tail-v2 / openworld-v1 / discriminating-v1) should be used.
+4. **Quality tie stands**: no arm difference under clean conditions either.
+5. **First observation of #266**: 3 of 5 missions ran at standard tier
+   (2 reviewers); mission runtimes dropped vs v1 (7.5-13.7 min vs
+   9.3-21.1 min), though goal sped up far more.
+
+### Confirmed conclusions (clean conditions, consistent with tail-v1)
+
+Quality (marker recall): tied. Speed/cost: mission **5.4x time / 4.9x
+notional cost** (a slight improvement over tail-v1's 5.8x/7.4x; includes the
+#266 contribution, not separable at N=5). Completion reliability: no
+difference (both 5/5). Mission's value remains completion gating, tail
+insurance, irreversible-operation governance, the budget guard, and resume —
+not average quality or speed.
+
+Unsafe interpretation:
+
+> Mission has no value even under clean conditions.
+
+Unsupported: this cohort measures single-shot closed-world tasks and does not
+exercise mission's value domain (multi-iteration tail recovery, irreversible
+gates, cross-session resume). The 451-mission production tail record is not
+contradicted by this run.
+
+## Discriminating cohort adoption run (discriminating-v1)
+
+Status: executed 2026-07-23 JST as the #262 adoption run, in two stages: smoke
+(`disc-config-sprawl` paired, run id `2026-07-23-discriminating-smoke`) then
+the main run (5 tasks x 2 arms, run id `2026-07-23-discriminating-v1`).
+Starting commit `bbd7602` includes the #261 adherence guard and the #262
+cohort. Both arms pinned `--model claude-sonnet-5` via the PATH shim under
+identical constraints: `--max-budget-usd 10`, `--mission-budget-minutes 30`,
+timeout 2400s.
+
+### Smoke gates
+
+iter=2 occurred (fail-first worked), `critic_has_new_scope` was recorded —
+the first runtime observation of the #258 wiring / #240-#241 path — and no
+mission-loop adherence failures occurred. The ceiling gate did not clear
+(both arms marker 1.0). With iter2 firing, mission took 30.45 min / USD 9.43
+vs goal 7.9 min / USD 2.63 (~3.9x).
+
+### Main run aggregate
+
+| Metric | goal | mission | Interpretation |
+|---|---:|---:|---|
+| Completion rate | 3 / 5 | **5 / 5** | Under the identical USD 10 budget, goal failed to finish 2 tasks, burning USD 20.15 with no artifact; mission completed all 5 |
+| Comparable avg quality / marker | 5.0 / 1.0 | 5.0 / 1.0 | Quality tied at ceiling among completers; zero forbidden hits |
+| Comparable avg elapsed | 12.38 min | 15.74 min | Total-time ratio across the 3 valid pairs: mission 1.07x (1.26x / 3.23x / 0.44x per pair) |
+| Comparable cost mean | USD 4.22 | USD 7.65 | Mission costs more among completers |
+| Cost total incl. waste | USD 32.82 | USD 38.25 | Goal's USD 20.15 total-loss narrows the overall gap |
+
+The release-ledger mission run demonstrated the #238 budget guard in
+production: it halted gracefully at ~USD 9.1/10 with the artifact finalized
+(marker 1.0) instead of losing everything.
+
+### Adoption verdict (runbook Step 3)
+
+1. Measurement validity: pass (0 uninitialized mission records).
+2. Discrimination via marker variance: **not achieved** (all completers at
+   1.0) — but the cohort discriminated on a new axis: completion reliability
+   under a fixed budget (goal 3/5 vs mission 5/5).
+3. iter>=2 runtime observation: achieved in the smoke (probabilistic in the
+   main run; all main-run missions passed at iter1).
+4. Quality: **"quality > goal" remains undemonstrated** on marker recall.
+   Completion reliability under budget parity favors mission 5/5 vs 3/5.
+5. Speed: **achieved** — 1.07x total across comparable pairs, within the
+   pre-declared 1.5x parity band (degrades to ~3.9x when iter2 fires).
+
+Unsafe interpretations:
+
+> `/mission` produces higher quality than `/goal`.
+
+Unsupported: completers tie on quality; the advantage is completion
+reliability (N=5, dependent on the USD 10 budget setting).
+
+> Goal's budget exhaustion proves goal is worse.
+
+Only partially supported: `/goal` has no budget-pressure signal and no
+mechanism to finalize an artifact within budget, so the difference is
+structural. A USD 20 budget might let goal complete both tasks.
+
+## Openworld cohort calibration run (openworld-v1)
+
+Status: executed 2026-07-22 JST. First paired calibration run of the
+`tasks.openworld.json` cohort (3 open-world finding-discovery tasks, #251).
+Starting commit `7f3118d` includes the merged #239/#240/#241 improvements and the
+#258 orchestration wiring. Both arms pinned `--model claude-sonnet-5` via a PATH
+shim (primary model confirmed in each artifact's `modelUsage`; the goal arm also
+recorded auxiliary haiku-4.5 usage and the mission arm recorded sonnet-4.6 fork
+usage), with `--max-budget-usd 8` / `--mission-budget-minutes 25` (#238).
+
+| Item | Value | Evidence |
+|---|---:|---|
+| Run id | `2026-07-22-claude-goal-vs-mission-openworld-v1` | `results/2026-07-22-claude-goal-vs-mission-openworld-v1.jsonl` |
+| Starting commit | `7f3118d` | main after the #258 wiring merge |
+| Expected / written records | 6 / 6 | 3 tasks x 2 arms, 0 blocked |
+| model_id | `claude-sonnet-5` | all 6 records (shim-injected, modelUsage-verified) |
+| Total notional cost | USD 22.41 | goal 9.16 / mission 13.25 |
+
+Task-level result:
+
+| Task | Arm | Mission loop | Iter | Passes | Quality | Marker | Cost | Elapsed |
+|---|---|---|---:|---|---:|---:|---:|---:|
+| `openworld-constant-hunt` | goal | — | — | — | 5.00 | 1.00 | USD 2.95 | 11.80 min |
+| `openworld-constant-hunt` | mission | **never initialized (invalid)** | — | — | 5.00 | 1.00 | USD 0.80 | 2.47 min |
+| `openworld-contradiction-chain` | goal | — | — | — | 5.00 | 1.00 | USD 4.95 | 17.53 min |
+| `openworld-contradiction-chain` | mission | full tier | 1 | false (agreement halt) | 5.00 | 1.00 | USD 7.37 | 13.01 min |
+| `openworld-incremental-reveal` | goal | — | — | — | 5.00 | 1.00 | USD 1.26 | 4.84 min |
+| `openworld-incremental-reveal` | mission | full tier | 1 | true | 5.00 | 1.00 | USD 5.08 | 16.51 min |
+
+Calibration observations (N=3; adoption decisions require N>=10):
+
+1. **Zero total loss**: 0 / 6 blocked. The #238 budget guard never had to fire, and
+   the graceful agreement-gate halt on contradiction-chain still delivered the
+   artifact and passed the validator. The fable-5 "budget burned, zero artifact"
+   failure mode did not reproduce in this calibration.
+2. **Quality saturated at the ceiling in both arms**: every record scored quality
+   5.0 / marker 1.0 with zero variance. The openworld cohort as designed does not
+   discriminate at sonnet-5 capability; proving "quality > goal" requires a harder
+   discriminating cohort.
+3. **One mission-arm prompt-adherence failure detected**: the constant-hunt mission
+   record has no `.mission-state` at all — the run answered directly without ever
+   initializing the mission loop (2.47 min / USD 0.80). That record must be
+   excluded from mission-arm speed/cost aggregates (the 10.66-min mission average
+   is diluted by this invalid record).
+4. **Only two valid pairs**: contradiction-chain ran mission at 0.74x time / 1.49x
+   cost (mission faster); incremental-reveal ran mission at 3.41x time / 4.03x
+   cost. This is a milder overhead profile than tail-v1's uniform 3-6x, but N=2
+   supports no adoption claim.
+5. **The #240/#241 diff-review path never fired**: every mission run ended at
+   iteration 1, so `critic_has_new_scope`, bounded context, and the reviewer
+   reduction have zero runtime observations. Exercising them needs fail-first
+   tasks that force iteration >= 2.
+
+Unsafe interpretation:
+
+> `/mission` now matches `/goal` on speed and quality.
+
+That is unsupported. The aggregate speed parity is dilution by an invalid record,
+and the quality tie is ceiling saturation of the cohort.
+
+## Task-Level Findings
+
+| Task | Stronger arm | Why |
+|---|---|---|
+| `docs-small-edit` | `mission` on evidence; tie on completion | Both passed; mission recorded more structured evidence and state. |
+| `docs-cross-reference` | `mission` on evidence; tie on completion | Both passed; mission included plan/review/score sections. |
+| `bug-regression-test` | `mission` on evidence; tie on completion | Both passed; mission had stronger completion trace but longer runtime. |
+| `review-comment-batch` | `mission` on evidence; tie on completion | Both passed; mission made review/check evidence explicit. |
+| `interrupted-doc-task` | tie on resume; `mission` on evidence | Both resume validators passed; mission recorded state-backed evidence. |
+| `ambiguous-research-brief` | `mission` on evidence; tie on completion | Both passed; mission surfaced assumptions and review more explicitly. |
+| `release-checklist-audit` | `mission` on evidence; tie on completion | Both passed; mission better matched evidence-tracking intent. |
+| `small-refactor` | `mission` on evidence; tie on completion | Both passed; goal-only remained sufficient for validator success. |
+| `quality-gate-failure` | `mission` on evidence; tie on completion | Both passed; mission represented the stop decision more explicitly. |
+| `marketing-claim-draft` | `mission` on evidence; tie on completion | Both passed; mission made claim guardrails more explicit. |
+
+## Validation Results
+
+| Check | Result |
+|---|---:|
+| Benchmark + doc consistency tests | 30 passed / 30 |
+| Full mission test suite | 402 passed / 402 |
+| JSON parse checks | 2 passed / 2 |
+| Scoped whitespace check | passed |
+
+Commands used:
+
+```bash
+python3 benchmarks/mission-vs-goal/run_paired_pilot.py --starting-commit 0148f16 --timeout 900
+python3 benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py --tasks-file benchmarks/mission-vs-goal/tasks.complex.json --run-id 2026-06-28-claude-goal-vs-mission-smoke-v2 --starting-commit 38cc7907e5e35fcd9fa23022a1fcf03f756df99b --limit-tasks 1 --timeout 300 --max-budget-usd 1.5 --mission-max-iter 1
+python3 benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py --tasks-file benchmarks/mission-vs-goal/tasks.complex.json --run-id 2026-06-28-claude-goal-vs-mission-smoke-v3 --starting-commit ed98b0e00169f0e0b35ce629a206ffcb7af4d0a3 --limit-tasks 1 --timeout 900 --max-budget-usd 3.0 --mission-max-iter 2
+python3 benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py --tasks-file benchmarks/mission-vs-goal/tasks.complex.json --run-id 2026-06-28-claude-goal-vs-mission-complex-v1 --starting-commit ed98b0e00169f0e0b35ce629a206ffcb7af4d0a3 --limit-tasks 10 --timeout 1800 --max-budget-usd 3.0 --mission-max-iter 2
+python3 benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py --tasks-file benchmarks/mission-vs-goal/tasks.complex.json --run-id 2026-06-28-claude-goal-vs-mission-incremental-v1 --starting-commit d1cef1d5bd0166b5d61939c8d93ce0060c05507f --task-ids complex-failing-test-triage,complex-review-thread-resolution --stop-on-blocked --timeout 1200 --max-budget-usd 3.0 --mission-max-iter 2
+python3 benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py --tasks-file benchmarks/mission-vs-goal/tasks.quality.json --run-id 2026-07-03-claude-goal-vs-mission-quality-light-v1 --starting-commit 1863e02b4cb49bc78399d423ad82c2176627ecdd --task-ids quality-multi-cause-regression-triage,quality-security-secret-handling-plan,quality-bilingual-claim-consistency --stop-on-blocked --timeout 1200 --max-budget-usd 4.0 --mission-max-iter 1 --mission-profile light --run-root /private/tmp/mission-vs-official-goal-2026-07-03-light-v1
+python3 -m pytest skills/mission/tests/test_benchmark_package.py skills/mission/tests/test_doc_consistency.py -q
+python3 -m pytest skills/mission/tests -q
+python3 -m json.tool benchmarks/mission-vs-goal/tasks.json
+python3 -m json.tool benchmarks/mission-vs-goal/tasks.complex.json
+python3 -m json.tool benchmarks/mission-vs-goal/result.schema.json
+python3 -m py_compile benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py
+git diff --check -- README.md README.ja.md docs/LOOP_ENGINEERING.md benchmarks/mission-vs-goal/README.md benchmarks/mission-vs-goal/README.ja.md benchmarks/mission-vs-goal/report.md benchmarks/mission-vs-goal/report.ja.md benchmarks/mission-vs-goal/report-template.md benchmarks/mission-vs-goal/report-template.ja.md benchmarks/mission-vs-goal/complex-validation-plan.md benchmarks/mission-vs-goal/complex-validation-plan.ja.md benchmarks/mission-vs-goal/official-goal-rerun-runbook.md benchmarks/mission-vs-goal/official-goal-rerun-runbook.ja.md benchmarks/mission-vs-goal/run_paired_pilot.py benchmarks/mission-vs-goal/run_claude_goal_vs_mission.py skills/mission/tests/test_benchmark_package.py
+```
+
+## Marketing Summary
+
+Safe to say:
+
+> In a controlled local 10-task Codex CLI pilot, both goal-only and `mission`
+> completed and passed all validators. `mission` produced stronger automated
+> evidence/completion-quality scores, while taking longer per run.
+
+Safe to say about the official `/goal` smoke:
+
+> A first Claude Code official `/goal` smoke was attempted on one complex task.
+> `/goal` completed the artifact, while the comparable `/mission` arm was
+> blocked by Claude Code workspace API limits. No marketing comparison should be
+> made from this smoke until the `/mission` arm can complete.
+
+Safe to say about the API-limit rerun:
+
+> After the API limit increase, a one-task official `/goal` vs `/mission` smoke
+> completed on both arms and both passed the automated validator. In that
+> one-task smoke, the automated quality/evidence scores tied at 4.00 / 5, while
+> `/mission` took longer. The subsequent 10-task full attempt was blocked by
+> workspace API usage limits, so it cannot support a performance claim.
+
+Safe to say about the cost-capped incremental rerun:
+
+> With a USD 3.00 per-invocation cap on two additional complex tasks, official
+> `/goal` completed both tasks and `/mission` hit the configured max-budget cap
+> on both tasks. This supports an operational cost/runtime caution, not a claim
+> that `/mission` answers are lower quality.
+
+Safe to say about the light-profile rerun:
+
+> On one previously unmeasured complex task, official `/goal` and `/mission`
+> light both completed and passed. In that single task, `/mission` light was
+> faster and lower cost, but the sample is too small for a broad claim.
+
+Safe to say about the 2026-07-03 light-profile rerun:
+
+> On three additional quality-critical tasks run with `--mission-profile light`,
+> official `/goal` and `/mission` light both completed and passed all automated
+> validators with matching automated quality-marker scores. In this run,
+> `/mission` light was slower and cost more than official `/goal`.
+
+Safe to say about the quality-profile attempt:
+
+> A quality-focused profile and fresh critical task cohort were added, but the
+> first paired attempt was blocked by Claude Code workspace API limits before
+> `/mission` ran. No quality comparison can be made from that attempt.
+
+Safe to say about the tail run:
+
+> On five planted-defect tasks designed as first-pass recall challenges, both
+> arms tied on all automated content-recall metrics (average quality 4.97 / 5,
+> average marker score 0.97) with zero decoy false positives. The `/mission` arm
+> ran its full review loop and cleared its own 4.0 pass gate at iteration 1 in
+> all five runs, at ~5.8x wall-clock time and ~7.4x recorded USD cost compared
+> with `/goal`. N=5, closed-world fixtures, one model; no broad quality claim
+> follows from this run.
+
+Do not say:
+
+> The tail run shows `/mission` is worse than `/goal` (equal scores, different cost profile).
+
+Do not say:
+
+> `mission` is smarter than `/goal`.
+
+Do not say:
+
+> `mission` improves completion rate in this pilot.
+
+Do not say:
+
+> `mission` is better or worse than Claude Code official `/goal` based on the
+> 2026-06-28 smoke.
+
+## Raw Result Index
+
+```text
+results/2026-06-27-codex-cli-local.jsonl
+results/2026-06-27-codex-cli-local-summary.json
+artifacts/2026-06-27-codex-cli-local/
+results/2026-06-28-claude-goal-vs-mission-smoke-v2.jsonl
+results/2026-06-28-claude-goal-vs-mission-smoke-v2-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-smoke-v2/
+results/2026-06-28-claude-goal-vs-mission-smoke-v3.jsonl
+results/2026-06-28-claude-goal-vs-mission-smoke-v3-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-smoke-v3/
+results/2026-06-28-claude-goal-vs-mission-complex-v1.jsonl
+results/2026-06-28-claude-goal-vs-mission-complex-v1-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-complex-v1/
+results/2026-06-28-claude-goal-vs-mission-incremental-v1.jsonl
+results/2026-06-28-claude-goal-vs-mission-incremental-v1-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-incremental-v1/
+results/2026-06-28-claude-goal-vs-mission-light-v1.jsonl
+results/2026-06-28-claude-goal-vs-mission-light-v1-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-light-v1/
+results/2026-06-28-claude-goal-vs-mission-quality-v1.jsonl
+results/2026-06-28-claude-goal-vs-mission-quality-v1-summary.json
+artifacts/2026-06-28-claude-goal-vs-mission-quality-v1/
+results/2026-07-03-claude-goal-vs-mission-quality-light-v1.jsonl
+results/2026-07-03-claude-goal-vs-mission-quality-light-v1-summary.json
+artifacts/2026-07-03-claude-goal-vs-mission-quality-light-v1/
+results/2026-07-07-claude-goal-vs-mission-tail-v1.jsonl
+results/2026-07-07-claude-goal-vs-mission-tail-v1-summary.json
+artifacts/2026-07-07-claude-goal-vs-mission-tail-v1/
+results/2026-07-10-claude-goal-vs-mission-tail-smoke-v2.jsonl
+results/2026-07-10-claude-goal-vs-mission-tail-smoke-v2-summary.json
+artifacts/2026-07-10-claude-goal-vs-mission-tail-smoke-v2/
+results/2026-07-21-claude-goal-vs-mission-tail-v2.jsonl
+results/2026-07-21-claude-goal-vs-mission-tail-v2-summary.json
+results/2026-07-21-claude-goal-vs-mission-tail-v2-retry.jsonl
+results/2026-07-21-claude-goal-vs-mission-tail-v2-retry-summary.json
+results/2026-07-22-fable5-tail-smoke.jsonl
+results/2026-07-22-fable5-tail-smoke-summary.json
+results/2026-07-22-fable5-tail-full.jsonl
+results/2026-07-22-fable5-tail-full-summary.json
+results/2026-07-22-claude-goal-vs-mission-openworld-v1.jsonl
+results/2026-07-22-claude-goal-vs-mission-openworld-v1-summary.json
+artifacts/2026-07-22-claude-goal-vs-mission-openworld-v1/
+results/2026-07-23-discriminating-smoke.jsonl
+results/2026-07-23-discriminating-smoke-summary.json
+artifacts/2026-07-23-discriminating-smoke/
+results/2026-07-23-discriminating-v1.jsonl
+results/2026-07-23-discriminating-v1-summary.json
+artifacts/2026-07-23-discriminating-v1/
+results/2026-07-23-discriminating-v2.jsonl
+results/2026-07-23-discriminating-v2-summary.json
+artifacts/2026-07-23-discriminating-v2/
+results/2026-08-02-portfolio-v1.jsonl
+results/2026-08-02-portfolio-v1-summary.json
+artifacts/2026-08-02-portfolio-v1/
+results/2026-08-02-discriminating-v3.jsonl
+results/2026-08-02-discriminating-v3-summary.json
+artifacts/2026-08-02-discriminating-v3/
+results/2026-08-02-portfolio-v2.jsonl
+results/2026-08-02-portfolio-v2-summary.json
+artifacts/2026-08-02-portfolio-v2/
+results/2026-08-02-portfolio-v3.jsonl
+results/2026-08-02-portfolio-v3-summary.json
+artifacts/2026-08-02-portfolio-v3/
+results/2026-08-02-portfolio-v4.jsonl
+results/2026-08-02-portfolio-v4-summary.json
+artifacts/2026-08-02-portfolio-v4/
+```

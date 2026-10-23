@@ -1,0 +1,150 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  color: #e5e4ed;
+  background: #090a10;
+  --muted: #929bb3;
+  --accent: #b6a2ee;
+  --line: #303246;
+  --surface: #171923;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 28px 24px;
+  background: radial-gradient(ellipse at 50% 45%, #291d3c5c, transparent 65%);
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select {
+  cursor: pointer;
+}
+
+button {
+  border: 0;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  outline-offset: 5px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.frame {
+  max-width: 1680px;
+  margin: 0 auto;
+  overflow: clip;
+  background: #10121b;
+  border: 1px solid #373043;
+  border-radius: 20px;
+  box-shadow:
+    0 24px 100px #0008,
+    0 0 100px #9b71d208;
+}
+
+.masthead {
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 650;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 0 8px #c0a0ff33);
+}
+
+.local-badge {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.local-badge span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  background: #8dd0bd;
+  border-radius: 50%;
+}
+
+main {
+  padding: 32px 36px 0;
+}
+
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  font-weight: 650;
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+
+h1,
+h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+
+h1 {
+  font-size: clamp(30px, 4vw, 44px);
+  letter-spacing: -0.035em;
+  margin: 0 0 12px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.6;
+}

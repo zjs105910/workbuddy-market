@@ -1,0 +1,29 @@
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 20px;
+  }
+
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .constellation-map,
+  .tree-hint {
+    display: none;
+  }
+
+  .constellation-list {
+    display: grid;
+    align-content: start;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .constellation-controls {
+    display: none;
+  }
+}

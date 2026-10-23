@@ -1,0 +1,77 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from autoharness.lib import counters
+
+
+def test_request_counter_per_layer_independent(tmp_path):
+    g, p = tmp_path / "g", tmp_path / "p"
+    assert counters.bump_request("global", g) == 1
+    assert counters.bump_request("global", g) == 2
+    assert counters.bump_request("project", p) == 1
+    assert counters.request_count("global", g) == 2
+    assert counters.request_count("project", p) == 1
+
+
+def test_bump_serialized_across_processes(tmp_path):
+    code = (
+        "import sys, pathlib\n"
+        "from autoharness.lib import counters\n"
+        "for _ in range(25):\n"
+        "    counters.bump_request('project', pathlib.Path(sys.argv[1]))\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(counters.__file__).parents[2])}
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(tmp_path)], env=env) for _ in range(4)]
+    assert [p.wait() for p in procs] == [0, 0, 0, 0]
+    assert counters.request_count("project", tmp_path) == 100
+
+
+def test_missing_counter_reads_zero(tmp_path):
+    assert counters.request_count("project", tmp_path) == 0
+
+
+def test_session_counter_bump_and_reset(tmp_path):
+    sid = "abc-123"
+    assert counters.bump_session(sid, tmp_path) == 1
+    assert counters.bump_session(sid, tmp_path) == 2
+    counters.reset_session(sid, tmp_path)
+    assert counters.session_count(sid, tmp_path) == 0
+
+
+def test_clear_session_deletes_and_idempotent(tmp_path):
+    counters.bump_session("abc-123", tmp_path)
+    assert counters._session_path("abc-123", tmp_path).exists()
+    counters.clear_session("abc-123", tmp_path)
+    assert counters.session_count("abc-123", tmp_path) == 0
+    counters.clear_session("abc-123", tmp_path)  # idempotent when missing, no raise
+
+
+def test_unknown_layer_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        counters.bump_request("staging", tmp_path)
+
+
+def test_session_id_traversal_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        counters.bump_session("../evil", tmp_path)
+
+
+def test_session_offset_roundtrip_default_zero(tmp_path):
+    assert counters.session_offset("s1", tmp_path) == 0
+    counters.write_session_offset("s1", 12345, tmp_path)
+    assert counters.session_offset("s1", tmp_path) == 12345
+
+
+def test_session_offset_garbage_reads_zero(tmp_path):
+    counters.write_session_offset("s2", 7, tmp_path)
+    counters._offset_path("s2", tmp_path).write_text("not-a-number")
+    assert counters.session_offset("s2", tmp_path) == 0
+
+
+def test_session_offset_traversal_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        counters.write_session_offset("../evil", 1, tmp_path)

@@ -1,0 +1,20 @@
+{
+  "name": "spacing-skill",
+  "description": "Spacing & rhythm skill library for Claude Code — anti-cramped spacing, vertical rhythm, and optical alignment for AI-generated UI",
+  "owner": {
+    "name": "buidangminh23",
+    "email": ""
+  },
+  "plugins": [
+    {
+      "name": "spacing-skill",
+      "description": "Anti-cramped spacing skill for AI-generated UI — three dials, one spacing scale, vertical rhythm, optical alignment, accessibility floors, and density discipline",
+      "version": "2.15.2",
+      "source": "./",
+      "author": {
+        "name": "buidangminh23",
+        "email": ""
+      }
+    }
+  ]
+}

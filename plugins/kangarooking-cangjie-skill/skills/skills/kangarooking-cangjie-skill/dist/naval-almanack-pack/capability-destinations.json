@@ -1,0 +1,85 @@
+{
+  "generated_by": "cangjie-tools v2.5.0",
+  "bundle_id": "bundle.naval-almanack",
+  "router_entrypoint": "naval-almanack",
+  "entrypoint_count": 7,
+  "capability_count": 19,
+  "destinations": {
+    "cap.naval.wealth-structure": {
+      "promoted_to": "wealth-structure",
+      "router_view": "naval-almanack/references/capabilities/wealth-structure.md"
+    },
+    "cap.naval.productize-yourself": {
+      "promoted_to": "productize-yourself",
+      "router_view": "naval-almanack/references/capabilities/productize-yourself.md"
+    },
+    "cap.naval.decision-heuristics": {
+      "promoted_to": "decision-heuristics",
+      "router_view": "naval-almanack/references/capabilities/decision-heuristics.md"
+    },
+    "cap.naval.hourly-rate-time": {
+      "promoted_to": "hourly-rate-time",
+      "router_view": "naval-almanack/references/capabilities/hourly-rate-time.md"
+    },
+    "cap.naval.reading-metaskill": {
+      "promoted_to": "reading-metaskill",
+      "router_view": "naval-almanack/references/capabilities/reading-metaskill.md"
+    },
+    "cap.naval.screen-detox": {
+      "promoted_to": "screen-detox",
+      "router_view": "naval-almanack/references/capabilities/screen-detox.md"
+    },
+    "cap.naval.judgment-training": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/judgment-training.md"
+    },
+    "cap.naval.long-term-compounding": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/long-term-compounding.md"
+    },
+    "cap.naval.principal-agent": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/principal-agent.md"
+    },
+    "cap.naval.happiness-skill": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/happiness-skill.md"
+    },
+    "cap.naval.game-selection": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/game-selection.md"
+    },
+    "cap.naval.acceptance": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/acceptance.md"
+    },
+    "cap.naval.self-liberation": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/self-liberation.md"
+    },
+    "cap.naval.monkey-mind-meditation": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/monkey-mind-meditation.md"
+    },
+    "cap.naval.peer-selection": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/peer-selection.md"
+    },
+    "cap.naval.identity-work": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/identity-work.md"
+    },
+    "cap.naval.honesty-communication": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/honesty-communication.md"
+    },
+    "cap.naval.rational-buddhism": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/rational-buddhism.md"
+    },
+    "cap.naval.life-meaning": {
+      "served_by": "naval-almanack",
+      "card": "naval-almanack/references/capabilities/life-meaning.md"
+    }
+  }
+}

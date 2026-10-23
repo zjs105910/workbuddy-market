@@ -1,0 +1,22 @@
+{
+ "name": "wshobson-agents",
+ "version": "2026.10.23.46891e7",
+ "description": "体量极大的工程技能合集，184 个技能覆盖后端、前端、Python、K8s、可观测性、安全、支付、LLM 微调、量化交易、无障碍等方向，按主题分成数十个插件组。",
+ "description_en": "A massive engineering skills collection: 184 skills covering backend, frontend, Python, K8s, observability, security, payments, LLM fine-tuning, quant trading and more.",
+ "author": {
+  "name": "wshobson"
+ },
+ "keywords": [
+  "合集",
+  "后端",
+  "前端",
+  "k8s",
+  "安全",
+  "LLM",
+  "量化"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/wshobson/agents",
+ "sourceCommit": "46891e7e60da0e52baf1050b7b6391b64e84c6d9"
+}

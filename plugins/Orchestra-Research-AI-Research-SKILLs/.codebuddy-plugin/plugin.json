@@ -1,0 +1,19 @@
+{
+ "name": "Orchestra-Research-AI-Research-SKILLs",
+ "version": "2026.10.23.773a529",
+ "description": "面向 AI 研究与工程的开源技能库（98 个 skill）：实验、评测、文献、写作全流程，可打包给任意模型使用。",
+ "description_en": "Comprehensive open-source library of AI research and engineering skills for any AI model.",
+ "author": {
+  "name": "Orchestra-Research"
+ },
+ "keywords": [
+  "科研",
+  "AI",
+  "评测",
+  "合集"
+ ],
+ "category": "科研",
+ "license": "MIT",
+ "homepage": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+ "sourceCommit": "773a52944ba4747a18bd4ae9ade53fff041adcbc"
+}

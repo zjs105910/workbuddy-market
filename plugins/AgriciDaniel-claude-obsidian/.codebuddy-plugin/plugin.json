@@ -1,0 +1,19 @@
+{
+ "name": "AgriciDaniel-claude-obsidian",
+ "version": "2026.10.23.32ac5a0",
+ "description": "Obsidian + Claude Code 的自组织第二大脑：丢进任何资料，代理自动阅读、建立链接并归档入 vault（16 个 skill）。",
+ "description_en": "Self-organizing AI second brain for Obsidian + Claude Code.",
+ "author": {
+  "name": "AgriciDaniel"
+ },
+ "keywords": [
+  "obsidian",
+  "笔记",
+  "知识管理",
+  "第二大脑"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/AgriciDaniel/claude-obsidian",
+ "sourceCommit": "32ac5a02c4e082e4a5628ca810776375e134708e"
+}

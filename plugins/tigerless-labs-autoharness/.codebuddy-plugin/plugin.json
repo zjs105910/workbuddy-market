@@ -1,0 +1,19 @@
+{
+ "name": "tigerless-labs-autoharness",
+ "version": "2026.10.23.6bb7ea5",
+ "description": "自学习技能层：从你的真实使用会话中蒸馏技能、持续更新阈值——越用越贴合你的工作方式。",
+ "description_en": "A self-learning skill layer for Claude Code - distills skills from your real sessions.",
+ "author": {
+  "name": "tigerless-labs"
+ },
+ "keywords": [
+  "自学习",
+  "蒸馏",
+  "个性化",
+  "claude-code"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/tigerless-labs/autoharness",
+ "sourceCommit": "6bb7ea55aa6522c118ad4b7f317fce521399750f"
+}

@@ -1,0 +1,19 @@
+{
+ "name": "AgriciDaniel-claude-ads",
+ "version": "2026.10.23.ac21644",
+ "description": "Claude 优先的付费媒体运营 Skill：覆盖 Google、Meta、YouTube、LinkedIn 等 12 个广告平台（34 个 skill）。",
+ "description_en": "Paid-media operations skill across 12 ad platforms (Google, Meta, YouTube, LinkedIn...).",
+ "author": {
+  "name": "AgriciDaniel"
+ },
+ "keywords": [
+  "广告",
+  "投放",
+  "营销",
+  "商业"
+ ],
+ "category": "商业",
+ "license": "MIT",
+ "homepage": "https://github.com/AgriciDaniel/claude-ads",
+ "sourceCommit": "ac21644933910419529bcf81efb95a9ca71edf81"
+}

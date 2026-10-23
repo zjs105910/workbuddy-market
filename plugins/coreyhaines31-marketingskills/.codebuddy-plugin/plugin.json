@@ -1,0 +1,20 @@
+{
+ "name": "coreyhaines31-marketingskills",
+ "version": "2026.10.23.b9ba399",
+ "description": "面向 Claude Code 与 AI 智能体的营销技能包：转化率优化（CRO）、文案、SEO、数据分析与增长工程。",
+ "description_en": "Marketing skills for Claude Code and AI agents: CRO, copywriting, SEO, analytics and growth engineering.",
+ "author": {
+  "name": "coreyhaines31"
+ },
+ "keywords": [
+  "营销",
+  "seo",
+  "文案",
+  "增长",
+  "数据分析"
+ ],
+ "category": "商业",
+ "license": "MIT",
+ "homepage": "https://github.com/coreyhaines31/marketingskills",
+ "sourceCommit": "b9ba399dd88b082b926e261e8ccfb843d20aa066"
+}

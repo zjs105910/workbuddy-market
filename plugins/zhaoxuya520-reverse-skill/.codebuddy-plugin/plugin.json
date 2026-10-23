@@ -1,0 +1,20 @@
+{
+ "name": "zhaoxuya520-reverse-skill",
+ "version": "2026.10.23.cab634b",
+ "description": "逆向工程与授权渗透测试的技能路由包：CTF 沙箱编排、Burp MCP 集成、Kali 工具链等，仅面向授权安全研究与学习。",
+ "description_en": "Skill router pack for reverse engineering and authorized penetration testing: CTF sandbox orchestration, Burp MCP, Kali tooling. Authorized research only.",
+ "author": {
+  "name": "zhaoxuya520"
+ },
+ "keywords": [
+  "安全",
+  "逆向",
+  "渗透测试",
+  "ctf",
+  "kali"
+ ],
+ "category": "安全",
+ "license": "MIT",
+ "homepage": "https://github.com/zhaoxuya520/reverse-skill",
+ "sourceCommit": "cab634bd855fc287f6e420c1f36fd1a6b9245960"
+}

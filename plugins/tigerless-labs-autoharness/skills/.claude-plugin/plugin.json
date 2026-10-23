@@ -1,0 +1,22 @@
+{
+  "name": "autoharness",
+  "version": "0.5.3",
+  "description": "Per-symbol maintenance optimizer for an agent's skill layer — learns skills from real runs and keeps them by adherence in use, not by an offline eval score.",
+  "author": {
+    "name": "Tigerless Labs"
+  },
+  "homepage": "https://github.com/tigerless-labs/autoharness",
+  "license": "MIT",
+  "mcpServers": {
+    "stage_skill": {
+      "command": "python3",
+      "args": [
+        "-m",
+        "autoharness.stage_skill.server"
+      ],
+      "env": {
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/src"
+      }
+    }
+  }
+}

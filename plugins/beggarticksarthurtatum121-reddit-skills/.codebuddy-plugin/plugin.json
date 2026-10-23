@@ -1,0 +1,18 @@
+{
+ "name": "beggarticksarthurtatum121-reddit-skills",
+ "version": "2026.10.23.0739c5e",
+ "description": "基于真实浏览器与账号的 Reddit 自动化技能集：浏览、检索、发帖与互动等 6 个技能，强调以用户本人身份合规操作。",
+ "author": {
+  "name": "beggarticksarthurtatum121"
+ },
+ "keywords": [
+  "Reddit",
+  "浏览器自动化",
+  "社区",
+  "发帖"
+ ],
+ "category": "自动化",
+ "license": "MIT",
+ "homepage": "https://github.com/beggarticksarthurtatum121/reddit-skills",
+ "sourceCommit": "0739c5e9a3b81b57b7f44dfc95262531a49ec674"
+}

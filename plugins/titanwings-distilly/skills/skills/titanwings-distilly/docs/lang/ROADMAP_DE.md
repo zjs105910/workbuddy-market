@@ -1,0 +1,148 @@
+<div align="center">
+
+# Distilly Roadmap
+
+### Von Colleague Skill (`colleague.skill`) zu Distilly — Menschen in wiederverwendbare Skills für KI-Agenten und kompatible Bots destillieren
+
+<br>
+
+Wir begannen mit einer einfachen Idee: **Wenn ein Kollege geht, nimmt er sein Wissen mit. Können wir es bewahren?**
+
+In zwei Wochen gaben uns 13.000+ Menschen die Antwort.
+
+Doch die Community zeigte uns, dass es weit über Kollegen hinausgeht —
+sie destillierten Professoren, Ex-Partner, sich selbst, sogar fiktive Figuren.
+
+**Also entschieden wir, Colleague Skill (`colleague.skill`) zu Distilly weiterzuentwickeln.**
+
+Jeder Mensch kann zu einem wiederverwendbaren `.skill` für KI-Agenten und kompatible Bots werden.
+
+<br>
+
+*Zuletzt aktualisiert: 2026-08-23*
+
+[**Englisch**](../../ROADMAP.md) · [**Chinesisch**](ROADMAP_ZH.md) · [**Spanisch**](ROADMAP_ES.md) · [**Japanisch**](ROADMAP_JA.md) · [**Russisch**](ROADMAP_RU.md) · [**Portugiesisch**](ROADMAP_PT.md) · [**Koreanisch**](ROADMAP_KO.md)
+
+</div>
+
+---
+
+## Was bereits erledigt ist (v1.0)
+
+| Funktion | Status |
+|----------|:------:|
+| Vollständiger Erstellungsablauf mit Familienauswahl (`colleague`, `relationship`, `celebrity`) über `/distilly` | Erledigt |
+| Automatische Erfassung von Lark (Nachrichten + Docs + Tabellen) | Erledigt |
+| Automatische Erfassung von DingTalk | Erledigt |
+| Automatische Erfassung von Slack | Erledigt |
+| WeChat-Chatverlauf (SQLite-Export) | Erledigt |
+| Import von E-Mail / PDF / Bild / Markdown | Erledigt |
+| Duale Modellarchitektur: Work Skill + Persona | Erledigt |
+| Gesprächskorrekturen und inkrementelle Weiterentwicklung | Erledigt |
+| Versionskontrolle und Rollback | Erledigt |
+| [Community-Galerie](https://titanwings.github.io/colleague-skill-site/) mit 99+ Skills | Erledigt |
+
+---
+
+## Roadmap-Phasen
+
+### Phase 1 — Aufbau der Community
+
+> 13k Sterne sollten nicht nur eine Zahl sein. Wir wollen, dass alle Teil davon sind.
+
+**Was du sehen wirst:**
+
+- **GitHub Discussions** — Schluss mit Diskussionen in Issues, wir bekommen eigene Diskussionsbereiche
+- **`CONTRIBUTING.md`** — klare Beitragsanleitung, einsteigerfreundlich
+- **`good-first-issue`-Labels** — Einstiegsaufgaben für neue Mitwirkende
+- **Offizielles Release v1.0.0** — erstes versioniertes Release, kein "einfach von main pullen" mehr
+- **Öffentliches Roadmap-Board** — du liest es gerade, aber wir werden auch eine Live-Version mit GitHub Projects haben
+
+**Du kannst helfen:** Dokumentation übersetzen, deinen .skill einreichen, unter Windows testen, beim Sichten von Issues helfen
+
+---
+
+### Phase 2 — Distilly: Über Kollegen hinaus
+
+> Colleague Skill (`colleague.skill`) war der Anfang. Distilly ist die Zukunft.
+
+**Bereits ausgeliefert:**
+
+- **`/distilly` als kanonischer universeller Einstieg** — wähle `colleague`, `relationship` oder `celebrity` und destilliere jede Person — auch dich selbst
+- **Portable generierte Skills** — kanonische Namen im Format `{character}-{slug}` für unterstützte Agent-Hosts
+
+**Noch geplant:**
+
+- **Erweiterung der Galerie-Kategorien** — Kollege / Prominenter / Beziehung / Figur / Selbst / Meta-Skill, nach Typ durchsuchen
+- **Weitere Datenquellen**
+  - Unterstützung für WeCom (WeChat Work)
+  - Automatisches Lesen von iMessage
+- **Plattformkompatibilität** — Behebung der Windows-Kompatibilität
+
+**Du kannst helfen:** Anfragen für Personentypen einreichen, neue Datenquellen-Sammler bauen, an Diskussionen zum Galerie-Design teilnehmen
+
+---
+
+### Phase 3 — Skill-Ökosystem
+
+> Wenn eine Person zu einem Skill wird, kann dann eine Gruppe von Menschen ein Team werden?
+
+**Wir erforschen:**
+
+- **Multi-Skill-Zusammenarbeit** — `/meeting @zhangsan @lisi @wangwu`, drei Personas diskutieren gemeinsam ein Thema
+- **Beziehungsgraph** — definiere Persona-Dynamiken: Wer arbeitet mit wem zusammen, wo liegen die Spannungen
+- **Ein-Klick-Installation** — Community-Skills wie Plugins installieren
+- **Aktive Weiterentwicklung** — Skills nehmen regelmäßig neue Datenquellen auf und bleiben aktuell
+
+**Du kannst helfen:** ideale Szenarien für Skill-Kombinationen vorschlagen, an Diskussionen über Verteilungsmechanismen teilnehmen
+
+---
+
+### Phase 4 — Multimodal: Zum Leben erwecken
+
+> Im Moment können .skills nur sprechen. Wir wollen, dass sie Fotos und Sticker senden, mit ihrer Stimme sprechen und schließlich Videos erstellen.
+
+**Schritt 1: Visueller Ausdruck**
+- Automatisches Senden von Stickern und Memes im Stil der Persona während des Gesprächs
+- Generierung von "Lebensfotos" in ihrem Stil — was würden sie heute posten?
+- Jeder Skill bekommt sein eigenes Sticker-Paket und Bildmaterial
+
+**Schritt 2: Stimme**
+- Mit ihrer Stimme sprechen — geklont aus Meetingaufnahmen, Sprachnachrichten
+- Sprachantworten direkt im Chat senden
+
+**Schritt 3: Video (explorativ)**
+- Kurzvideos "Ein Tag in ihrem Leben" generieren
+- Digitaler Mensch / animierter Avatar
+
+**Du kannst helfen:** Ideen für multimodale Anwendungsfälle teilen, Sticker-Ressourcen beisteuern, Stimmklonen testen
+
+---
+
+## Mitmachen
+
+| Wie | Wo |
+|-----|-----|
+| Reiche deinen .skill ein | [Galerie-PR](https://titanwings.github.io/colleague-skill-site/) |
+| Diskutiere und schlage vor | [GitHub Discussions](https://github.com/titanwings/distilly/discussions) (demnächst) |
+| Echtzeit-Chat | [Discord](https://discord.gg/NVX66RxWZv) |
+| Fehler melden | [Issue](https://github.com/titanwings/distilly/issues/new) |
+| Code beitragen | Suche nach `good-first-issue`-Labels oder öffne einfach einen PR |
+
+**Wir brauchen besonders:**
+- Windows-Nutzer — helft uns, Kompatibilitätsprobleme zu testen und zu beheben
+- Mehrsprachige Sprecher — helft bei der Übersetzung der Dokumentation
+- Datenquellen-Entwickler — baut neue Sammler (WeCom, Notion, Google Docs...)
+- Designer — die Galerie und die Website brauchen euer Auge
+
+---
+
+<div align="center">
+
+**Diese Roadmap gehört der Community. Prioritäten verschieben sich basierend auf eurem Feedback.**
+
+Hast du Ideen? Komm zu [Discord](https://discord.gg/NVX66RxWZv) oder starte eine Discussion.
+
+Jeder `.skill` ist eine fortgeführte Beziehung.
+
+</div>

@@ -1,0 +1,72 @@
+---
+import { withBase } from "@/lib/urls";
+import "@/styles/global.css";
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const currentPath = Astro.url.pathname.replace(import.meta.env.BASE_URL.replace(/\/$/, ""), "") || "/";
+const navigation = [
+  { href: "/learn", label: "使用教程" },
+  { href: "/skills", label: "Skills" },
+  { href: "/submit", label: "提交 Skill" },
+];
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" href={`data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23111210%22/><text y=%22.78em%22 x=%22.18em%22 font-size=%2272%22 fill=%22white%22>仓</text></svg>`} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href={withBase("/")} aria-label="仓颉 Skill 首页">
+          <span class="brand-mark" aria-hidden="true">仓</span>
+          <span>仓颉 Skill</span>
+        </a>
+        <nav class="site-nav" aria-label="主导航">
+          {navigation.map((item) => (
+            <a
+              href={withBase(item.href)}
+              aria-current={currentPath.startsWith(item.href) ? "page" : undefined}
+            >
+              {item.label}
+            </a>
+          ))}
+          <a class="github-link" href="https://github.com/kangarooking/cangjie-skill" target="_blank" rel="noreferrer">
+            GitHub ↗
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div>
+          <a class="brand footer-brand" href={withBase("/")}><span class="brand-mark">仓</span><span>仓颉 Skill</span></a>
+          <p>把知识蒸馏成 AI 可以直接执行的方法。</p>
+        </div>
+        <div class="footer-links">
+          <a href={withBase("/learn")}>使用教程</a>
+          <a href={withBase("/skills")}>Skill 目录</a>
+          <a href={withBase("/submit")}>参与共建</a>
+          <a href="https://github.com/kangarooking/cangjie-skill" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

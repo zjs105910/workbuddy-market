@@ -1,0 +1,69 @@
+from pathlib import Path
+
+from autoharness.lib import validate
+
+AGENT = Path(__file__).resolve().parents[1] / "agents" / "curator.md"
+
+
+def test_curator_frontmatter_present():
+    fm = validate._frontmatter(AGENT.read_text())
+    assert fm is not None and fm.get("name") and fm.get("model")
+
+
+def test_curator_tools_are_least_privilege():
+    fm = validate._frontmatter(AGENT.read_text())
+    tools = fm["tools"]
+    for allowed in ("Read", "Grep", "Glob"):
+        assert allowed in tools
+    # same emit-only write face as the reflector — propose intents, never touch the live tree
+    assert "mcp__plugin_autoharness_stage_skill__stage_skill" in tools
+    for forbidden in ("Write", "Edit", "Bash"):
+        assert forbidden not in tools
+
+
+def test_curator_ports_umbrella_levers():
+    body = AGENT.read_text().lower()
+    for lever in ("umbrella", "class-level", "prefix", "references/", "templates/", "scripts/", "assets/"):
+        assert lever in body
+
+
+def test_curator_teaches_three_ways_to_consolidate():
+    body = AGENT.read_text().lower()
+    assert "existing umbrella" in body   # (a) merge into an already-broad member
+    assert "new umbrella" in body        # (b) create a fresh umbrella
+    assert "demote" in body              # (c) demote narrow detail into support subfiles
+
+
+def test_curator_delete_is_archive_not_destruction():
+    body = AGENT.read_text().lower()
+    assert "archive" in body
+    assert "recoverable" in body  # delete stages an archive move-out, never a hard delete
+
+
+def test_curator_only_touches_agent_created():
+    body = AGENT.read_text().lower()
+    assert "created_by:agent" in body or "agent-created" in body  # native/user skills are out of pool
+
+
+def test_curator_is_iterative():
+    body = AGENT.read_text().lower()
+    assert "iterate" in body or "next umbrella" in body
+
+
+def test_curator_judges_by_maintainer_bar_not_pairwise():
+    body = AGENT.read_text().lower()
+    assert "maintainer" in body  # "would a maintainer write N skills or one with N subsections?"
+
+
+def test_curator_requires_absorbed_into_on_delete():
+    body = AGENT.read_text()
+    assert "absorbed_into" in body  # field is mandatory language for the curator (fail-closed downstream)
+
+
+def test_curator_carries_the_category_duties():
+    # the curator is the only organ that can move both levers: fold content into an umbrella, and
+    # re-file the label. Without these three it never writes a category and the index stays flat.
+    body = AGENT.read_text().lower()
+    assert "category" in body
+    assert "backfill" in body or "back-fill" in body  # (b) existing skills get a category over time
+    assert "same category is not a reason" in body   # (c) labelling must not substitute for merging

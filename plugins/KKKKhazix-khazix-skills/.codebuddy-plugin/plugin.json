@@ -1,0 +1,19 @@
+{
+ "name": "KKKKhazix-khazix-skills",
+ "version": "2026.10.23.322346d",
+ "description": "数字生命卡兹克开源的 AI Skills 合集：leader 目标定义、洁癖整理、hv-analysis 深度分析、写作等中文场景技能。",
+ "description_en": "AI skills collection from khazix: leader, neat-freak, hv-analysis, khazix-writer and more.",
+ "author": {
+  "name": "KKKKhazix"
+ },
+ "keywords": [
+  "合集",
+  "写作",
+  "分析",
+  "中文"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/KKKKhazix/khazix-skills",
+ "sourceCommit": "322346ded8129436b3f64707789a73e732ae24d9"
+}

@@ -1,0 +1,19 @@
+{
+ "name": "OrchestratorInc-agent-orchestrator",
+ "version": "2026.10.23.44acd07",
+ "description": "运行并监督成队的编码代理：从规划到合并全流程，跨 Claude Code、Codex 等 25+ harness 通用。",
+ "description_en": "Run and supervise teams of coding agents from planning to merge, across any harness.",
+ "author": {
+  "name": "OrchestratorInc"
+ },
+ "keywords": [
+  "编排",
+  "多代理",
+  "编码",
+  "监督"
+ ],
+ "category": "开发工具",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/OrchestratorInc/agent-orchestrator",
+ "sourceCommit": "44acd07e15a4f33bf5dcf5c5c5e7d752325919c4"
+}

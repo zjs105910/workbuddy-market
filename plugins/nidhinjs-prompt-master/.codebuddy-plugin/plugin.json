@@ -1,0 +1,19 @@
+{
+ "name": "nidhinjs-prompt-master",
+ "version": "2026.10.23.769bf64",
+ "description": "为任意 AI 工具写准提示词的 Skill：完整上下文分析，不浪费一个 token 或额度，一次写到位。",
+ "description_en": "A Claude skill that writes accurate prompts for any AI tool. Zero tokens wasted.",
+ "author": {
+  "name": "nidhinjs"
+ },
+ "keywords": [
+  "提示词",
+  "prompt",
+  "效率",
+  "写作"
+ ],
+ "category": "写作",
+ "license": "MIT",
+ "homepage": "https://github.com/nidhinjs/prompt-master",
+ "sourceCommit": "769bf64d8e11f78fee2d183ad8891f9403f365e6"
+}

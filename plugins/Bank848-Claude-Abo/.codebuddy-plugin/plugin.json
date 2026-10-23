@@ -1,0 +1,18 @@
+{
+ "name": "Bank848-Claude-Abo",
+ "version": "2026.10.23.59b498d",
+ "description": "便携式 Claude Code 配置模板：66 个经过实战验证的技能开箱即用，一条命令即可在新机器上复原完整工作环境。",
+ "author": {
+  "name": "Bank848"
+ },
+ "keywords": [
+  "便携配置",
+  "模板",
+  "技能合集",
+  "开箱即用"
+ ],
+ "category": "合集",
+ "license": "NOASSERTION",
+ "homepage": "https://github.com/Bank848/Claude-Abo",
+ "sourceCommit": "59b498d848ada6fe6716d33d8125026406f4abca"
+}

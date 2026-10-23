@@ -1,0 +1,19 @@
+{
+ "name": "cathrynlavery-diagram-design",
+ "version": "2026.10.23.f4547ee",
+ "description": "编辑级的图表设计技能：42 种图表类型与 editorial 审美，支持 Claude Code、Codex、Copilot 等多个智能体。",
+ "description_en": "Editorial diagram design skills with 42 diagram types, for Claude Code, Codex, GitHub Copilot and more.",
+ "author": {
+  "name": "cathrynlavery"
+ },
+ "keywords": [
+  "图表",
+  "设计",
+  "编辑级",
+  "可视化"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/cathrynlavery/diagram-design",
+ "sourceCommit": "f4547ee95f88e5b28a52517feff6b6c11cc657f9"
+}

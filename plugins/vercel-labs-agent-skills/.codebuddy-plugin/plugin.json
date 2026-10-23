@@ -1,0 +1,18 @@
+{
+ "name": "vercel-labs-agent-skills",
+ "version": "2026.10.23.063bee9",
+ "description": "Vercel 官方 agent skills 合集：9 个覆盖前端部署与工作流场景的技能，与 Next.js 生态同源。",
+ "description_en": "Vercel's official collection of agent skills.",
+ "author": {
+  "name": "vercel-labs"
+ },
+ "keywords": [
+  "vercel",
+  "官方",
+  "合集",
+  "前端"
+ ],
+ "category": "合集",
+ "homepage": "https://github.com/vercel-labs/agent-skills",
+ "sourceCommit": "063bee94c3f4df8453406c830b0a7df0f2860278"
+}

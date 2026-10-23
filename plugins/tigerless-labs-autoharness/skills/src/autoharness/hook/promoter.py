@@ -1,0 +1,275 @@
+"""promoter: the sole deterministic writer of the host skill tree (admission gate, ★security chokepoint).
+
+Read the intent (the proposal the reflector sent via stage_skill) → shape the final full text in memory →
+validate the six classes in memory → only on pass write atomically to disk (validate-before-ANY-write).
+The model only proposes, never touches disk; landing and validation all happen here. Modeled on K8s
+validating admission (validate in-flight, persist only on allow) + POSIX atomic-write.
+
+- Shaping: create/update = intent body; patch = read live + apply delta; delete = None (removal).
+- Layer resolution: create takes the intent `level`; update/patch/delete go through skill_store.find
+  (same name across layers errors, missing is rejected).
+- Validation: reuse lib.validate's six classes, fed {**intent, level: resolved layer} (the global gate
+  applies to update too).
+- Land (after pass): land intent subfiles first (paths re-gated; every landing parent resolved and
+  escape-checked BEFORE any write — a pre-planted symlink rejects with zero writes) → materialize the
+  evidence slice into references/evidence-<hash>.md (redacted again at this egress, content-addressed →
+  idempotent; the model never names or writes it) → write SKILL.md last (atomic replace = the commit
+  point: recall only reads SKILL.md, so a reader never sees it point at an unlanded subfile) → create
+  stamps the sidecar created_by:agent → append the intent's own LED with evidence as the slice's
+  relative path. delete = materialize evidence + LED retirement + archive move-out (whole-dir
+  os.replace carries the slices along). remove_file = drop one subfile (path re-gated + escape-checked;
+  rejected while the live SKILL.md still references it; missing target = no-op, so crash replays stay
+  idempotent) + evidence + LED with the removed path. Reject = zero writes, no stamp, no ledger.
+- Drain: read queue → promote one by one → clear at the end (at-least-once + atomic land = effectively
+  exactly-once); on startup sweep orphan .tmp. On a crash, unprocessed intents stay in the durable queue
+  and are retried next time; in the extreme of never running → zero land (fail-safe).
+
+ponytail: one drain per project root is now serialized through lib.lock (see drain). LED watermark still pends true values from CAP; the create anchor reads the layer request counter at land time (probation is fiction without a true anchor). Whole-run clear, the tiny crash window (between land and clear) may re-append the LED — per-item idempotent watermark pending the intent-queue granularity being finalized (validate-store open).
+"""
+import hashlib
+import json
+
+from autoharness import config
+from autoharness.lib import (
+    atomic,
+    counters,
+    intent_queue,
+    layer,
+    ledger,
+    lock,
+    notify,
+    redact,
+    sidecar,
+    skill_store,
+    validate,
+)
+
+_MODIFY = ("update", "patch", "remove_file", "delete")
+
+
+def _reject(action, level, findings):
+    return {"ok": False, "action": action, "level": level, "findings": findings}
+
+
+def _resolve_level(intent, roots):
+    if intent.get("action") == "create":
+        return intent.get("level")
+    return skill_store.find(intent.get("name"), roots)
+
+
+def _shape(intent, level, root):
+    action = intent.get("action")
+    if action in ("create", "update"):
+        body = intent.get("body")
+        if body is None:
+            raise ValueError(f"{action} requires body")
+        return body
+    if action == "patch":
+        live = skill_store.read_body(level, intent.get("name"), root)
+        if live is None:
+            raise ValueError("patch target has no live body")
+        return skill_store.apply_delta(live, intent["old_string"], intent["new_string"])
+    if action in ("remove_file", "delete"):
+        return None
+    raise ValueError(f"unknown action: {action!r}")
+
+
+def _led(intent, evidence_ref):
+    entry = {"action": intent.get("action"),
+             "reason": intent.get("reason"),
+             "evidence": evidence_ref}
+    if intent.get("path"):
+        entry["path"] = intent["path"]
+    if intent.get("absorbed_into"):
+        entry["absorbed_into"] = intent["absorbed_into"]  # consolidated vs pruned, distinguishable in the account
+    return entry
+
+
+def _materialize_evidence(level, name, evidence, root):
+    text = redact.redact(evidence)
+    rel = f"{layer.EVIDENCE_PREFIX}{hashlib.sha256(text.encode('utf-8')).hexdigest()[:8]}.md"
+    p = layer.subfile_path(level, name, rel, root)
+    if not p.exists():
+        atomic.write_text(p, text)
+    return rel
+
+
+def _land_files(level, name, files, root):
+    if not files:
+        return
+    sdir = layer.symbol_dir(level, name, root).resolve()
+    paths = {rel: layer.subfile_path(level, name, rel, root) for rel in sorted(files)}
+    for rel, p in paths.items():
+        if not p.resolve().is_relative_to(sdir):
+            raise ValueError(f"subfile escapes the skill dir: {rel}")
+    for rel, p in paths.items():
+        atomic.write_text(p, files[rel])
+
+
+def _remove_subfile(level, name, rel, root):
+    p = layer.subfile_path(level, name, rel, root)
+    sdir = layer.symbol_dir(level, name, root).resolve()
+    if not p.resolve().is_relative_to(sdir):
+        raise ValueError(f"subfile escapes the skill dir: {rel}")
+    live = skill_store.read_body(level, name, root) or ""
+    # Use the same contextual pointer interpretation as admission. Mark the
+    # requested path known even if it is already absent: its pointer still needs patching out.
+    if rel in validate.subfile_references(live, base_dir=sdir, files={rel: ""}):
+        raise ValueError(f"{rel} is still referenced by the live SKILL.md (patch the pointer out first)")
+    if p.is_file():
+        p.unlink()
+
+
+def _land(action, intent, body, level, name, root):
+    if action == "delete":
+        evidence_ref = _materialize_evidence(level, name, intent.get("evidence"), root)
+        ledger.append(level, name, _led(intent, evidence_ref), root)
+        skill_store.archive(level, name, root)
+        return
+    if action == "remove_file":
+        _remove_subfile(level, name, intent["path"], root)
+        evidence_ref = _materialize_evidence(level, name, intent.get("evidence"), root)
+        ledger.append(level, name, _led(intent, evidence_ref), root)
+        return
+    _land_files(level, name, intent.get("files"), root)
+    evidence_ref = _materialize_evidence(level, name, intent.get("evidence"), root)
+    skill_store.write_body(level, name, body, root)
+    if action == "create":
+        existing = sidecar.read(level, name, root)
+        if not existing:
+            sidecar.create(level, name, counters.request_count(level, root), root)
+        # crash-replay: sidecar already exists — skip create to preserve counters
+    else:
+        sidecar.bump_patch(level, name, root)  # update/patch: feeds the reuse-after-improvement pair
+    ledger.append(level, name, _led(intent, evidence_ref), root)
+
+
+def promote(intent, *, roots=None, repo_name=None):
+    roots = roots or {}
+    action = intent.get("action")
+    name = intent.get("name")
+    if action == "create":
+        try:  # before any filesystem call: a name past NAME_MAX would raise, not reject
+            layer.check_new_name(name)
+        except ValueError as exc:
+            return _reject(action, None, [("shape", str(exc))])
+
+    try:
+        level = _resolve_level(intent, roots)
+    except ValueError as exc:
+        return _reject(action, None, [("routing", str(exc))])
+    if level not in layer.LAYERS:
+        return _reject(action, level, [("routing", f"unresolved/illegal level: {level!r}")])
+    if level == layer.GLOBAL and config.DISABLE_GLOBAL:
+        return _reject(action, level,
+                       [("routing", "global layer is disabled by AUTOHARNESS_DISABLE_GLOBAL")])
+
+    if level == layer.GLOBAL:
+        # Per-project drain locks cannot coordinate another project's edits to
+        # the same global library. Keep local-only promotions independent.
+        with lock.file_lock(layer.state_dir(level, roots.get(level)) / "promote.lock"):
+            return _promote_resolved(intent, action, name, level, roots, repo_name)
+    return _promote_resolved(intent, action, name, level, roots, repo_name)
+
+
+def _promote_resolved(intent, action, name, level, roots, repo_name):
+    root = roots.get(level)
+    try:
+        body = _shape(intent, level, root)
+        base_dir = layer.symbol_dir(level, name, root)
+    except (ValueError, KeyError) as exc:
+        return _reject(action, level, [("shape", str(exc))])
+
+    target_created = sidecar.is_agent_created(level, name, root) if action in _MODIFY else None
+
+    absorbed = intent.get("absorbed_into")
+    if action == "delete" and absorbed:
+        # fail-closed absorption claim (direction D, Hermes trust-chain tier 1): the umbrella must be
+        # a live, self-produced skill distinct from the target — a hallucinated name rejects the intent.
+        try:
+            alevel = skill_store.find(absorbed, roots)
+        except ValueError as exc:
+            return _reject(action, level, [("absorbed_into", str(exc))])
+        if alevel is None or absorbed == name \
+                or not sidecar.is_agent_created(alevel, absorbed, roots.get(alevel)):
+            return _reject(action, level,
+                           [("absorbed_into", f"umbrella {absorbed!r} is not a live self-produced skill")])
+
+    verdict = validate.validate(
+        {**intent, "level": level}, body,
+        target_is_agent_created=target_created, repo_name=repo_name, base_dir=base_dir,
+    )
+    if not verdict["ok"]:
+        return _reject(action, level, verdict["findings"])
+
+    try:
+        _land(action, intent, body, level, name, root)
+    except ValueError as exc:
+        return _reject(action, level, [("landing", str(exc))])
+    return {"ok": True, "action": action, "level": level, "findings": [], "notes": _notes(action, body)}
+
+
+def _notes(action, body):
+    """Fail-open observations on a landed intent: not a rejection, not silence either.
+
+    A missing category only groups the skill badly (the index falls back to `general`), so refusing
+    real content over it is out of proportion — the opposite call from the description gate, where a
+    cue-less description can never be recalled at all. It still has to reach the account, or the
+    library drifts into one flat group with nobody noticing."""
+    if action not in ("create", "update"):
+        return []
+    return [] if (validate._frontmatter(body) or {}).get("category") else ["category"]
+
+
+def sweep(roots=None):
+    roots = roots or {}
+    removed = []
+    for lyr in config.active_layers():
+        removed += skill_store.sweep_orphans(lyr, roots.get(lyr))
+    return removed
+
+
+def _account(run_id, intents, verdicts, proot):
+    """Run-level verdict account (direction B, anti-silence): the per-symbol LED records only landed
+    facts, so a rejected create would vanish without trace — this account is where verdicts live.
+    last_run.json feeds the one-line SessionStart summary and is consumed after one injection."""
+    rows = [{"action": v.get("action"), "name": i.get("name"), "ok": v["ok"],
+             "findings": [f[0] for f in v.get("findings", [])], "notes": v.get("notes", [])}
+            for i, v in zip(intents, verdicts, strict=True)]
+    landed = sum(1 for r in rows if r["ok"])
+    absorbed = sum(1 for i, v in zip(intents, verdicts, strict=True)
+                   if v["ok"] and i.get("action") == "delete" and i.get("absorbed_into"))
+    families = sorted({f for r in rows if not r["ok"] for f in r["findings"]})
+    state = layer.state_dir(layer.PROJECT, proot)
+    runs = state / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    record = {"run_id": run_id, "verdicts": rows}
+    atomic.write_text(runs / f"{run_id}.json", json.dumps(record, ensure_ascii=False, indent=2))
+    atomic.write_text(state / "last_run.json",
+                      json.dumps({"run_id": run_id, "landed": landed,
+                                  "rejected": len(rows) - landed, "absorbed": absorbed,
+                                  "families": families,
+                                  "uncategorized": sum(1 for r in rows if "category" in r["notes"])},
+                                 ensure_ascii=False))
+    return record
+
+
+def drain(run_id, *, roots=None, repo_name=None):
+    roots = roots or {}
+    proot = roots.get(layer.PROJECT)
+    # One drain per project root at a time. A hook is a short-lived process, so two passes on the same
+    # state dir (parallel worktrees remapped to one root, or a killed session leaving a detached
+    # promotion running) interleave at the file level: each reads the library without seeing the
+    # other's skill, and each lands. Held across read→land→clear, which also closes the crash window
+    # the account comment below used to leave open to an external writer.
+    with lock.file_lock(layer.state_dir(layer.PROJECT, proot) / "drain.lock"):
+        sweep(roots)
+        intents = intent_queue.read(run_id, proot)
+        verdicts = [promote(i, roots=roots, repo_name=repo_name) for i in intents]
+        record = _account(run_id, intents, verdicts, proot) if intents else None
+        intent_queue.clear(run_id, proot)
+    if record:
+        # after clear and outside the lock: the notification is fire-and-forget and must not hold
+        # the next pass out of the state dir
+        notify.send(record)
+    return verdicts

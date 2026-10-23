@@ -1,0 +1,20 @@
+{
+ "name": "thedotmack-claude-mem",
+ "version": "2026.10.23.fef3402",
+ "description": "跨会话持久记忆：自动捕获代理会话中的操作与决策，向量化归档后按需取回，让每个代理都带着上下文继续工作。",
+ "description_en": "Persistent context across sessions for every agent - captures what your agent does and makes it searchable.",
+ "author": {
+  "name": "thedotmack"
+ },
+ "keywords": [
+  "记忆",
+  "上下文",
+  "chromadb",
+  "claude-code",
+  "效率"
+ ],
+ "category": "效率",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/thedotmack/claude-mem",
+ "sourceCommit": "fef3402e674bebbf72a23aeb735e91c92cd34afd"
+}

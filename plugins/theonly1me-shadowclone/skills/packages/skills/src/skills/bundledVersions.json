@@ -1,0 +1,127 @@
+{
+  "choose-by-consequence": {
+    "SKILL.md": [
+      "77cdc4f354f680eb91280bccae3c75d4854e6a3bce5319fee23629952dbdd49c",
+      "469d74b656f55c9061c50924caf0f9b9c7a9ca49a45b1707687cd786b53dcc28"
+    ]
+  },
+  "design-deep-modules": {
+    "SKILL.md": [
+      "20e68745e99b0d17ba745dc6b8b3b410f8d87acff219413ea8b792fa3bf86a70",
+      "05919660812b75fd0c473719ab3dd5d1827f2ecb7a45cc7cdb55801d83c0455f",
+      "278b75a3353e2167fd103f0356cc7712715c3c96f277c27c686e530d6af63cec",
+      "62c3e80be509258024d7e93928305dec7ae7dbe4366e5c1ed88d17e56f20bdbe"
+    ]
+  },
+  "diagnose-before-editing": {
+    "SKILL.md": [
+      "ffa748e648206390cf67653426c8a92171d017724c35723bd476877238edb683",
+      "bad207d07a796161d617ad50c62d855f6eb086b62f2a77dd1f78d5b17d48d1dd",
+      "58743b9347aebc84b9593e1b9df35f2d4edb2c081d957d17b30b093f244e21c1",
+      "a7ceaf6e07b273bbd634a8d89c89bb3dd91051e30bf246cbeae8746b42e6bee3"
+    ]
+  },
+  "plan-with-review-page": {
+    "assets/review-page.html": ["8a587b325fc576a2eefb247baa2d3374ce1e5633f62fbe7987e2e65141292964"],
+    "scripts/validate-page.mjs": [
+      "b73ec4a524a8ba274087cd293061b3dda3658e63533e9c43b621ecf116018d3f"
+    ],
+    "SKILL.md": ["786f6b8ef45eeb97a483b9172d02595d84ce6f6c01f50439d6b9b5689551e4ea"]
+  },
+  "prove-regression-tests": {
+    "SKILL.md": [
+      "4ca9c38fd94b9aad9ba18c44d220077caad268d8fb8578122f278a74c31a7b0e",
+      "c2659dd1aae4cbe4b45436e257391495791f3019a930ced9eb83286c8cade376",
+      "099d33d326fd6197c5392ac3d79b238e1d2794728746d14ca71335f739b6faa5"
+    ]
+  },
+  "research-primary-sources": {
+    "SKILL.md": [
+      "cbdedb2cb3bbb38afa1a3982f6c8fd0a86ebacc0e8495d55895dd14d777358ab",
+      "83ae7c8021c659c54f64313bbc79f6c2bf82a440c5f4822900b3687b840b401f",
+      "66a1854843aad97aa3af84763c1185d88a99a05a9b736c30094c2a14049c3698",
+      "9c2855a4ef469242b108a660ef7c86bad82d213813e0aa2db33beb29520b3f2e"
+    ]
+  },
+  "resolve-conflicts-by-intent": {
+    "SKILL.md": [
+      "1d1faa9f885ed50c3e917b5aa9a10fd85e640dac7cee0a2b5f28c497a0eb0a38",
+      "670a19cf754ae9e0d903d7363f93ad0283934a33b636a0847d615ee39d182562",
+      "58a150766ab3dc9c94fe43232ac54fdbe5324600541318d21870ce7e8d2134a0",
+      "977fb045e1425a87fdf8aa74ed77d9aa918bf291ec4e0c2b81a3c21ea2a5156d"
+    ]
+  },
+  "scope-confirmed-changes": {
+    "SKILL.md": [
+      "cbe9c9251086f3e62f6c4ffa06480e42db2b9100edf9f83ab7ee328df8dce10e",
+      "21e9fa9bfde94c2cde863272061210a2b021cff3f62b8bb87451273f7e4528cf",
+      "742b8af277f9ed5aa362b632f2e00ea9d94be85f4709c461708253accb1f17cb",
+      "6a02591b3cf96b2e26e90f3087d352c8c3b679941e93e2190ce397df34cfb582"
+    ]
+  },
+  "shadowclone-review": {
+    "SKILL.md": [
+      "32c41e1db66c621a65964409ae506d3d8147c0ca1c18e025f0b7ac8dd6d186d5",
+      "a633db5659cde0a39a469f494c59f8261477fadf53018bbbb7ea75a147b5e1d2",
+      "2fd8501b34ace7a836937aaa11d88ad8d111fe8e25d94ba432082df8ecf2dbaa"
+    ]
+  },
+  "shadowclone-work": {
+    "SKILL.md": [
+      "eaca7570650ccb574e18ef359a8a15ae7b1d382b367828e32d29774d342c7757",
+      "33257867b1396ff304c8e1b998bf306f88f263b27b1e45382cf534d96a43ee2a",
+      "eb168ad4d50a9e43f3d2ca54e8e7e14e1352b83218fe45193fbf77b46ee39b13"
+    ]
+  },
+  "testing-first": {
+    "SKILL.md": [
+      "2d244cc47826a1d181a29e01497b66fb9f267fd1523605e4e13f7a64dc173b12",
+      "4bfebcb9f9d9b937b6ac181b2f8330a7061474671664ce87201cb7db0963da5f",
+      "7baddce04f7d25e391f06aac727f643409f7e2900eea5fe421065cb3bc4a7d9a"
+    ]
+  },
+  "testing-risk-based": {
+    "SKILL.md": [
+      "4044ef53d8fd2d91c919fb566d6115ae21f82f9ecbfa0b369cafa3ab2881bcbd",
+      "502dfaac8674f85c6963b8cb463d77f49fc40707ff82f7e67edea3811706f444",
+      "c0fb2fa19c506c507a99c19dcc203c6b84d8bf4b8835fc08b92625392452460d"
+    ]
+  },
+  "tests-that-catch-bugs": {
+    "SKILL.md": [
+      "4034b8b61ef6116b6f1627b68607a0d96ba0203ce9218100a396effd89f70f5a",
+      "17825aa6187232601e4c7d2420fc0d307d0605b11054ed8ddeecc97fe361e42f"
+    ]
+  },
+  "typescript-type-safety": {
+    "SKILL.md": [
+      "bf4bb366585fa3f7a1343d540d5d93615c496646d2bc1252475c0e2d721799d6",
+      "a9d78f11cf0b0abf3574f973dcb604cee65c101044c413d0023520edc723ed1a",
+      "af07a7287d1161f52d1fd87889b400023ff63daa7f1c1cfacff0c2bd448d6ec2",
+      "2e60ea43b640ba8bc0dfbb0f8e560fd28eb37a7a76fce48a5330e3004317d7b5"
+    ]
+  },
+  "verify-and-review": {
+    "SKILL.md": [
+      "653ae0a192ce21fac49f6cc58602e17b2a0e0dc7ce46994578d5d03942fb0ab8",
+      "94fa891930e24202fd0ec5acd36885d56917874d10bddf076e8eac33c4027495",
+      "cecee9bc6878c4e15b6496c410f51e71911c21cceb822a05cdcad8c46f95421f",
+      "cb9c7c2095eeb9bf645c1505ed0b5f500b9aa9b04414673fb85af0ae3b690a07",
+      "31ddbb7e63e625a9c444433a7ea62d281f4c1649ca0dad045313ce0c73ca20a1",
+      "f57d34dffb1177703a4c55b094e7616738f1bc38dbeb57c26f870fb0fd13954c"
+    ]
+  },
+  "verify-review-findings": {
+    "SKILL.md": ["6d484e0627b5a14e65ad4707dbf5a2cb368ea1e4786c83091de6c37aff8c0f89"]
+  },
+  "write-plain-english": {
+    "scripts/check-ste.mjs": [
+      "cf3338f4797e692308005703995539fdf3db1e1a2b61e22b359de4d83934684f",
+      "47c65903d65c040c092fdff0f6ed15fadc63eb6ef10f97048cf81ccd59616007"
+    ],
+    "SKILL.md": [
+      "fc40ec50b6e6f888427d281352df83a156ee4845b01f4b6c4a75138df3f2b8bf",
+      "41e84fb489a63e1859ba231c278e25ad5a3aa227c9649138f521d956c3104c91"
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+ "name": "cloudflare-security-audit-skill",
+ "version": "2026.10.23.c1c8a8c",
+ "description": "Cloudflare 出品的多阶段安全审计 Skill：产出可独立核验的机器可读发现，让代理审计有据可查。",
+ "description_en": "A coding-agent skill for multi-phase security audits with independently verified, machine-readable findings.",
+ "author": {
+  "name": "cloudflare"
+ },
+ "keywords": [
+  "安全",
+  "审计",
+  "cloudflare",
+  "漏洞"
+ ],
+ "category": "安全",
+ "license": "MIT",
+ "homepage": "https://github.com/cloudflare/security-audit-skill",
+ "sourceCommit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8"
+}

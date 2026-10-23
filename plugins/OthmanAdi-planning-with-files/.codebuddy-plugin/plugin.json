@@ -1,0 +1,19 @@
+{
+ "name": "OthmanAdi-planning-with-files",
+ "version": "2026.10.23.41f60ae",
+ "description": "面向长任务的持久化文件规划技能：崩溃不丢进度的 Markdown 计划，适配多个主流编码智能体（含 CodeBuddy 目录）。",
+ "description_en": "Persistent file-based planning for AI coding agents and long-running tasks: crash-proof markdown plans.",
+ "author": {
+  "name": "OthmanAdi"
+ },
+ "keywords": [
+  "规划",
+  "任务管理",
+  "断点续传",
+  "markdown"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/OthmanAdi/planning-with-files",
+ "sourceCommit": "41f60aeca8bae0b145ec0e9421a7abd747ae2b69"
+}

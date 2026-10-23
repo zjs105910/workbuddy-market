@@ -1,0 +1,112 @@
+# Tests: runs the pytest suite on Linux, Windows, and macOS plus the Pi
+# extension, OpenCode plugin and DSH plugin vitest suites on every PR and
+# push to master.
+# The pytest suite also runs scripts/sync-ide-folders.py --verify via
+# tests/test_canonical_script_sync.py, so cross-copy parity is covered.
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is the real-BSD-userland leg (shasum, BSD stat, no
+        # flock); tests/test_bsd_userland_sim.py simulates the same userland
+        # on ubuntu so GNU-only regressions fail there too.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows runs the full suite through Git Bash and native PowerShell.
+    # Successful runs already approach 15 minutes; allow runner variance.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 15 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        # pyyaml is optional at test time; without it the YAML frontmatter
+        # test in tests/test_skill_frontmatter_valid.py silently skips.
+        run: python -m pip install pytest pyyaml
+      - name: Assert sh is available
+        # Many hook tests guard on shutil.which("sh") and skip when absent.
+        # Fail loudly instead of silently losing coverage (Git Bash provides
+        # sh.exe on windows-latest).
+        run: python -c "import shutil, sys; sys.exit(0 if shutil.which('sh') else 1)"
+      - name: Run pytest
+        run: python -m pytest tests/ -q --durations=20
+
+  vitest:
+    name: vitest (Pi extension)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .pi/skills/planning-with-files/extensions/planning-with-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: .pi/skills/planning-with-files/extensions/planning-with-files/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Run vitest
+        run: npm test
+
+  vitest-opencode:
+    name: vitest (OpenCode plugin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .opencode/packages/opencode-planning-with-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: .opencode/packages/opencode-planning-with-files/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck and build
+        run: npm run build
+      - name: Run vitest
+        run: npm test
+
+  vitest-dsh:
+    name: vitest (DSH plugin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .dsh/packages/dsh-planning-with-files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: .dsh/packages/dsh-planning-with-files/package-lock.json
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck and build
+        run: npm run build
+      - name: Run vitest
+        run: npm test

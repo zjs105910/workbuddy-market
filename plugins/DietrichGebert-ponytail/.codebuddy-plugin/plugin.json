@@ -1,0 +1,19 @@
+{
+ "name": "DietrichGebert-ponytail",
+ "version": "2026.10.23.552acd5",
+ "description": "让智能体像「房间里最懒的高级工程师」一样思考：能不写的代码就不写，追求最小改动、最简方案与最少复杂度。",
+ "description_en": "Makes your AI agent think like the laziest senior dev in the room: the best code is the code you never write.",
+ "author": {
+  "name": "DietrichGebert"
+ },
+ "keywords": [
+  "最小改动",
+  "工程哲学",
+  "代码审查",
+  "方法论"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/DietrichGebert/ponytail",
+ "sourceCommit": "552acd5efd0aeae2583a12efe39373d2f076f25e"
+}

@@ -1,0 +1,17023 @@
+#!/usr/bin/env python3
+"""mission-state.py — /mission skill の state.json 管理ユーティリティ
+
+責務:
+- state.json の atomic write (Phase B-2: fsync + replace)
+- ファイルロック (Phase B-1: fcntl)
+- A-4: 更新前に .bak を自動生成
+- A-1: project_root の自動 stamp
+- A-2: pid / hostname / session_id の自動 stamp
+- A-3: 空 .mission-state/ ディレクトリの cleanup
+
+ユーザビリティ:
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py init <mission> [--threshold X] [--max-iter N] [--files a.py,b.py]
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py get [--field key]
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py set key=value [key=value ...]
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py artifact init --title <text> [--required-for-pass]
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py artifact append --section evidence --text <text>
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py mark-passes
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py mark-halt --reason <text>
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py reactivate --approved-by-user --expected-category <category> --reason <text>
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py cleanup-empty <path>
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py list   # 全プロジェクト active 一覧 (C-4)
+  python3 ${MISSION_PLUGIN_ROOT}/skills/mission/bin/mission-state.py halt --reason <text> [--all]
+"""
+
+# Issue #99: PEP 604 union 注釈 (X | None) を Python 3.9 (macOS Xcode CLT の python3) でも
+# パース可能にする。これが無いとモジュール読み込み時点で TypeError になり全コマンドが全滅する。
+from __future__ import annotations
+
+import argparse
+from bisect import bisect_left, bisect_right
+import copy
+import contextlib
+import errno
+import fcntl
+import hashlib
+from collections import Counter
+import importlib.metadata
+import importlib.util
+import io
+import json
+import math
+import multiprocessing
+import os
+import re
+import secrets
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import shutil
+from functools import lru_cache, partial
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from typing import NamedTuple, NoReturn, Optional, Protocol
+
+LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from mission_persistence.capacity_gate import (  # noqa: E402
+    CapacityWriteError, state_capacity_status, GOAL_DISPATCH_REASON_MAX_CHARS,
+)
+
+from mission_persistence.legacy_capacity import (  # noqa: E402
+    acquire_legacy_lease, write_legacy_json, write_legacy_terminal, DeferredBackupRepository,
+)
+
+from mission_application.stale_cleanup import record_session_error
+
+from mission_common import (  # noqa: E402
+    HALT_CATEGORIES,
+    PREPARATION_ONLY_MARKERS,
+    SPECIALIST_SELECTION_CHECKPOINT_REQUIRED_AT,
+    classify_state as _classify,
+    correlation_id,
+    opaque_token,
+    derive_terminal_outcome,
+    duration_sec as _duration_sec,
+    parse_iso_datetime,
+    state_identity,
+    summarize_pass_rate_population,
+    state_age_details as _state_age_details,
+)
+from specialist_accounting import (  # noqa: E402
+    candidate_accounting_report,
+    explicitly_selected_specialist_skills as _accounting_selected_specialist_skills,
+    selected_without_terminal_invocations,
+    terminal_invoked_specialist_skills as _accounting_terminal_invoked_specialist_skills,
+)
+from specialist_lifecycle import (  # noqa: E402
+    SpecialistLifecycleError,
+    invocation_by_id,
+    invocation_lifecycle_state,
+    is_terminal_invocation,
+    new_invocation_id,
+    new_selection_id,
+    selection_checkpoint,
+    validate_invocation_record,
+    validate_invocation_transition,
+    validate_specialist_lifecycle,
+)
+from activity_segments import (  # noqa: E402
+    ACTIVITY_KINDS,
+    PHASE_ACTIVITY_DEFAULTS,
+    ACTIVITY_REASONS_BY_KIND,
+    ActivityTimingError,
+    WAIT_KINDS,
+    close_activity_for_resume,
+    close_activity_for_terminal,
+    end_activity_segment,
+    is_phase_default_activity,
+    record_activity_event,
+    sanitize_activity_detail,
+    start_activity_segment,
+    start_phase_default_activity,
+    summarize_activity_states,
+    transition_activity_phase,
+    validate_activity,
+)
+from mission_application import guard_application  # noqa: E402
+from mission_application.evidence_publication import progress_mission_segment  # noqa: E402
+from mission_persistence.evidence_publish_path import (  # noqa: E402
+    open_publication_directory,
+    open_publication_parent,
+    publication_parent_mismatch,
+)
+from mission_application.lifecycle import (  # noqa: E402
+    ActivityEndRequest,
+    ActivityStartRequest,
+    AdvanceRequest,
+    AdvanceServices,
+    InitRequest,
+    InitServices,
+    LifecycleFailure,
+    MarkHaltRequest,
+    MarkHaltServices,
+    SupersedeReviewWriteRequest,
+    ReactivateRequest,
+    RefreshPidRequest,
+    RefreshPidServices,
+    SetFieldsRequest,
+    SetFieldsServices,
+    UpdateProjectRootRequest,
+    activity_end as run_activity_end,
+    activity_start as run_activity_start,
+    advance as run_advance,
+    bind_reinitialized_mission_identity,
+    initialize as run_initialize,
+    initialization_operation_id,
+    initialize_v5_repository as run_initialize_v5_repository,
+    mark_halt as run_mark_halt,
+    prepare_supersede_review_write,
+    record_reinitialization_commit,
+    reactivate as run_reactivate,
+    refresh_pid as run_refresh_pid,
+    set_fields as run_set_fields,
+    TERMINALIZABLE_ACTIVE,
+    TERMINALIZABLE_UNDECODABLE,
+    diagnose_terminalizable_state,
+    real_terminalizable_state,
+    repository_metadata,
+    select_new_session_initializer,
+    should_route_init_to_goal,
+    supersede_review_projection,
+    update_project_root as run_update_project_root,
+)
+from mission_application.next_action import (  # noqa: E402
+    NextActionRequest,
+    NextActionServices,
+    _unclosed_optional_specialist_skills,
+    derive_next_action as run_derive_next_action,
+)
+from mission_adapter.rendering import repository_format_error  # noqa: E402
+from mission_adapter.worktree_archive_specs import (  # noqa: E402
+    path_name as archive_path_name,
+    path_stem as archive_path_stem,
+    path_suffix as archive_path_suffix,
+)
+from mission_projection.stats import (  # noqa: E402
+    StatsProjectionInput,
+    project_stats,
+)
+from mission_application.ports import AuditMetadata, ExecutionRequest  # noqa: E402
+from mission_application.fresh_review_completion import FreshReviewCompletionServices  # noqa: E402
+from mission_application.review import (  # noqa: E402
+    AcceptanceCandidateServices,
+    MarkPassRequest,
+    MarkPassServices,
+    ReviewFailure,
+    closeout_already_passed,
+    legacy_manual_score_ref,
+    legacy_review_input_ref,
+    mark_pass as run_mark_pass,
+    reduce_reviews_to_score,
+    typed_manual_score_ref,
+    typed_review_input_ref,
+)
+from mission_application.artifact import (  # noqa: E402
+    ArtifactAppendRequest,
+    ArtifactCliServices,
+    ArtifactExportRequest,
+    ArtifactInitRequest,
+    ArtifactPublishRequest,
+    ArtifactRenderRequest,
+    EvidenceEffect,
+    EvidenceFailure,
+    run_artifact_append,
+    run_artifact_export,
+    run_artifact_init,
+    run_artifact_publish,
+    run_artifact_render,
+)
+from mission_application.artifact_cli import (  # noqa: E402
+    run_artifact_append_cli,
+    run_artifact_export_cli,
+    run_artifact_init_cli,
+    run_artifact_publish_cli,
+    run_artifact_render_cli,
+)
+from mission_application.evidence import (  # noqa: E402
+    EvidenceCliServices,
+    run_context_manifest_cli,
+    run_progress_update_cli,
+    ClaimsLedgerCliRequest,
+    ClaimsLedgerCliServices,
+    ContextManifestRequest,
+    ProgressClearRequest,
+    ProgressUpdateRequest,
+    VerificationRecordRequest,
+    evidence_publication_paths,
+    prepare_verification_record_operation,
+    run_context_manifest,
+    render_claims_ledger_cli,
+    run_progress_clear,
+    run_progress_update,
+    run_verification_record,
+    validate_context_iteration_override,
+    verify_published_evidence_effects,
+)
+from mission_application.budget import run_budget_status_cli, run_budget_next, run_budget_reconcile_cli
+from mission_persistence.spawn_jobs import cleanup_jobs
+from mission_kernel.budget import BudgetError
+from mission_application.fresh_review import run_fresh_review_prepare_cli, run_fresh_review_status_cli, run_repair_origins_cli
+from mission_application.fresh_review_withdraw import run_fresh_review_withdraw_cli
+from mission_application.fresh_review_publish import run_fresh_review_import_cli
+from mission_application.fresh_review_dispatch import run_fresh_review_dispatch_cli
+import fresh_review_host
+from mission_application.acceptance import (  # noqa: E402
+    AcceptanceContractCliServices,
+    run_acceptance_contract_import_cli,
+    run_acceptance_contract_status_cli,
+)
+from mission_application.verifier_policy import load as load_verifier_policy  # noqa: E402
+from mission_application.verification_execution import (  # noqa: E402
+    VerificationReceiptCliRequest,
+    VerificationReceiptCliServices,
+    run_verification_receipt_cli,
+)
+from mission_application.planning import (  # noqa: E402
+    EXECUTOR_HANDOFF_ABORT_REASONS,
+    EXECUTOR_HANDOFF_COMMAND_NAMES,
+    EXECUTOR_HANDOFF_FACTS_SOURCE,
+    EXECUTOR_HANDOFF_READS_PLAN,
+    PlanningFailure,
+    commit_plan_evidence,
+    decide_provider_terminal_result,
+    ExecutorHandoffFacts,
+    ExecutorHandoffRequest,
+    ExecutorHandoffRejected,
+    TransitionRejected,
+    executor_handoff_response,
+    run_executor_handoff,
+    run_transition_effects,
+    prepare_executor_handoff,
+    prepare_executor_handoff_rejection,
+    prepare_specialist_recommendation,
+    record_dispatch_intent,
+    record_provider_receipt,
+    reconcile_dispatch_unknown,
+    typed_plan_binding,
+    validate_closed_provider_receipt,
+    validate_provider_plan_import,
+    verify_handoff_binding,
+)
+from mission_application.command_provider import (  # noqa: E402
+    CommandProviderFailure,
+    CommandProviderRequest,
+    ExecutionServices as CommandProviderExecutionServices,
+    ProviderPolicyServices as CommandProviderPolicyServices,
+    StateEffectsServices as CommandProviderStateEffectsServices,
+    WorkspaceServices as CommandProviderWorkspaceServices,
+    invoke_command_provider,
+)
+from mission_application.plan_import import (  # noqa: E402
+    PlanImportFailure,
+    PlanImportPolicyServices,
+    PlanImportRequest,
+    PlanImportStateEffectsServices,
+    PlanImportWorkspaceServices,
+    run_plan_import,
+)
+from mission_application.contract_schemas import (  # noqa: E402
+    render_contract_schema,
+    review_contract_schema,
+)
+from mission_application.findings_summary import (  # noqa: E402
+    findings_summary_fields,
+)
+from mission_application.review_aggregation import (  # noqa: E402
+    ReviewAggregationRequest,
+    ReviewAggregationServices,
+    run_aggregate_reviews,
+)
+from mission_application.supersede_reviews import (  # noqa: E402
+    SupersedeReviewsFailure,
+    SupersedeReviewsRequest,
+    SupersedeReviewsServices,
+    run_supersede_reviews,
+)
+from mission_application.stats_formatting import (  # noqa: E402
+    StatsTextRequest,
+    format_stats_text,
+)
+from mission_application.stale_cleanup import (  # noqa: E402
+    CleanupStaleRequest,
+    CleanupStaleServices,
+    run_cleanup_stale,
+)
+from mission_application.legacy_initialization import (  # noqa: E402
+    LegacyV4InitializationRequest,
+    LegacyV4InitializationServices,
+    run_initialize_legacy_v4,
+    initialize_v5_session as run_initialize_v5_session,
+    preflight_v5_session as run_preflight_v5_session,
+)
+from mission_application.worktree_archive_specs import (  # noqa: E402
+    WorktreeArchiveSpecsRequest,
+    WorktreeArchiveSpecsServices,
+    collect_worktree_archive_specs,
+)
+from mission_application.specialist_registry_discovery import (  # noqa: E402
+    SpecialistRegistryDiscoveryRequest,
+    SpecialistRegistryDiscoveryServices,
+    discover_specialist_registry_candidates,
+    portable_provider_identifier as _portable_provider_identifier,
+    provider_id as _provider_id,
+    safe_provider_reference as _safe_provider_reference,
+)
+from mission_application.guard_timeout import (  # noqa: E402
+    DEADLINE_ENV_VAR,
+    bounded_by_guard_timeout,
+    finish_guard_verdict,
+)
+from mission_application.runtime_guard import (  # noqa: E402
+    CleanupStaleExecuteCommand,
+    GuardRequest,
+    GuardSessionFact,
+    MarkHaltCommand,
+    NoCommand,
+    PermissionHaltRejected,
+    PermissionObservationRequest,
+    PermissionProbe,
+    ProviderConsentRequest,
+    RegisteredEntryPointDistributionObservation,
+    ResolvedProviderConsentPathObservation,
+    StopGuardObserveCommand,
+    StopObservationRequest,
+    decide_stop_guard,
+    observe_stop_guard,
+    record_permission_observation,
+    validate_provider_consent_request,
+    validate_registered_approval_entry_point_distribution,
+)
+from mission_application.specialist_selection import (  # noqa: E402
+    SpecialistDeclineRequest,
+    SpecialistDeclineServices,
+    SpecialistSelectionFailure,
+    decline_specialist_selection,
+    resolve_provider_confirmation,
+)
+from mission_persistence.legacy_v4 import (  # noqa: E402
+    LegacyV4InitializerRepository,
+    LegacyV4Repository,
+    V5CompatibilityRepository,
+)
+from mission_persistence.aggregate_index import RecoverableAggregateIndex  # noqa: E402
+from mission_persistence.repository_binding import (  # noqa: E402
+    RepositoryFormat,
+    RepositorySelectionError,
+    inspect_repository_bytes,
+    select_legacy_repository,
+    select_repository,
+)
+from mission_persistence.fenced_commit import (  # noqa: E402
+    FencedCommitError,
+    CanonicalStateEncodingError,
+    LocalFencedRepository,
+    compute_intent_digest,
+)
+from mission_persistence.reinitialization import V5MissionReinitializer  # noqa: E402
+from mission_persistence.local_uow import VerifiedBlobSet  # noqa: E402
+from mission_kernel.fresh_review import FreshReviewError
+from mission_persistence.authoritative_reader import (  # noqa: E402
+    AuthoritativeSnapshot,
+    authoritative_snapshot_from_document,
+    expected_session_id_for_live_path,
+    is_live_session_path,
+    read_authoritative_snapshot,
+    read_session_json, preflight_session_paths, load_authoritative_snapshot,
+    read_legacy_compatibility_snapshot,
+    summarize_authoritative_pass_rate_population,
+)
+from worktree_archive import (  # noqa: E402
+    STATE_ARCHIVE_GENERATION_SCHEMA,
+    STATE_ARCHIVE_POINTER_SCHEMA,
+    WorktreeArchiveValidation,
+    read_state_archive_file_bytes,
+    read_state_archive_compaction,
+    read_validated_archive_authoritative_snapshot,
+    read_verified_content_addressed_evidence,
+    read_verified_review_input_evidence,
+    resolve_repo_artifact_reference,
+    state_archive_content_digest,
+    valid_review_perspective,
+    validated_archive_evidence_reader,
+    validate_worktree_archive_bundle,
+    worktree_archive_lineage_references,
+    worktree_archive_typed_score_bindings,
+)
+from state_snapshot import SnapshotError, consume_snapshot_document  # noqa: E402
+from provider_eligibility import (  # noqa: E402
+    RegistryContractError,
+    _strict_json_loads,
+    detect_registry_version,
+    evaluate_provider_eligibility,
+    normalize_selection_source,
+    parse_v2_registry_json,
+    registry_entry_digest,
+    validate_provider_application,
+    value_digest as provider_value_digest,
+)
+from provider_public_contract import (  # noqa: E402
+    SpecialistPublicContractError,
+    contains_local_locator,
+    redact_local_locators,
+    validate_specialist_public_state as _validate_specialist_public_state,
+)
+from provider_preflight import (  # noqa: E402
+    ProviderPreflightError,
+    build_preflight,
+    dispatch_prepared_packet,
+    safe_input_snapshot,
+    validate_receipt as validate_provider_receipt,
+)
+from plan_contract import (  # noqa: E402
+    MAX_PLAN_RESULT_BYTES,
+    PlanContractError,
+    _strict_load as _strict_plan_load,
+    _validate_document,
+    canonical_plan_bytes,
+)
+from planning_lifecycle import (  # noqa: E402
+    PlanningLifecycleError,
+    canonical_plan_identity,
+    derive_planning_lifecycle,
+    validate_handoff_step,
+)
+from planning_provider_metrics import reduce_planning_provider_kpis  # noqa: E402
+from review_learning import (  # noqa: E402
+    LEARNING_BRIEF_SCHEMA,
+    failure_ledger_counts,
+    LearningContractError,
+    reduce_iteration_recovery,
+    reduce_failure_ledger,
+    summarize_learning_brief,
+    WEAK_PHASES,
+    validate_review_learning,
+)
+from artifact_contract import (  # noqa: E402
+    ArtifactContractError,
+    artifact_lint_observation_matches,
+    artifact_path_from_state,
+    canonical_artifact_identity_snapshot,
+    capture_artifact_identity,
+    invalidate_artifact_lint_observation,
+    summarize_artifact_coverage,
+    validate_artifact_identity,
+    validate_artifact_state_consistency,
+)
+from scoring_provenance import (  # noqa: E402
+    REASON_CODES as _PROVENANCE_REASON_CODES,
+    VERIFIER_ID_RE as _APPROVAL_VERIFIER_NAME_RE,
+    build_request as build_approval_request,
+    digest as provenance_digest,
+    classify_score_provenance,
+    project_root_from_state_path,
+    read_score_provenance_evidence,
+    reduce_review_aggregate,
+    terminal_state_digest,
+    validate_receipt_binding,
+    validate_recorded_envelope,
+)
+from command_outcomes import (  # noqa: E402
+    KINDS as COMMAND_OUTCOME_KIND_ORDER,
+    OutcomeStoreError,
+    append_sidecar as append_command_outcome_sidecar,
+    append_state_record as append_command_outcome_state,
+    iter_records as iter_command_outcome_records,
+    observe_state_only as observe_state_command_outcomes,
+    summarize_sessions as summarize_command_outcome_sessions,
+    validate_observation as validate_command_outcome_observation,
+    valid_identifier as _valid_command_outcome_identifier,
+)
+from error_guidance import build_guidance  # noqa: E402
+from evidence_handoff import (  # noqa: E402
+    EvidenceHandoffError,
+    EvidenceHandoffTimeout,
+    await_handoff as await_evidence_handoff,
+    load_payload as load_handoff_payload,
+    publish as publish_evidence_handoff,
+    verify_handoff as verify_evidence_handoff,
+)
+from pregate_cache import (  # noqa: E402
+    PregateCacheError,
+    inspect as inspect_pregate_cache,
+    lookup as lookup_pregate_cache,
+    record as record_pregate_cache,
+    subject_digest as subject_digest_pregate_cache,
+)
+from merge_queue import (  # noqa: E402
+    BaseMismatchError,
+    MergeQueueError,
+    derive_revision_scope_shas as derive_queue_revision_scope_shas,
+    enqueue as enqueue_merge_queue,
+    mark as mark_merge_queue,
+    next_candidate as next_merge_queue_candidate,
+    status as status_merge_queue,
+    verify as verify_merge_queue,
+)
+from integration_gate import execute_changeset_digest, execute_gate_and_merge  # noqa: E402
+from mission_application.integration_gate import (  # noqa: E402
+    CLAIMED_DIGEST_SOURCES,
+    ChangesetDigestRequest,
+    ChangesetDigestServices,
+    IntegrationGateFailure,
+    IntegrationGateRequest,
+    IntegrationGateServices,
+    run_changeset_digest,
+    run_integration_gate,
+)
+from mission_kernel.artifact import (  # noqa: E402
+    unknown_artifact_section_message,
+)
+from mission_kernel.commands import GENERIC_SET_FROZEN_FIELDS  # noqa: E402
+from mission_kernel.errors import MissionStateDecodeError, StrictReadError  # noqa: E402
+from mission_kernel.json_codec import (  # noqa: E402
+    _reject_duplicate_json_pairs,
+    decode_json_object as _decode_strict_json_object,
+    thaw_json_object as _thaw_strict_json_object,
+)
+from mission_kernel.versions import read_schema_version as _read_schema_version  # noqa: E402
+from mission_persistence.administrative import (  # noqa: E402
+    AdministrativeCommitError,
+    administrative_commit,
+    restore_record as restore_administrative_record,
+)
+from mission_persistence.strict_reader import (  # noqa: E402
+    read_stable_bytes as _read_stable_bytes,
+    read_stable_payload_beneath as _read_stable_payload_beneath,
+)
+
+SCHEMA_VERSION = 4  # v4: structured scoring provenance is mandatory for new sessions
+NEW_SESSION_REPOSITORY_FORMAT = RepositoryFormat.V5
+GOAL_DISPATCH_MODES = {"inline", "host-native"}
+_SCHEMA_VERSION_MISSING = object()
+
+
+class UnsupportedSchemaVersionError(ValueError):
+    """The reader only accepts legacy-missing or supported schema versions."""
+
+
+class AuthoritativeStateRecord(dict):
+    """Compatibility mapping that retains its typed authoritative projection."""
+
+    def __init__(self, snapshot: AuthoritativeSnapshot, document: dict) -> None:
+        super().__init__(document)
+        self.authoritative_snapshot = snapshot
+
+
+def _authoritative_snapshot_for_state(state: dict) -> AuthoritativeSnapshot:
+    snapshot = getattr(state, "authoritative_snapshot", None)
+    if snapshot is not None:
+        return snapshot
+    return authoritative_snapshot_from_document(state)
+
+
+def _validate_schema_version(data: dict) -> int | None:
+    version = data.get("schema_version", _SCHEMA_VERSION_MISSING)
+    try:
+        origin = _read_schema_version(data, max_reader_version=4)
+    except MissionStateDecodeError as exc:
+        raise UnsupportedSchemaVersionError(
+            f"unsupported schema_version {version!r}; expected a missing field or an integer in 1..{SCHEMA_VERSION}"
+        ) from exc
+    if version is _SCHEMA_VERSION_MISSING:
+        return None
+    return int(origin.value[1:])
+
+
+def _load_state_json(sf: Path) -> dict:
+    data = read_session_json(sf)
+    _validate_schema_version(data)
+    return data
+
+
+def _load_authoritative_state(
+    sf: Path,
+    archive_validation: Optional[WorktreeArchiveValidation] = None,
+    *,
+    legacy_compatibility: bool = False,
+    allow_missing_schema_session_mismatch: bool = False,
+) -> tuple[AuthoritativeSnapshot, dict]:
+    snapshot = load_authoritative_snapshot(
+        sf, archive_validation, legacy_compatibility=legacy_compatibility,
+        allow_missing_schema_session_mismatch=allow_missing_schema_session_mismatch,
+        archive_resolver=_validated_archive_for_state_path,
+        archive_reader=read_validated_archive_authoritative_snapshot,
+        schema_error_type=UnsupportedSchemaVersionError,
+    )
+    return snapshot, snapshot.document_copy()
+
+
+def _validated_archive_for_state_path(sf: Path):
+    """Bind a non-live generation path back to its validated bundle only."""
+
+    path = Path(sf)
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if (
+            part == ".mission-state"
+            and index + 2 < len(parts)
+            and parts[index + 1] == "archive"
+            and parts[index + 2].startswith("worktree-")
+        ):
+            bundle = Path(*parts[: index + 3])
+            validation = validate_worktree_archive_bundle(bundle)
+            if validation.status != "valid":
+                return None
+            resolved = path.resolve(strict=False)
+            bound_paths = tuple(
+                candidate.resolve(strict=False)
+                for candidate in validation.state_paths
+            )
+            if bound_paths != (resolved,):
+                raise ValueError("validated archive state path is not manifest-bound")
+            return validation
+    return None
+
+
+def _reject_legacy_repository_selection(
+    sf: Path,
+    error: RepositorySelectionError,
+) -> NoReturn:
+    """Translate a library selection rejection into the legacy CLI contract."""
+    try:
+        source = _read_stable_bytes(sf, limit=4 * 1024 * 1024)
+        document = _thaw_strict_json_object(_decode_strict_json_object(source))
+    except (OSError, ValueError, UnicodeDecodeError):
+        document = None
+    if isinstance(document, dict):
+        # Preserve the established #483 diagnostic and exit-code contract.
+        _validate_schema_version(document)
+    print(
+        f"ERROR: legacy repository selection rejected: {error.code}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
+def _select_legacy_repository_for_cli(session_id, sf, legacy_factory):
+    """Bind every selector failure, including retained-guard drift, to CLI errors."""
+
+    def bind_cli_guard(format_guard):
+        def cli_format_guard():
+            try:
+                return format_guard()
+            except RepositorySelectionError as error:
+                _reject_legacy_repository_selection(Path(sf), error)
+                raise AssertionError("repository rejection translator returned")
+
+        return legacy_factory(cli_format_guard)
+
+    try:
+        return select_legacy_repository(session_id, sf, bind_cli_guard)
+    except RepositorySelectionError as error:
+        _reject_legacy_repository_selection(Path(sf), error)
+        raise AssertionError("repository rejection translator returned")
+
+
+def _select_repository_for_cli(
+    session_id,
+    sf,
+    legacy_factory,
+    v5_factory,
+):
+    """Bind a retained v4/v5 selector to the CLI error contract."""
+
+    def bind_cli_guard(factory):
+        def build(format_guard):
+            def cli_format_guard():
+                try:
+                    return format_guard()
+                except RepositorySelectionError as error:
+                    _reject_legacy_repository_selection(Path(sf), error)
+                    raise AssertionError("repository rejection translator returned")
+
+            return factory(cli_format_guard)
+
+        return build
+
+    try:
+        return select_repository(
+            session_id,
+            sf,
+            bind_cli_guard(legacy_factory),
+            bind_cli_guard(v5_factory),
+        )
+    except RepositorySelectionError as error:
+        _reject_legacy_repository_selection(Path(sf), error)
+        raise AssertionError("repository rejection translator returned")
+
+
+def _new_specialist_selection_checkpoint() -> dict:
+    return {
+        "policy": "checkpoint",
+        "action": "continue-core",
+        "decision": "none",
+        "reason": "specialist selection has not been evaluated",
+        "reason_code": "pending-evaluation",
+        "prompted_user": False,
+        "lifecycle_state": "terminal",
+        "selection_id": new_selection_id(),
+    }
+
+
+def _current_selection_id(data: dict) -> str | None:
+    decision = data.get("specialists_decision")
+    selection_id = decision.get("selection_id") if isinstance(decision, dict) else None
+    return str(selection_id) if isinstance(selection_id, str) else None
+
+
+def _finalize_specialist_selection_checkpoint(
+    decision: dict, candidates: list[dict], selected: list[dict], unavailable: list[dict]
+) -> tuple[dict, list[dict], list[dict], list[dict]]:
+    """Bind one recommendation result to one opaque, durable checkpoint."""
+    selection_id = new_selection_id()
+    if selected:
+        checkpoint = {"decision": "selected", "reason_code": "candidate-selected", "lifecycle_state": "selected"}
+    elif decision.get("action") == "ask-user":
+        checkpoint = {"decision": "none", "reason_code": "awaiting-confirmation", "lifecycle_state": "candidate"}
+    elif unavailable:
+        checkpoint = {"decision": "unavailable", "reason_code": "provider-unavailable", "lifecycle_state": "terminal"}
+    else:
+        checkpoint = {
+            "decision": "none",
+            "reason_code": "no-candidates" if not candidates else "profile-not-applicable",
+            "lifecycle_state": "terminal",
+        }
+    decision = {**decision, **checkpoint, "selection_id": selection_id}
+    bind = lambda records: [{**record, "selection_id": selection_id} for record in records]
+    return decision, bind(candidates), bind(selected), bind(unavailable)
+
+
+def _specialist_selection_checkpoint_error(data: dict) -> str | None:
+    decision = data.get("specialists_decision")
+    if not isinstance(decision, dict) or not decision.get("selection_id"):
+        return None  # legacy sessions remain readable and are classified by audit
+    try:
+        validate_specialist_lifecycle(data)
+    except SpecialistLifecycleError as exc:
+        return f"specialist selection checkpoint is not terminal or valid: {exc}"
+    return None
+
+# #186: 実行中の mission-state.py のバージョン。.claude-plugin/plugin.json 等の manifest と
+# 一致させる (release 時に手動 bump。test_doc_consistency.py::test_release_version_paths_are_in_sync
+# が manifest 間の一致は既に保証しているため、ここでは manifest との一致のみ追加で固定する)。
+# 実行時に manifest ファイルを読みに行かない設計: plugin cache 配布・symlink 配布・単一ファイル
+# 実行のいずれでも `.claude-plugin/plugin.json` への相対パスが安定しないため。
+MISSION_CLI_VERSION = "2.8.0"
+
+# Tier5: スコア/反復のマジックナンバーを単一定義 (散在防止・閾値変更を1箇所に集約)
+DEFAULT_THRESHOLD = 4.0     # 合格 composite 閾値 (init --threshold 未指定時 / mark-passes fallback)
+MIN_ITEM_THRESHOLD = 3.5    # 各項目スコアの足切り (これ未満は mark-passes が reject)
+DEFAULT_MAX_ITER = 3        # init --max-iter 未指定時の最大反復回数 (0=上限なし)
+SCORE_MIN, SCORE_MAX = 0.0, 5.0  # composite/min_item の許容範囲
+
+
+def _finite_score(value: object) -> bool:
+    """Return whether a score is a non-boolean finite number on the 0–5 scale."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and SCORE_MIN <= float(value) <= SCORE_MAX
+    )
+
+
+def _nonnegative_int(value: object) -> bool:
+    """Return whether an open High count is an exact non-boolean integer."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+ARTIFACT_SECTIONS = {
+    "mission": "Mission",
+    "plan": "Plan",
+    "execution": "Execution",
+    "evidence": "Evidence",
+    "review": "Review",
+    "score_gate": "Score Gate",
+    "assumptions": "Assumptions",
+    "follow_ups": "Follow-ups",
+}
+ARTIFACT_REDACTION_STATUSES = {"unchecked", "checked", "reviewed", "not-needed"}
+ARTIFACT_PUBLISH_PROVIDERS = {"claude-code", "local"}
+MAX_REGISTRY_BYTES = 1024 * 1024
+
+
+BUILTIN_SPECIALIST_CANDIDATES = [
+    {
+        "role": "doc-writer",
+        "skill": "documentation-provider",
+        "task_profiles": ["documentation"],
+        "phases": ["planning", "execution", "review"],
+        "source": "preset:docs",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "frontend",
+        "skill": "frontend-provider",
+        "task_profiles": ["frontend"],
+        "phases": ["planning", "execution"],
+        "source": "preset:frontend",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "visual-quality",
+        "skill": "visual-quality-provider",
+        "task_profiles": ["frontend", "product"],
+        "phases": ["planning", "review"],
+        "source": "preset:frontend",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "backend",
+        "skill": "backend-provider",
+        "task_profiles": ["backend", "database"],
+        "phases": ["planning", "execution"],
+        "source": "preset:backend",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "unit-tester",
+        "skill": "unit-test-provider",
+        "task_profiles": ["testing", "backend"],
+        "phases": ["execution", "review"],
+        "source": "preset:testing",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "security-reviewer",
+        "skill": "security-review-provider",
+        "task_profiles": ["security"],
+        "phases": ["planning", "review"],
+        "source": "preset:security",
+        "required": False,
+        "install_hint": False,
+    },
+    {
+        "role": "infra",
+        "skill": "infra-provider",
+        "task_profiles": ["infra"],
+        "phases": ["planning", "execution", "review"],
+        "source": "preset:infra",
+        "required": False,
+        "install_hint": False,
+    },
+]
+
+PHASE_ROLE_ORDER = {
+    "planning": [
+        "issue-framing",
+        "hypothesis-design",
+        "architecture-review",
+        "api-design",
+        "schema-review",
+        "planning",
+        "doc-writer",
+    ],
+    "execution": [
+        "implementation",
+        "backend",
+        "frontend",
+        "refactor-review",
+        "documentation",
+        "market-research",
+        "competitor-intelligence",
+        "financial-modeling",
+        "risk-review",
+        "data-analysis",
+    ],
+    "review": [
+        "unit-test",
+        "integration-test",
+        "unit-tester",
+        "code-review",
+        "security-review",
+        "security-reviewer",
+        "performance-review",
+        "infra-review",
+        "strategy-review",
+        "document-review",
+        "visual-quality",
+    ],
+    "synthesis": [
+        "quality-synthesis",
+        "risk-summary",
+        "report-synthesis",
+        "strategy-review",
+        "document-review",
+    ],
+}
+
+PROFILE_KEYWORDS = {
+    "architecture": (
+        "architecture", "architect", "system design", "design review",
+        "設計", "アーキテクチャ", "構成", "構造",
+    ),
+    "documentation": ("readme", "docs", "document", "documentation", "adr", "guide", "reference", "changelog", ".md"),
+    "frontend": ("frontend", "react", "vue", "ui", "css", "component", "browser", "screenshot", "accessibility"),
+    "backend": ("backend", "api", "endpoint", "service", "worker", "validation", "business logic"),
+    "database": ("database", "schema", "migration", "query", "sql", "persistence"),
+    "security": ("security", "auth", "permission", "secret", "token", "injection", "pii", "oauth"),
+    "testing": ("test", "pytest", "jest", "e2e", "playwright", "coverage", "flaky"),
+    "infra": ("deploy", "deployment", "ci", "docker", "cloud", "observability", "terraform", "github actions"),
+    "product": ("prd", "ux", "workflow", "acceptance criteria", "product"),
+    "research": (
+        "research", "market", "competitor", "analysis", "source",
+        "市場", "市場規模", "競合", "差別化", "競争優位", "tam", "sam", "som",
+        "roi", "npv", "収益性", "投資対効果", "リスク", "規制", "感度分析",
+        "戦略", "提案", "executive summary", "recommendation", "positioning",
+    ),
+    "strategy": (
+        "strategy", "strategic", "戦略", "差別化", "競争優位", "positioning",
+        "roadmap", "kpi", "提案", "recommendation",
+    ),
+    "financial": ("roi", "npv", "financial model", "収益性", "投資対効果", "財務", "感度分析"),
+    "risk": ("risk", "リスク", "規制", "scenario", "シナリオ", "compliance"),
+}
+
+HIGH_RISK_KEYWORDS = (
+    # Issue #175 で #174 と同一ポリシーで較正 (2026-07-10)
+    # 維持: production, deploy, migration, drop table, delete data, irreversible, payment, security, secret, pii
+    # 削除: "prod" ("production" が既にあり冗長。"product"/"productivity" への誤発火源)
+    # "auth" → 語幹 (authenticat / authoriz / oauth) に置換 (authority への誤発火を排除)
+    # "token" → 複合語 (api token / api-token / api_key / access token / access-token / bearer) に置換
+    "production", "deploy", "migration", "drop table", "delete data",
+    "irreversible", "payment", "security", "secret", "pii",
+    "api token", "api-token", "api_key",
+    "access token", "access-token", "bearer",
+    "authenticat", "authoriz", "oauth",
+)
+
+SPECIALIST_INVOCATION_STATUSES = {
+    "selected",
+    "started",
+    "completed",
+    "unvalidated-evidence",
+    "prepared",
+    "awaiting-input",
+    "inline-applied",
+    "skill-tool-applied",
+    "skipped",
+    "unavailable",
+    "failed",
+}
+
+SPECIALIST_INVOCATION_MODES = {
+    "skill-tool",
+    "command-provider",
+    "codex-inline",
+    "natural-language",
+    "fallback-core",
+}
+
+SPECIALIST_INVOCATION_REASON_REQUIRED_STATUSES = {
+    "prepared",
+    "awaiting-input",
+    "skipped",
+    "unavailable",
+    "failed",
+}
+
+SPECIALIST_SELECTION_SOURCES = {
+    "confirmed-user",
+    "user-instruction",
+    "manual",
+    "task-required",
+}
+
+APPLIED_SPECIALIST_INVOCATION_STATUSES = {
+    "completed",
+    "inline-applied",
+    "skill-tool-applied",
+}
+
+SPECIALIST_SELECTION_CHECKPOINT_COMPLEXITIES = {"Standard", "Complex", "Critical"}
+DEFAULT_STALE_ACTIVE_SECONDS = 3 * 60 * 60
+DEFAULT_LEASE_TTL_SECONDS = 15 * 60
+LEASE_CARRIER_PREFIX = "MISSION_LEASE_CARRIER="
+LEASE_STATE_FIELDS = (
+    "owner_session_id",
+    "lease_id",
+    "fencing_epoch",
+    "lease_expires_at",
+)
+
+
+class LeaseRejectedError(RuntimeError):
+    """A writer does not own the current fenced session lease."""
+
+
+class LeaseDecision:
+    """Result of acquiring, renewing, or taking over a session lease."""
+
+    def __init__(self, action: str, lease_id: str, fencing_epoch: int):
+        self.action = action
+        self.lease_id = lease_id
+        self.fencing_epoch = fencing_epoch
+
+
+def iso_now() -> str:
+    override = os.environ.get("MISSION_STATE_NOW")
+    if override:
+        parsed = parse_iso_datetime(override)
+        if parsed:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def state_dir(cwd: Path) -> Path:
+    return cwd / ".mission-state"
+
+
+def session_dir(cwd: Path) -> Path:
+    return state_dir(cwd) / "sessions"
+
+
+def session_file(cwd: Path, sid: str) -> Path:
+    return session_dir(cwd) / f"{sid}.json"
+
+
+def aggregate_file(cwd: Path) -> Path:
+    return state_dir(cwd) / "aggregate.json"
+
+
+def cmd_repair_aggregate_index(args) -> None:
+    """Check or explicitly rebuild the derived aggregate index from authority."""
+    coordinator = RecoverableAggregateIndex(
+        state_dir(Path.cwd()),
+        clock=lambda: parse_iso_datetime(iso_now()) or datetime.now(timezone.utc),
+    )
+    result = coordinator.repair(execute=bool(args.execute))
+    print(json.dumps(result, ensure_ascii=False))
+
+
+# os.walk スキャン時にプルーニングする巨大・無関係ツリー (この内側に mission state は作られない)。
+_PRUNE_DIRS = frozenset({
+    "node_modules", ".git", ".venv", "venv", "__pycache__",
+    "dist", "build", ".next", ".cache", ".pytest_cache", "vendor",
+    "target", ".gradle", "Pods", ".build",
+})
+
+
+def _iter_state_files(
+    root: Path,
+    *,
+    include_archive: bool = False,
+    archive_validations: Optional[dict[Path, WorktreeArchiveValidation]] = None,
+):
+    """root 配下の全 state ファイルを列挙 (legacy state.json + multi-session sessions/*.json)。
+
+    os.walk で node_modules/.git 等の巨大ツリーをプルーニングするため、~/dev のような
+    大規模ディレクトリ (実測 12 万サブディレクトリ) でも高速にスキャンできる
+    (rglob 全舐めの ~20 秒 → 0.x 秒)。
+    include_archive=True で archive/state-*.json も含める (stats の全履歴収集用)。
+    デフォルトは現役ファイルのみ (cleanup/list/halt が誤って archive を拾わないように)。
+    """
+    root = Path(root)
+    if not root.exists():
+        return
+    # followlinks=False (明示): symlink 先を二重走査しない。rglob も symlink を展開しないため等価。
+    for dirpath, dirnames, _filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+        if os.path.basename(dirpath) != ".mission-state":
+            continue
+        # 子 (sessions/archive) は下で直接 glob するため os.walk の降下を止める (.mission-state は入れ子にならない)
+        dirnames[:] = []
+        gs = Path(dirpath)
+        sf = gs / "state.json"  # legacy 単一 state
+        if sf.is_file():
+            yield sf
+        sessions = gs / "sessions"  # multi-session
+        if sessions.is_dir():
+            yield from sorted(sessions.glob("*.json"))
+        if include_archive:
+            archive = gs / "archive"  # 退避済み履歴 (stats 用)
+            if archive.is_dir():
+                yield from sorted(archive.glob("state-*.json"))
+                # Issue #7: worktree サブディレクトリ (archive/worktree-*/) も列挙する
+                for sub in sorted(archive.glob("worktree-*")):
+                    if sub.is_dir():
+                        validation = validate_worktree_archive_bundle(sub)
+                        if validation.status == "invalid":
+                            continue
+                        if validation.status == "valid":
+                            for state_path in validation.state_paths:
+                                if archive_validations is not None:
+                                    archive_validations[
+                                        state_path.resolve(strict=False)
+                                    ] = validation
+                                yield state_path
+                            continue
+                        worktree_root = validation.root
+                        yield from sorted(worktree_root.glob("*.json"))
+                        worktree_sessions = worktree_root / "sessions"
+                        if worktree_sessions.is_dir():
+                            yield from sorted(worktree_sessions.glob("*.json"))
+
+
+def _default_search_roots() -> list[Path]:
+    """list / cleanup-stale / halt --all / stats のデフォルト探索 root。
+
+    環境変数 MISSION_SEARCH_ROOTS (OS のパス区切り文字で複数指定可、~ 展開あり) が
+    あればそれを使う。未設定なら現在の作業ディレクトリ (cwd) のみを探索する。
+    Path.home() 全体の rglob は低速 (実測 86 秒) なため既定にはしない。複数プロジェクト
+    を横断スキャンしたい場合は MISSION_SEARCH_ROOTS を設定するか --root を明示する。
+    """
+    env = os.environ.get("MISSION_SEARCH_ROOTS")
+    if env:
+        return [Path(p).expanduser() for p in env.split(os.pathsep) if p.strip()]
+    return [Path.cwd()]
+
+
+def _learning_brief_default_roots(cwd: Path) -> list[Path]:
+    """learning brief 専用の default root を返す。
+
+    worktree では main checkout root の .mission-state を読みたいので、
+    `git rev-parse --git-common-dir` の親を優先する。git 解決が失敗した場合や
+    non-git では、従来どおり cwd を使って fail-safe に落とす。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return [cwd]
+    if result.returncode != 0:
+        return [cwd]
+    common_dir = result.stdout.strip()
+    if not common_dir:
+        return [cwd]
+    common_path = Path(common_dir)
+    if not common_path.is_absolute():
+        common_path = cwd / common_path
+    try:
+        checkout_root = common_path.resolve().parent
+    except OSError:
+        return [cwd]
+    # 非 worktree でも common-dir の親は checkout root になるので、そのまま使う。
+    return [checkout_root]
+
+
+def _project_root_of(sf: Path) -> Path:
+    """Derive a project root from the state file's nearest valid structure."""
+    if sf.parent.name == "sessions" and sf.parent.parent.name == ".mission-state":
+        return sf.parent.parent.parent
+    if sf.name == "state.json" and sf.parent.name == ".mission-state":
+        return sf.parent.parent
+    raise ValueError(f"unsupported mission state path: {sf}")
+
+
+def lock_file(cwd: Path) -> Path:
+    return state_dir(cwd) / ".state.lock"
+
+
+def resolve_session_id() -> str:
+    """現セッションの ID を取得。優先順: MISSION_SESSION_ID(明示) > Claude Code/Codex の
+    native session env > agent CLI PID fallback。Claude Code/Codex の ID は安定 (resume 後も
+    同一・PID 再利用の影響を受けない) ため、ファイル名・session_id フィールドの両方に使う。"""
+    sid = os.environ.get("MISSION_SESSION_ID")
+    if sid:
+        return _sanitize_sid(sid)
+    cc = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if cc:
+        return f"cc-{_sanitize_sid(cc)}"
+    cx = os.environ.get("CODEX_THREAD_ID")
+    if cx:
+        return f"cx-{_sanitize_sid(cx)}"
+    pid = find_agent_pid()
+    global _PID_FALLBACK_WARNING_EMITTED
+    if not _PID_FALLBACK_WARNING_EMITTED:
+        print(
+            "WARNING: MISSION_SESSION_ID 未設定のため pid フォールバックを使用しています "
+            f"(pid-{pid})。",
+            file=sys.stderr,
+        )
+        _PID_FALLBACK_WARNING_EMITTED = True
+    return f"pid-{pid}"  # fallback (env なし環境)
+
+
+def _lease_ttl_seconds() -> int:
+    raw = os.environ.get("MISSION_LEASE_TTL_SECONDS", "")
+    try:
+        value = int(raw) if raw else DEFAULT_LEASE_TTL_SECONDS
+    except ValueError:
+        value = DEFAULT_LEASE_TTL_SECONDS
+    return value if value > 0 else DEFAULT_LEASE_TTL_SECONDS
+
+
+def _new_lease_id() -> str:
+    return secrets.token_hex(16)
+
+
+def _lease_expiry(now: datetime) -> str:
+    expires = now + timedelta(seconds=_lease_ttl_seconds())
+    return expires.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _renewed_lease_expiry(existing_expiry: str, now: datetime) -> str:
+    """Renew without moving the fencing deadline backwards on clock rollback."""
+    candidate = now + timedelta(seconds=_lease_ttl_seconds())
+    existing = parse_iso_datetime(existing_expiry)
+    if existing is not None:
+        if existing.tzinfo is None:
+            existing = existing.replace(tzinfo=timezone.utc)
+        candidate = max(candidate, existing.astimezone(timezone.utc))
+    return candidate.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lease_fields_present(state: dict) -> bool:
+    return all(
+        state.get(key) not in (None, "")
+        for key in LEASE_STATE_FIELDS
+    )
+
+
+def _lease_now() -> datetime:
+    parsed = parse_iso_datetime(iso_now())
+    if parsed is None:
+        return datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def acquire_or_verify_lease(
+    state: dict,
+    session_id: str,
+    *,
+    reason: str = "mutating-command",
+    lease_id: str | None = None,
+) -> LeaseDecision:
+    """Acquire or verify the fenced lease while the caller holds StateLock.
+
+    `MISSION_LEASE_ID` is the explicit fencing token contract. Only lease-free
+    legacy state may acquire without one. A foreign writer must wait for expiry
+    and receives a new token with an incremented epoch.
+    """
+    return acquire_legacy_lease(
+        state, session_id, reason=reason,
+        presented_lease_id=lease_id if lease_id is not None else os.environ.get('MISSION_LEASE_ID'),
+        now=_lease_now(), new_token=_new_lease_id, fields_present=_lease_fields_present,
+        lease_fields=LEASE_STATE_FIELDS, expiry=_lease_expiry, renewed_expiry=_renewed_lease_expiry,
+        rejected_error=LeaseRejectedError, decision=LeaseDecision,
+    )
+
+
+def resolve_agent() -> str:
+    """state を起動したエージェント種別を判定 (ログでの起動元識別用)。
+    session_id とは独立に起動元 env を見るため、MISSION_SESSION_ID 明示時も正しく記録される。"""
+    if os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        return "claude-code"
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex"
+    return "cli"
+
+
+def detect_host() -> str:
+    """Return the native agent host used by goal dispatch guidance."""
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        return "claude-code"
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex"
+    return "unknown"
+
+
+def _read_routing_config(path: Path, source: str, allowed_root: Path | None = None) -> dict | None:
+    """Read the version-1 minimal routing config without a YAML dependency."""
+    if allowed_root is not None and path.is_symlink():
+        reason = f"routing config symlink rejected at {source}"
+        print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+        return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+    if allowed_root is not None:
+        try:
+            resolved_path = path.resolve(strict=False)
+            resolved_root = allowed_root.resolve(strict=True)
+            resolved_path.relative_to(resolved_root)
+        except ValueError:
+            reason = f"routing config escapes project root at {source}"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        except (OSError, RuntimeError) as exc:
+            reason = f"routing config path unreadable at {source}: {exc.__class__.__name__}"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+    if not path.is_file():
+        return None
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        reason = f"routing config unreadable at {source}: {exc.__class__.__name__}"
+        print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+        return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if ":" not in line:
+            reason = f"invalid routing config syntax at {source}"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        key, raw_value = line.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip().strip("'\"")
+        if key not in {"version", "goal_dispatch"}:
+            reason = f"unknown routing config key '{key}' at {source}"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        if key in values:
+            reason = f"duplicate routing config key '{key}' at {source}"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        values[key] = value
+    if values.get("version") != "1":
+        reason = f"unsupported routing config version '{values.get('version')}' at {source}"
+        print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+        return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+    mode = values.get("goal_dispatch")
+    if mode not in GOAL_DISPATCH_MODES:
+        reason = f"invalid goal_dispatch '{mode}' at {source}"
+        print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+        return {"mode": "inline", "source": source, "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+    return {"mode": mode, "source": source, "fallback_reason": None}
+
+
+def _routing_config_decision(cwd: Path | None = None) -> dict:
+    root = cwd or Path.cwd()
+    project = _read_routing_config(
+        root / ".mission" / "routing.yml",
+        "project:.mission/routing.yml",
+        allowed_root=root,
+    )
+    if project is not None:
+        return project
+    user = _read_routing_config(
+        Path.home() / ".config" / "mission" / "routing.yml",
+        "user:~/.config/mission/routing.yml",
+    )
+    if user is not None:
+        return user
+    return {"mode": "inline", "source": "default:inline", "fallback_reason": None}
+
+
+def load_routing_config() -> dict:
+    """Load the effective minimal routing config (project > user > inline)."""
+    return {"goal_dispatch": _routing_config_decision()["mode"]}
+
+
+def _mission_goal_dispatch_values(mission: str) -> list[str]:
+    """Collect standalone directives outside quoted Markdown blocks."""
+    directive_re = re.compile(
+        r"(?i)^ {0,3}goal[_ -]dispatch\s*[:=]\s*([a-z][a-z0-9-]*)[ \t]*(?:;|$)"
+    )
+    fence_re = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+    fence_char: str | None = None
+    fence_length = 0
+    values = []
+    for line in (mission or "").splitlines():
+        fence_match = fence_re.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            suffix = fence_match.group(2)
+            if fence_char is None:
+                if marker[0] != "`" or "`" not in suffix:
+                    fence_char = marker[0]
+                    fence_length = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length and not suffix.strip():
+                fence_char = None
+                fence_length = 0
+            continue
+        if fence_char is not None:
+            continue
+        directive = directive_re.match(line)
+        if directive:
+            values.append(directive.group(1).lower())
+    return values
+
+
+def _resolve_goal_dispatch(mission: str, cli_mode: str | None, cwd: Path) -> dict:
+    explicit_values = _mission_goal_dispatch_values(mission)
+    if explicit_values:
+        unique_values = list(dict.fromkeys(explicit_values))
+        if len(unique_values) > 1:
+            reason = (
+                "conflicting goal_dispatch directives in mission user instruction: "
+                + ", ".join(unique_values)
+            )
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": "mission:user-explicit", "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        mode = unique_values[0]
+        if mode not in GOAL_DISPATCH_MODES:
+            reason = f"invalid goal_dispatch '{mode}' in mission user instruction"
+            print(f"WARN #355: {reason}; using inline", file=sys.stderr)
+            return {"mode": "inline", "source": "mission:user-explicit", "fallback_reason": reason[:GOAL_DISPATCH_REASON_MAX_CHARS]}
+        return {"mode": mode, "source": "mission:user-explicit", "fallback_reason": None}
+    if cli_mode is not None:
+        return {"mode": cli_mode, "source": "cli:--goal-dispatch", "fallback_reason": None}
+    return _routing_config_decision(cwd)
+
+
+def _goal_dispatch_route_fields(data: dict) -> dict:
+    requested = data.get("goal_dispatch_requested") or "inline"
+    source = data.get("goal_dispatch_source") or "default:inline"
+    fallback_reason = data.get("goal_dispatch_resolution_fallback_reason")
+    host = detect_host()
+    effective = requested
+    if requested == "host-native" and host == "unknown":
+        effective = "inline"
+        fallback_reason = "host-native unavailable: host detection returned unknown"
+    fields = {
+        "goal_dispatch_requested": requested,
+        "goal_dispatch_effective": effective,
+        "goal_dispatch_source": source,
+        "goal_dispatch_host": host,
+    }
+    if fallback_reason:
+        fields["goal_dispatch_fallback_reason"] = fallback_reason[:GOAL_DISPATCH_REASON_MAX_CHARS]
+    return fields
+
+
+def _inline_goal_guidance(prefix: str = "") -> str:
+    return (
+        f"{prefix}goal 契約の 5 見出し (Goal / Result / Evidence / Assumptions / "
+        "Stop Condition) でタスクを直接完遂し、最終報告に goal へルーティングした旨を明記する。"
+        "mission の pass は主張しない。mission 機構が必要なら --force-mission で再 init する。"
+    )
+
+
+def _goal_dispatch_guidance(fields: dict, inline_prefix: str = "") -> str:
+    if fields["goal_dispatch_effective"] == "host-native":
+        if fields["goal_dispatch_host"] == "claude-code":
+            return (
+                "mission ループを続けず、実行ホストの /goal <目標文> へ目標を委譲して完遂する。"
+                "最終報告に goal へルーティングした旨を明記し、mission の pass は主張しない。"
+            )
+        return (
+            "mission ループを続けず、実行ホストの goal mode に目標を登録して完遂する。"
+            "最終報告に goal へルーティングした旨を明記し、mission の pass は主張しない。"
+        )
+    return _inline_goal_guidance(inline_prefix)
+
+
+def _sanitize_sid(sid: str) -> str:
+    """session_id をファイル名安全化 (パストラバーサル防止)。区切り文字を除去。"""
+    safe = re.sub(r"[/\\]", "_", sid).strip().lstrip(".")
+    return safe or "default"
+
+
+def _slug_for_filename(value: str) -> str:
+    """Archive filename fragment sanitizer for skill names such as github:github."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", value or "").strip(".-")
+    return safe or "unknown"
+
+
+
+def resolve_state_file(cwd: Path) -> Path:
+    """全 cmd_* の state ファイル解決の単一窓口。常に sessions/<sid>.json を返す (2026-06-13 legacy 廃止)。"""
+    return session_file(cwd, resolve_session_id())
+
+
+class StateLock:
+    """fcntl ベースの排他ロック (Phase B-1)."""
+
+    def __init__(self, lock_path: Path, timeout: float = 5.0):
+        self.lock_path = lock_path
+        self.timeout = timeout
+        self.fd = None
+
+    def __enter__(self):
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = open(self.lock_path, "w")
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                fcntl.flock(self.fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except BlockingIOError:
+                if time.time() > deadline:
+                    raise TimeoutError(
+                        f"Could not acquire state lock within {self.timeout}s: {self.lock_path}"
+                    )
+                time.sleep(0.05)
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.fd:
+            try:
+                fcntl.flock(self.fd.fileno(), fcntl.LOCK_UN)
+            finally:
+                self.fd.close()
+
+
+def _state_file_identity(path: Path) -> tuple[int, int, int, int, int, int]:
+    metadata = os.stat(path, follow_symlinks=False)
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _atomic_write(path: Path, writer, *, expected_identity=None) -> None:
+    """同一 directory の排他的な一時ファイルを fsync 後に publish する."""
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = -1
+            writer(f)
+            f.flush()
+            os.fsync(f.fileno())
+        if (
+            expected_identity is not None
+            and _state_file_identity(path) != expected_identity
+        ):
+            raise ValueError("state changed before publish")
+        os.replace(tmp, path)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
+
+
+def _is_session_state_shape(data: dict) -> bool:
+    """#310: session state 形状の判定 (aggregate / manifest / scoring 等を除外)."""
+    return isinstance(data, dict) and "mission_id" in data and "loop_active" in data
+
+
+def _is_session_state_path(path: Path) -> bool:
+    return (
+        path.suffix == ".json"
+        and (
+            path.parent.name == "sessions"
+            or path.name == "state.json" and path.parent.name == ".mission-state"
+        )
+    )
+
+
+_LEASE_KEYS = (*LEASE_STATE_FIELDS, "lease_history")
+_LEASE_WRITE_REASON: str | None = None
+_PROCESS_LEASE_IDS: dict[str, str] = {}
+_LEASE_DECISION_UNSET = object()
+_SUPERSEDE_TERMINAL_PATHS: set[str] = set()
+_PID_FALLBACK_WARNING_EMITTED = False
+
+
+@contextlib.contextmanager
+def _lease_write_reason(reason: str | None):
+    global _LEASE_WRITE_REASON
+    previous = _LEASE_WRITE_REASON
+    _LEASE_WRITE_REASON = reason
+    try:
+        yield
+    finally:
+        _LEASE_WRITE_REASON = previous
+
+
+def _enforce_session_lease_for_write(path: Path, data: dict) -> LeaseDecision | None:
+    """CAS the lease against the latest state immediately before publish."""
+    if not (_is_session_state_path(path) and _is_session_state_shape(data)):
+        return None
+    if str(path.resolve()) in _SUPERSEDE_TERMINAL_PATHS:
+        return None
+    latest = None
+    if path.exists():
+        try:
+            candidate = read_session_json(path)
+            if _is_session_state_shape(candidate):
+                latest = candidate
+        except (OSError, json.JSONDecodeError):
+            latest = None
+    lease_state = latest if latest is not None else data
+    path_key = str(path.resolve())
+    presented_lease_id = os.environ.get("MISSION_LEASE_ID") or _PROCESS_LEASE_IDS.get(path_key)
+    try:
+        decision = acquire_or_verify_lease(
+            lease_state,
+            resolve_session_id(),
+            reason=_LEASE_WRITE_REASON or "mutating-command",
+            lease_id=presented_lease_id,
+        )
+    except LeaseRejectedError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        guidance = build_guidance("lease", "lease-rejected", _guidance_context_for_state(lease_state))
+        for line in guidance:
+            print(line, file=sys.stderr)
+        raise CommandOutcomeExit(2, "expected-gate", guidance=guidance)
+    for key in _LEASE_KEYS:
+        if key in lease_state:
+            data[key] = lease_state[key]
+    return decision
+
+
+_FENCED_CLI_EXPECTED_GATE_CODES = frozenset({
+    "state-capacity-exhausted", "state-capacity-legacy-full",
+    "state-capacity-invariant-broken", "state-capacity-withdraw-not-needed",
+    # #747: the commit CAS reports from two places.  Both are concurrency,
+    # not a defect; only the first is retried, but neither is an internal
+    # error.
+    "final-authority-cas-mismatch",
+    "head-cas-mismatch",
+    # #747 item 6: a replay whose committed generation GC already removed. The
+    # operation completed; its result can no longer be reconstructed.
+    "operation-history-collected",
+    "lease-precondition-changed",
+    "lease-rejected",
+    "lease-token-required",
+    "projection-precondition-changed",
+    "session-already-initialized",
+    "stale-fencing-token",
+})
+_FENCED_CLI_INVALID_INPUT_CODES = frozenset({
+    "operation-intent-collision",
+    "session-not-found",
+})
+
+
+def _fenced_cli_outcome_kind(error_code: str) -> str:
+    if error_code in _FENCED_CLI_EXPECTED_GATE_CODES:
+        return "expected-gate"
+    if error_code in _FENCED_CLI_INVALID_INPUT_CODES:
+        return "invalid-input"
+    return "internal-error"
+
+
+def _reject_fenced_lease_for_cli(
+    error: FencedCommitError,
+    *,
+    state_path: Optional[Path] = None,
+) -> NoReturn:
+    """Translate v5 lease admission failures to the established v4 CLI shape."""
+
+    if error.code not in {
+        "lease-token-required",
+        "lease-rejected",
+        "stale-fencing-token",
+    }:
+        detail = error.detail.strip() if isinstance(error.detail, str) else ""
+        print("ERROR: %s" % (detail or error.code), file=sys.stderr)
+        raise CommandOutcomeExit(2, _fenced_cli_outcome_kind(error.code))
+    state = {}
+    try:
+        target_path = state_path or resolve_state_file(Path.cwd())
+        _snapshot, state = _load_authoritative_state(target_path)
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except (OSError, ValueError, FencedCommitError):
+        pass
+    owner = state.get("owner_session_id")
+    expiry = state.get("lease_expires_at")
+    if isinstance(owner, str) and owner and isinstance(expiry, str) and expiry:
+        detail = "lease held by %s until %s" % (owner, expiry)
+        if error.code == "stale-fencing-token":
+            detail += " (stale fencing token)"
+    else:
+        detail = error.code
+    print("ERROR: %s" % detail, file=sys.stderr)
+    guidance = build_guidance(
+        "lease",
+        "lease-rejected",
+        _guidance_context_for_state(state),
+    )
+    for line in guidance:
+        print(line, file=sys.stderr)
+    raise CommandOutcomeExit(2, "expected-gate", guidance=guidance)
+
+
+def _emit_lease_carrier(data: dict, decision: LeaseDecision | None) -> None:
+    """Expose a newly issued token only after its state publish succeeds."""
+    if decision is None or decision.action not in {"acquired", "taken-over"}:
+        return
+    carrier = {
+        "schema": "mission-lease-carrier/1",
+        "action": decision.action,
+        "session_id": str(data.get("session_id") or resolve_session_id()),
+        "lease_id": decision.lease_id,
+        "fencing_epoch": decision.fencing_epoch,
+        "lease_expires_at": data.get("lease_expires_at"),
+    }
+    print(
+        LEASE_CARRIER_PREFIX + json.dumps(carrier, ensure_ascii=False, separators=(",", ":")),
+        file=sys.stderr,
+    )
+
+
+def _record_committed_v5_lease(path: Path, data: dict, pending_lease) -> None:
+    """Publish a v5 lease only after its generation commit succeeds."""
+    decision = LeaseDecision(
+        pending_lease.action,
+        pending_lease.target.lease_id,
+        pending_lease.target.fencing_epoch,
+    )
+    _PROCESS_LEASE_IDS[str(path.resolve())] = decision.lease_id
+    _emit_lease_carrier(data, decision)
+
+
+def atomic_write_json(
+    path: Path,
+    data: dict,
+    *,
+    administrative: bool = False,
+    lease_decision: LeaseDecision | None | object = _LEASE_DECISION_UNSET,
+    expected_identity=None,
+    before_publish=None,
+    prepare_only=False,
+    replacement=False,
+    base_bytes=None,
+):
+    """Phase B-2: fsync + os.replace で完全な前 or 後状態を保証.
+
+    #310: session state 形状の書き込みは既定で `last_activity_at` を刻む (エージェント
+    活動の実時刻)。cleanup-stale / resolve-archive / halt --all 等の管理系 janitor は
+    `administrative=True` で opt-out し、活動時刻を汚染しない。duration / stale 判定は
+    last_activity_at を updated_at より優先する (updated_at は resolution batch 書き込みで
+    上書きされ壁時計が最大 500 倍膨張した実害があるため)。
+
+    """
+    return write_legacy_json(
+        path, data, administrative=administrative, lease_decision=lease_decision,
+        expected_identity=expected_identity, before_publish=before_publish,
+        prepare_only=prepare_only, replacement=replacement, base_bytes=base_bytes,
+        services=SimpleNamespace(
+            is_state_shape=_is_session_state_shape, is_state_path=_is_session_state_path,
+            unset=_LEASE_DECISION_UNSET, enforce_lease=_enforce_session_lease_for_write,
+            now=iso_now, atomic_write=_atomic_write, decision_type=LeaseDecision,
+            process_leases=_PROCESS_LEASE_IDS, emit_lease=_emit_lease_carrier,
+        ),
+    )
+
+
+
+def atomic_write_text(path: Path, content: str) -> None:
+    """Text evidence を fsync + replace で atomic に更新する."""
+    _atomic_write(path, lambda f: f.write(content))
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Binary evidence を symlink 非追跡の一時ファイルから atomic publish する."""
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            fd = -1
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        tmp.unlink(missing_ok=True)
+
+
+def _probe_directory_write(directory: Path) -> None:
+    """Write, fsync, and remove a probe in a mission state directory."""
+    probe_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".mission-permission-probe-",
+            dir=directory,
+            delete=False,
+        ) as probe:
+            probe_path = Path(probe.name)
+            probe.write("permission-preflight\n")
+            probe.flush()
+            os.fsync(probe.fileno())
+    finally:
+        if probe_path is not None:
+            probe_path.unlink(missing_ok=True)
+
+
+def _probe_file_write(path: Path) -> None:
+    """Perform a content-preserving write and fsync on an evidence file."""
+    with path.open("r+b") as target:
+        first_byte = target.read(1)
+        if first_byte:
+            target.seek(0)
+            target.write(first_byte)
+        else:
+            target.write(b"\n")
+            target.truncate(0)
+        target.flush()
+        os.fsync(target.fileno())
+
+
+def _validated_assumptions_probe_path(cwd: Path, raw_path: str) -> Path:
+    """Resolve an existing regular assumptions file inside .mission-state."""
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        raise ValueError("absolute evidence path")
+    state_root = state_dir(cwd).absolute()
+    candidate = (cwd / candidate).absolute()
+    candidate.relative_to(state_root)
+    if candidate.is_symlink():
+        raise ValueError("symlink evidence path")
+    resolved_root = state_root.resolve(strict=True)
+    resolved_candidate = candidate.resolve(strict=True)
+    resolved_candidate.relative_to(resolved_root)
+    if not resolved_candidate.is_file():
+        raise ValueError("evidence path is not a regular file")
+    return candidate
+
+
+def _record_permission_preflight_halt(
+    cwd: Path, sf: Path, reason: str
+) -> tuple[bool, str | None]:
+    """Route init's best-effort fallback through the same closed A5 writer.
+
+    批2-a-3 (#632): 保存された terminal outcome をそのまま返す。捨てて固定値を
+    出力すると、supersede-marked state で保存値と CLI 出力の authority が割れる。
+    """
+    expected = (
+        "Phase 0 permission preflight failed before task execution: "
+        "state write unavailable"
+    )
+    if reason != expected:
+        return False, None
+    return _record_permission_probe_observation(
+        cwd,
+        sf,
+        (PermissionProbe("state", "denied", "write-unavailable"),),
+    )
+
+
+def _exit_init_evidence_write_failure(target: str) -> None:
+    """新 state publish 前の evidence 作成失敗を正しい target で返す."""
+    reason = (
+        "Phase 0 permission preflight failed before task execution: "
+        f"{target} write unavailable"
+    )
+    print(json.dumps({
+        "ok": False,
+        "halt_recorded": False,
+        "halt_category": "blocked-external",
+        "terminal_outcome": "blocked_external",
+        "halt_reason": reason,
+        "probes": [
+            {"target": target, "ok": False, "error": "write-unavailable"}
+        ],
+    }))
+    raise SystemExit(2)
+
+
+def _exit_init_write_failure(cwd: Path, sf: Path | None = None) -> None:
+    """Emit the non-interactive fallback when init cannot persist state."""
+    reason = (
+        "Phase 0 permission preflight failed before task execution: "
+        "state write unavailable"
+    )
+    try:
+        halt_recorded, persisted_outcome = (
+            _record_permission_preflight_halt(cwd, sf, reason)
+            if sf is not None and sf.exists()
+            else (False, None)
+        )
+    except PermissionHaltRejected as error:
+        # 批2-a-3 (#632): kernel invariant 違反を OSError 経路の traceback に
+        # 落とさない。他 command と同じ構造化報告へ揃える
+        _exit_internal_invariant(error.code, str(error))
+    except FencedCommitError as error:
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        _exit_internal_invariant(error.code, error.detail)
+    print(json.dumps({
+        "ok": False,
+        "halt_recorded": halt_recorded,
+        "halt_category": "blocked-external",
+        "terminal_outcome": (
+            persisted_outcome if halt_recorded and persisted_outcome else "blocked_external"
+        ),
+        "halt_reason": reason,
+        "probes": [
+            {"target": "state", "ok": False, "error": "write-unavailable"}
+        ],
+    }))
+    raise SystemExit(2)
+
+
+@contextlib.contextmanager
+def _guarded_init_state_lock(cwd: Path, sf: Path):
+    """Convert every init persistence OSError into structured fallback evidence."""
+    try:
+        with StateLock(lock_file(cwd)):
+            yield
+    except OSError:
+        _exit_init_write_failure(cwd, sf)
+
+
+def backup_state(path: Path) -> None:
+    """A-4: 更新前に .bak をコピー生成."""
+    if path.exists():
+        _validate_specialist_public_state(
+            read_session_json(path)
+        )
+        bak = path.with_suffix(path.suffix + ".bak")
+        atomic_write_bytes(bak, path.read_bytes())
+
+
+def _comm_is_agent(comm: str) -> bool:
+    """comm がエージェント CLI (Claude Code / Codex) のプロセス名か判定。
+
+    Codex 対応 (2026-06-13): claude/claude.exe に加えて codex/codex.exe も
+    エージェントプロセスとみなす。PID owner 判定の単一の真実源。
+    """
+    comm = (comm or "").strip()
+    if not comm:
+        return False
+    # basename 一致のみ許可: フルパス (/usr/bin/codex) は末尾 "/codex" で拾い、
+    # "notcodex" / "xclaude" のような部分一致 (false positive) は除外する。
+    for name in ("claude.exe", "claude", "codex.exe", "codex"):
+        if comm == name or comm.endswith("/" + name):
+            return True
+    return False
+
+
+_LAST_PID_WAS_FALLBACK: bool = False
+
+
+def _last_pid_was_fallback() -> bool:
+    return _LAST_PID_WAS_FALLBACK
+
+
+def find_agent_pid() -> int:
+    """親プロセスツリーを遡って claude / codex (エージェント CLI) プロセスを見つける。
+
+    Bash 経由で実行された場合、os.getppid() は bash を返してしまうため、
+    プロセスツリーを最大 8 階層遡って agent CLI プロセスを特定する。
+    見つからなければ os.getppid() (= 直接の親) を fallback で返す。
+    #239: fallback した場合は _LAST_PID_WAS_FALLBACK = True を設定する。
+    """
+    global _LAST_PID_WAS_FALLBACK
+    pid = os.getppid()
+    for _ in range(8):
+        if pid <= 1:
+            break
+        try:
+            r = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=2)
+            comm = r.stdout.strip()
+            if _comm_is_agent(comm):
+                _LAST_PID_WAS_FALLBACK = False
+                return pid
+            r2 = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=2)
+            pid = int(r2.stdout.strip() or 0)
+        except Exception:
+            break
+    _LAST_PID_WAS_FALLBACK = True
+    return os.getppid()  # fallback
+
+
+def stamp_metadata(data: dict, cwd: Path) -> dict:
+    """A-1/A-2/B-3: project_root / pid / hostname / session_id / agent を保証."""
+    data.setdefault("schema_version", SCHEMA_VERSION)
+    data.setdefault("project_root", str(cwd.resolve()))
+    # #12: setdefault は RHS を eager 評価するため、既存キーでも find_agent_pid (ps subprocess)
+    # が走り StateLock を最大 8x2s 占有して lock timeout を誘発する。存在チェックで遅延させる。
+    if "pid" not in data:
+        data["pid"] = find_agent_pid()  # agent CLI プロセスの PID (プロセスツリー遡及で正確に取得)
+        data["pid_source"] = "fallback" if _last_pid_was_fallback() else "agent"
+    data.setdefault("hostname", socket.gethostname())
+    if "session_id" not in data:
+        data["session_id"] = resolve_session_id()
+    if "agent" not in data:
+        data["agent"] = resolve_agent()  # 起動元 (claude-code/codex/cli) をログ識別用に記録
+    data.setdefault("created_at_session", iso_now())
+    data.setdefault("cli_version", MISSION_CLI_VERSION)  # #186
+    return data
+
+
+def mission_id(mission: str) -> str:
+    return hashlib.sha256(mission.encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_iso_datetime(value: str | None):
+    return parse_iso_datetime(value)
+
+
+def _mission_started_at(data: dict) -> datetime | None:
+    for key in ("created_at_session", "started_at", "created_at"):
+        started = _parse_iso_datetime(data.get(key))
+        if started:
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            return started.astimezone(timezone.utc)
+    return None
+
+
+def _specialist_selection_checkpoint_expected(data: dict) -> bool:
+    if str(data.get("complexity") or "") not in SPECIALIST_SELECTION_CHECKPOINT_COMPLEXITIES:
+        return False
+    started = _mission_started_at(data)
+    return bool(started and started >= SPECIALIST_SELECTION_CHECKPOINT_REQUIRED_AT)
+
+
+def _has_specialist_selection_checkpoint(data: dict) -> bool:
+    task_profile = data.get("task_profile")
+    decision = data.get("specialists_decision")
+    if not isinstance(task_profile, dict) or not task_profile.get("primary"):
+        return False
+    if not isinstance(decision, dict) or not decision.get("policy"):
+        return False
+    return True
+
+
+def _state_age_since_update_sec(data: dict, *, now: datetime | None = None) -> float | None:
+    return _state_age_details(data, now=now)["age_sec"]
+
+
+def _stale_active_seconds() -> int:
+    raw = os.environ.get("MISSION_STALE_ACTIVE_SECONDS")
+    if raw:
+        try:
+            parsed = int(raw)
+            if parsed >= 0:
+                return parsed
+        except ValueError:
+            pass
+    return DEFAULT_STALE_ACTIVE_SECONDS
+
+
+def _normalize_issue_ref(value):
+    """issue_ref を比較用の正規化キーへ変換する (#295).
+
+    同一 Issue を指す異なる形式 (裸番号 `42` / `#42` / `host:owner/repo#42` /
+    `https://.../issues/42`) を同一キーへ畳み込み、形式差による重複見逃しを防ぐ。
+    `.mission-state` は project (cwd) 単位のため、比較キーは Issue 番号を基準にする。
+    数値を抽出できない参照は小文字化した生値をキーとする (後方互換)。
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    # URL 形式: .../issues/<n>
+    m = re.search(r"/issues/(\d+)", raw)
+    if m:
+        return m.group(1)
+    # 末尾 #<n> (例 host:owner/repo#42, gh:repo#99)
+    m = re.search(r"#(\d+)\s*$", raw)
+    if m:
+        return m.group(1)
+    # 裸番号 (先頭 # 任意)
+    m = re.fullmatch(r"#?(\d+)", raw)
+    if m:
+        return m.group(1)
+    # 数値を抽出できない参照は生値 (大文字小文字非依存) で比較
+    return raw.lower()
+
+
+def _pregate_state_reference(cwd: Path, issue_ref: Any) -> dict[str, Any] | None:
+    record = inspect_pregate_cache(cwd, issue_ref)
+    if record is None:
+        return None
+    return {
+        "path": record["path"],
+        "subject_digest": record["subject_digest"],
+        "verdict": record["verdict"],
+        "gate_id": record["gate_id"],
+        "evaluated_at": record["evaluated_at"],
+    }
+
+
+def _pregate_verdict_warning(record: dict[str, Any] | None) -> str | None:
+    if not record or not isinstance(record, dict):
+        return None
+    verdict = record.get("verdict")
+    if verdict in {None, "accepted"}:
+        return None
+    return f"WARNING: pregate verdict={verdict}。planning 前に分割を解決してください"
+
+
+def _ensure_phase_timing(data: dict, now: str | None = None) -> None:
+    """phase 別所要時間の計測フィールドを後方互換で初期化する."""
+    now = now or iso_now()
+    if not isinstance(data.get("phase_durations_sec"), dict):
+        data["phase_durations_sec"] = {}
+    if not data.get("phase_started_at"):
+        data["phase_started_at"] = data.get("started_at") or now
+
+
+def _finite_nonnegative_phase_seconds(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
+
+
+def _record_terminal_phase_anomaly(data: dict) -> None:
+    counts = data.get("activity_anomaly_counts")
+    if not isinstance(counts, dict):
+        counts = {}
+        data["activity_anomaly_counts"] = counts
+    current = counts.get("invalid-phase-terminal", 0)
+    if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+        current = 0
+    counts["invalid-phase-terminal"] = current + 1
+
+
+def _accrue_phase_for_terminal_control(
+    data: dict, old_phase: object, now: str, *, trusted_boundary: bool
+) -> bool:
+    """Best-effort phase accrual that can never block terminal control."""
+    if isinstance(old_phase, str) and old_phase in {"done", "halted"}:
+        return True
+    if not isinstance(old_phase, str) or old_phase not in {
+        "planning",
+        "executing",
+        "reviewing",
+        "scoring",
+    }:
+        _record_terminal_phase_anomaly(data)
+        return False
+    durations = data.get("phase_durations_sec")
+    if durations is None:
+        durations = {}
+        data["phase_durations_sec"] = durations
+    if not isinstance(durations, dict):
+        _record_terminal_phase_anomaly(data)
+        return False
+    started_text = data.get("phase_started_at") or data.get("started_at")
+    started = _parse_iso_datetime(started_text)
+    ended = _parse_iso_datetime(now)
+    if not started or not ended or ended < started:
+        _record_terminal_phase_anomaly(data)
+        return False
+    boundary = ended
+    if trusted_boundary:
+        updated_text = data.get("updated_at")
+        updated = _parse_iso_datetime(updated_text)
+        if updated_text is not None and not updated:
+            _record_terminal_phase_anomaly(data)
+            return False
+        boundary = updated or started
+        if boundary < started or boundary > ended:
+            _record_terminal_phase_anomaly(data)
+            return False
+    current = _finite_nonnegative_phase_seconds(durations.get(old_phase, 0))
+    if current is None:
+        _record_terminal_phase_anomaly(data)
+        return False
+    durations[old_phase] = current + (boundary - started).total_seconds()
+    return True
+
+
+def _transition_phase(
+    data: dict,
+    new_phase: str,
+    now: str | None = None,
+    *,
+    terminal_trusted_boundary: bool = False,
+) -> None:
+    """phase を変更し、旧 phase の経過秒数を phase_durations_sec に加算する."""
+    if new_phase == "reviewing":
+        validate_artifact_state_consistency(data, require_resolved=True)
+    now = now or iso_now()
+    old_phase = data.get("phase")
+    if new_phase in {"done", "halted"}:
+        old_phase_is_resumable = isinstance(old_phase, str) and old_phase in {
+            "planning",
+            "executing",
+            "reviewing",
+            "scoring",
+        }
+        if new_phase == "halted" and terminal_trusted_boundary and old_phase_is_resumable:
+            data["resume_target_phase"] = old_phase
+        else:
+            data.pop("resume_target_phase", None)
+        _accrue_phase_for_terminal_control(
+            data,
+            old_phase,
+            now,
+            trusted_boundary=terminal_trusted_boundary,
+        )
+        # Terminal control must close an open activity even on a repeated
+        # terminal command.  Malformed measurement is quarantined as an
+        # anomaly by the shared reducer and cannot block pass/halt control.
+        transition_activity_phase(
+            data,
+            new_phase,
+            now,
+            terminal_trusted_boundary=terminal_trusted_boundary,
+        )
+        data["phase_started_at"] = now
+        data["phase"] = new_phase
+        return
+    _ensure_phase_timing(data, now)
+    if old_phase and old_phase != new_phase:
+        if new_phase not in {"done", "halted"}:
+            transition_activity_phase(data, new_phase, now)
+        started = _parse_iso_datetime(data.get("phase_started_at"))
+        ended = _parse_iso_datetime(now)
+        if started and ended:
+            elapsed = (ended - started).total_seconds()
+            if elapsed >= 0:
+                durations = data.setdefault("phase_durations_sec", {})
+                if not isinstance(durations, dict):
+                    raise ActivityTimingError("phase durations are malformed")
+                current = _finite_nonnegative_phase_seconds(durations.get(old_phase, 0))
+                if current is None:
+                    raise ActivityTimingError("phase duration is malformed")
+                durations[old_phase] = current + elapsed
+        data["phase_started_at"] = now
+    data["phase"] = new_phase
+
+
+def _resume_phase_timing(data: dict, now: str) -> None:
+    """Accrue only the last observed pre-resume phase window, then restart it."""
+    _ensure_phase_timing(data, now)
+    phase = data.get("phase")
+    if not phase or phase in {"done", "halted"}:
+        return
+    started = _parse_iso_datetime(data.get("phase_started_at"))
+    updated = _parse_iso_datetime(data.get("updated_at"))
+    resumed = _parse_iso_datetime(now)
+    if not started or not resumed:
+        data["phase_started_at"] = now
+        return
+    boundary = updated if updated and started <= updated <= resumed else started
+    if updated and (updated < started or updated > resumed):
+        raise ActivityTimingError("phase resume boundary is inconsistent")
+    elapsed = (boundary - started).total_seconds()
+    durations = data.setdefault("phase_durations_sec", {})
+    current = _finite_nonnegative_phase_seconds(durations.get(phase, 0))
+    if current is None:
+        raise ActivityTimingError("phase duration is malformed")
+    durations[phase] = current + elapsed
+    data["phase_started_at"] = now
+
+
+# #188: set phase= の正規値と別名マップ。実運用で `phase=execution` (typo) が
+# 無検証で受理され stats の phase_duration_totals を汚染した実害への対策。
+VALID_PHASES = {"planning", "executing", "reviewing", "scoring", "done", "halted"}
+PHASE_ALIASES = {
+    "execution": "executing",
+    "review": "reviewing",
+    "plan": "planning",
+    "score": "scoring",
+}
+
+
+def _normalize_set_phase_value(value: str) -> str:
+    """set phase=<value> の値を検証・正規化する (#188)。
+
+    正規値はそのまま通す。既知の別名は正規化して WARN。それ以外は exit 2。
+    push-score の items キーエイリアス正規化 (#H2) と同じ方針。
+    """
+    if value in VALID_PHASES:
+        return value
+    if value in PHASE_ALIASES:
+        canonical = PHASE_ALIASES[value]
+        print(
+            f"WARNING [#188]: phase='{value}' は非正規値です。'{canonical}' として保存しました。",
+            file=sys.stderr,
+        )
+        return canonical
+    print(
+        f"ERROR: phase の値 '{value}' は無効です。有効値: {sorted(VALID_PHASES)}"
+        f" (既知の別名: {sorted(PHASE_ALIASES)})",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+# #190: HALT_CATEGORIES は skills/mission/lib/mission_common.py で定義し、
+# audit 側 (scripts/mission-audit.py) と共有する。実運用で「完了しました」という完了風の
+# 自由文 halt_reason が threshold 未達 (min_item/composite gate) と混同され、stats/audit 上は
+# 障害 halt と同じ HALT に集計されて root-cause review のたびに人が自由文を読み分けていた実害への対策。
+
+
+def _normalize_halt_category(value: str | None) -> str:
+    """mark-halt --category の検証。省略/不正値は 'other' + WARN (reject しない: halt 自体は
+    緊急停止経路であり、カテゴリ不正で halt そのものを妨げるのは本末転倒)。"""
+    if value is None:
+        print(
+            "WARNING [#190]: --category が未指定です。'other' として記録しました。"
+            f" 可能ならカテゴリを指定してください: {sorted(HALT_CATEGORIES)}",
+            file=sys.stderr,
+        )
+        return "other"
+    if value not in HALT_CATEGORIES:
+        print(
+            f"WARNING [#190]: --category '{value}' は無効です。'other' として記録しました。"
+            f" 有効値: {sorted(HALT_CATEGORIES)}",
+            file=sys.stderr,
+        )
+        return "other"
+    return value
+
+
+def _write_terminal_outcome(data: dict) -> None:
+    """Persist the outcome implied by an authorized terminal transition."""
+    data.pop("terminal_outcome", None)
+    outcome = derive_terminal_outcome(data)
+    if outcome is None:
+        raise ValueError("terminal transition did not produce a terminal outcome")
+    data["terminal_outcome"] = outcome
+
+
+# M7 (2026-06-10): SKILL.md Phase 1 の複雑度→Reviewer 数マッピング
+# #266 (2026-07-23): Complex 3→2。discriminating-v1 で reviewer-wait が壁時計の 62% を
+# 占め、3人目の限界検出価値がゼロだった実測に基づく。不可逆・security シグナルの
+# エスカレータは full (3名) を維持するため、リスクありの Complex は従来どおり 3名。
+COMPLEXITY_REVIEWER_COUNT = {"Simple": 1, "Standard": 2, "Complex": 2, "Critical": 3}
+
+# Issue #168: review_tier による適応的レビュー深度
+# tier → reviewer_count のマッピング (COMPLEXITY_REVIEWER_COUNT と同値になる設計)
+TIER_REVIEWER_COUNT = {"light": 1, "standard": 2, "full": 3}
+# complexity → review_tier のベースマッピング (#266: Complex は standard 起点、エスカレータで full へ)
+REVIEW_TIER_BASE = {"Simple": "light", "Standard": "standard", "Complex": "standard", "Critical": "full"}
+
+# 不可逆系キーワード (英語) — 小文字化して部分一致
+# Issue #174 で 505 mission 遡及分析に基づき較正: push / merge を除外 (標準 dev フロー誤発火)
+_RELEASE_NOUN_FOLLOWERS_RE = re.compile(
+    r"\A\s+(?:\d|v\d|brief\b|notes\b|mission\b)", re.IGNORECASE
+)
+
+
+def _release_noun_reference(mission_text: str, start: int, end: int) -> bool:
+    """#313: "release" の名詞参照 (版名・文書名) 判定。
+
+    実運用監査 (2026-08-01) で FP 36% の実測: "Release 6" / "Release brief" /
+    "release notes" / "Release Mission #582" が Standard→full へ誤昇格していた。
+    直後が数字・版番号・brief/notes/mission の場合のみ名詞参照として suppress する
+    (保守的ホワイトリスト。"release the hotfix" 等の動詞用法は対象外)。
+    """
+    return bool(_RELEASE_NOUN_FOLLOWERS_RE.match(mission_text[end:]))
+
+
+_IRREVERSIBLE_KEYWORDS_EN = (
+    "deploy", "release", "migration", "drop", "delete",
+    "publish", "production",
+)
+# 不可逆系キーワード (日本語) — そのまま部分一致
+# Issue #174 で 505 mission 遡及分析に基づき較正: 単体「削除」を除外し複合語に置換 (可逆なコード変更への誤発火)
+_IRREVERSIBLE_KEYWORDS_JA = ("本番", "リリース", "マイグレーション", "データ削除", "レコード削除", "物理削除", "公開", "決済")
+# 「公開」複合語抑制の技術名詞 (#450)。「クラス」は否定先読みで「クラスタ/クラスター」
+# (cluster = 不可逆な公開操作の対象になり得る) への誤マッチを除外する。
+_REVIEW_TECHNICAL_NOUN_SUFFIX_RE = re.compile(
+    r"(?:API|Api|api|関数|メソッド|クラス(?![ァ-ヶー])|インターフェース"
+    r"|プロパティ|属性|型|モジュール|フィールド)"
+)
+# セキュリティ系キーワード (英語) — 小文字化して部分一致
+# Issue #174 で 505 mission 遡及分析に基づき較正:
+#   token → 複合語 (api token / api-token / api_key / access token / access-token / bearer) に置換
+#   auth  → 語幹 (authenticat / authoriz / oauth) に置換 (authority 等への誤発火を排除)
+_SECURITY_KEYWORDS_EN = (
+    "secret", "credential", "password",
+    "api token", "api-token", "api_key",
+    "access token", "access-token", "bearer",
+    "authenticat", "authoriz", "oauth",
+)
+# セキュリティ系キーワード (日本語) — そのまま部分一致
+_SECURITY_KEYWORDS_JA = ("認証", "秘密", "鍵")
+
+_REVIEW_ENGLISH_KEYWORD_FAMILY_PATTERNS: dict[str, str] = {
+    "deploy": r"deploy(?:s|ed|ing)?",
+    "release": r"release(?:s|d|ing)?",
+    "migration": r"migration(?:s)?",
+    "drop": r"drop(?:s|ped|ping)?",
+    "delete": r"delete(?:s|d|ing)?",
+    "publish": r"publish(?:es|ed|ing)?",
+    "production": r"production(?:s)?",
+    "secret": r"secret(?:s)?",
+    "credential": r"credential(?:s)?",
+    "password": r"password(?:s)?",
+    "authenticat": r"authenticat(?:e|es|ed|ing|ion|ions)?",
+    "authoriz": r"authoriz(?:e|es|ed|ing|ation|ations)?",
+    "oauth": r"oauth",
+    "api token": r"api token",
+    "api-token": r"api-token",
+    "api_key": r"api_key",
+    "access token": r"access token",
+    "access-token": r"access-token",
+    "bearer": r"bearer",
+}
+_REVIEW_ENGLISH_BOUNDARY_CHAR_CLASS = r"0-9A-Za-z_-"
+_REVIEW_JA_PARTICLES = frozenset({"の", "は", "が", "を", "に", "へ", "で", "も", "と", "や", "か"})
+
+
+_REVIEW_CONTEXT_BOUNDARY_RE = re.compile(
+    r"[。.!！?？;；\n]+|(?:だが|けど|けれど|ただし|しかし|一方(?:で)?)[、,]?\s*|"
+    r"\band(?:\s+then)?\b\s*|\bbut\b\s*|\bhowever\b[\s,]*",
+    re.IGNORECASE,
+)
+_REVIEW_UNIT_BOUNDARY_RE = re.compile(
+    r"\n[ \t]*\n+|\n(?=[ \t]*(?:[-*+>]|#{1,6}\s|\d+[.)])\s*)",
+    re.IGNORECASE,
+)
+_REVIEW_DOUBLE_NEGATION_RE = re.compile(
+    r"(?:し|行わ|実行し)ないわけではない|(?:し|行わ|実行し)ないとは限らない|"
+    r"(?:しない|行わない|実行しない)\s*"
+    r"(?:(?:(?:予定|方針|計画)\s*)?(?:ではない|はない)|とは(?:言って|述べて)いない)|"
+    r"なくはない|禁止ではない|対象外ではない|"
+    r"(?:\b(?:do|does|did|will|would|should|must|can|could)\s+not\s+not|"
+    r"\b[a-z]+n['’]t\s+not|\bcannot\s+not|\bnever\s+not)\s+"
+    r"(?:(?:perform|execute)\s+(?:a|an|the)?\s*)?"
+    r"(?:production\s+)?(?:deploy(?:ment)?|release|migration|drop|delete|publish)\b|"
+    r"\b(?:it(?:(?:\s+(?:is|was)|['’](?:s|d))\s+not\s+"
+    r"(?:the\s+case|true)|\s+[a-z]+n['’]t\s+(?:the\s+case|true))\s+that|"
+    r"there\s+(?:(?:(?:is|was)|['’](?:s|d))\s+no|"
+    r"[a-z]+n['’]t\s+(?:a|any))\s+"
+    r"(?:guarantee|assurance|certainty)\s+that|"
+    r"(?:i|we|they|he|she|it)\s+(?:(?:(?:am|is|are|was|were)\s+not|"
+    r"[a-z]+n['’]t)\s+"
+    r"(?:say(?:ing)?|claim(?:ing)?|stat(?:e|ing))|"
+    r"(?:cannot|can['’]t)\s+(?:say|claim|state))\s+(?:that\s+)?)"
+    r"[^.!?;\n]{0,80}?"
+    r"(?:\b(?:do|does|did|will|would|should|must|can|could)\s+not|"
+    r"\b[a-z]+n['’]t|\bcannot|\bnever)\s+"
+    r"(?:(?:perform|execute)\s+(?:a|an|the)?\s*)?"
+    r"(?:production\s+)?(?:deploy(?:ment)?|release|migration|drop|delete|publish)\b|"
+    r"\bnot\s+impossible\b|\bnot\s+never\b|\bcannot\s+rule\s+out\b",
+    re.IGNORECASE,
+)
+_REVIEW_CONDITIONAL_RE = re.compile(
+    r"必要なら|必要な場合|場合|可能なら|可能性|かもしれ|未確定|検討中|するか|し得|あり得|"
+    r"限り|以外|除く|除き|"
+    r"原則(?!\s*ではなく(?:[、,]\s*)?絶対に)|ことがある|"
+    r"例外(?!\s*なく)|緊急時(?!\s*に?も)|"
+    r"\bonly\s+if\b|\bif\b|\bunless\b|\bmay\b|\bmight\b|\bcould\b|\bpossibly\b|\bwhether\b|"
+    r"\bexcept\s+(?:(?:when|in)\s+)?(?:emergenc(?:y|ies)|authorized|approved|approval)\b|"
+    r"\buntil\b|\bpending\s+(?:approval|authorization|permission)\b|"
+    r"\b(?:before|prior\s+to)\s+(?:(?:the|final)\s+)?"
+    r"(?:approval|authorization|permission)\b|"
+    r"\bwhile\s+(?:(?:the|final)\s+)?(?:approval|authorization|permission)\s+"
+    r"(?:is|remains)\s+pending\b|"
+    r"\bwithout\s+(?:approval|authorization|permission)\b",
+    re.IGNORECASE,
+)
+_REVIEW_EN_NEGATED_OPERATION_RE = re.compile(
+    r"(?:\b(?:do|does|did|will|would|should|must|can|could)\s+not|\bnot|"
+    r"\bnever|\b[a-z]+n['’]t|\bcannot|"
+    r"\b(?:am|is|are|was|were)\s+not\s+going\s+to)\s+"
+    r"(?:(?:perform|execute)\s+(?:a|an|the)?\s*)?"
+    r"(?:production\s+)?(?:deploy(?:ment)?|release|migration|drop|delete|publish)"
+    r"(?:\s+(?:to|in)\s+(?:(?:our|the)\s+)?(?:target\s+)?production(?:\s+environment)?)?|"
+    r"(?:production\s+)?(?:deploy(?:ment)?|release|migration|drop|delete|publish)"
+    r"(?:\s+(?:to|in)\s+(?:(?:our|the)\s+)?(?:target\s+)?production(?:\s+environment)?)?\s+"
+    r"(?:(?:is|are|was|were)\s+"
+    r"(?:not\s+(?:performed|executed|deployed|released|published|planned)|out\s+of\s+scope)|"
+    r"(?:will|would|should|must|can|could)\s+not\s+be\s+"
+    r"(?:performed|executed|deployed|released|published))\b",
+    re.IGNORECASE,
+)
+_REVIEW_JA_POST_NEGATION_RE = re.compile(
+    r"^\s*(?:は|を|も|が|では|には|へ|に|で)?\s*"
+    r"(?:(?:実行|実施)\s*)?(?:しない方針|しない|しません|せず)|"
+    r"^\s*(?:は|を|も|が|では|には|へ|に|で)?\s*"
+    r"(?:行わない|行われない|行いません|行わず|禁止|対象外)|"
+    r"^\s*する予定はない",
+)
+_REVIEW_HONBAN_QUALIFIER_RE = re.compile(
+    r"^\s*(?:環境)?(?:への|へ|で|に|の)?\s*(?:deploy|release|publish|リリース|公開)\s*"
+    r"(?:は|を)?\s*(?:(?:実行|実施)\s*)?"
+    r"(?:しない方針|しない|しません|せず|行わない|行われない|行いません|行わず|"
+    r"禁止|対象外|する予定はない)",
+    re.IGNORECASE,
+)
+_REVIEW_GLOBAL_NON_OPERATION_RE = re.compile(
+    r"実操作\s*(?:は|を)?\s*(?:行わない|実行しない|しない)|"
+    r"\bactual\s+(?:operation|execution)s?\s+(?:will\s+)?not\s+(?:be\s+)?(?:performed|executed)\b|"
+    r"\bno\s+actual\s+(?:operation|execution)s?\b",
+    re.IGNORECASE,
+)
+_REVIEW_META_ONLY_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:review|analy[sz]e|document|describe|explain|inspect)\s+"
+    r"(?:the\s+)?(?:deploy(?:ment)?|release|migration|publish|production)\s+"
+    r"(?:procedures?|instructions?|settings?|logs?|text)|"
+    r"(?:deploy(?:ment)?|release|migration|publish|production)\s+"
+    r"(?:procedures?|instructions?|settings?|logs?|text)\s+"
+    r"(?:review|analysis|documentation|description|inspection)|"
+    r"(?:deploy|release|publish|migration|production|本番|リリース|マイグレーション|公開)"
+    r"[^。.!！?？;；\n]{0,48}(?:手順|設定|文言|ログ)\s*(?:を|の)?\s*"
+    r"(?:調査|確認|分析|説明|文書化|レビュー)(?:する|します)?"
+    r")\s*$",
+    re.IGNORECASE,
+)
+_REVIEW_QUOTED_EXECUTION_BEFORE_RE = re.compile(
+    r"\b(?:execute|run|perform)\s+(?:(?:the\s+)?quoted\s+)?$",
+    re.IGNORECASE,
+)
+_REVIEW_QUOTED_EXECUTION_AFTER_RE = re.compile(
+    r"^[」』\"`]\s*(?:"
+    r"(?:を|は)\s*(?:実際に)?(?:実行|実施|行う)|"
+    r"(?:will|must|should)\s+be\s+(?:executed|performed|released|published)\b"
+    r")",
+    re.IGNORECASE,
+)
+_REVIEW_QUOTE_ONLY_RE = re.compile(
+    r"引用するだけ|引用(?:する|のみ|だけ)|\bquote(?:d|s|ing)?\s+only\b|\bonly\s+quot(?:e|ed|ing)\b",
+    re.IGNORECASE,
+)
+_REVIEW_NEGATION_CUE_RE = re.compile(
+    r"しない|行わない|実行しない|ではない|はない|言っていない|述べていない|ない|"
+    r"\bnot\b|\bnever\b|\bcannot\b|\b(?:don|won|can)['’]t\b",
+    re.IGNORECASE,
+)
+_REVIEW_CAUSAL_ASSURANCE_AFTER_NEGATION_RE = re.compile(
+    r"(?:しない|行わない|実行しない)\s*(?:ので|から|ため)\s*"
+    r"(?:問題|支障|懸念|影響)(?:は|が)?\s*ない\s*$"
+)
+_REVIEW_EXECUTION_CUE_RE = re.compile(
+    r"\b(?:execute(?:d)?|run|perform(?:ed)?|carry\s+(?:(?:it|that|this)\s+)?out|"
+    r"(?:follow|apply|proceed\s+with)\s+"
+    r"(?:it|them|that|this|those|the\s+(?:procedures?|instructions?|steps?))|"
+    r"released|published)\b|"
+    r"(?:実行|実施|反映|適用)(?:する|します|した|する予定)?|"
+    r"(?:それ|それら|これ|これら|その(?:手順|指示|設定))(?:に|を)?従う|"
+    r"行う|行います",
+    re.IGNORECASE,
+)
+_REVIEW_NAMED_EXECUTION_RE = re.compile(
+    r"\b(?:actually\s+)?(?:execute|run|perform|carry\s+out)\s+"
+    r"(?:(?:the|a|an)\s+)?[\"`]?"
+    r"(?:deploy(?:ment)?|release|migration|publish|production)\b|"
+    r"[\"`]?(?:deploy(?:ment)?|release|migration|publish|production)[\"`]?\s+"
+    r"(?:(?:will|must|should)\s+be|(?:is|are|was|were))\s+"
+    r"(?:executed|performed|released|published)\b|"
+    r"(?:deploy|release|publish|migration|production|本番|リリース|マイグレーション|公開)"
+    r"[」』\"`]?\s*(?:を|は|が|も)?\s*"
+    r"(?:(?:実行|実施|反映)(?:する|します|した|する予定)?|"
+    r"行う|行います)",
+    re.IGNORECASE,
+)
+_REVIEW_QUOTE_RESIDUAL_NOISE_RE = re.compile(
+    r"[\s,.;:!?、。；：！？\"`「」『』\-*+>]+|"
+    r"\b(?:and|but|then|however)\b|"
+    r"(?:という文言を手順書に|という文言を|手順書に|"
+    r"だが|けど|けれど|ただし|しかし|その後|は|を|が|も)",
+    re.IGNORECASE,
+)
+
+
+def _review_keyword_matches(text: str, keyword: str, *, ignore_case: bool) -> list[re.Match]:
+    """Return keyword occurrences that satisfy the boundary contract."""
+    pattern = _review_keyword_pattern(keyword, ignore_case)
+    matches = list(pattern.finditer(text))
+    if not ignore_case and keyword == "鍵":
+        matches = [
+            match
+            for match in matches
+            if _review_japanese_key_match_allowed(text, match.start(), match.end())
+        ]
+    return matches
+
+
+@lru_cache(maxsize=None)
+def _review_keyword_pattern(keyword: str, ignore_case: bool) -> re.Pattern:
+    """Compile a boundary-aware regex for a review keyword."""
+    if ignore_case:
+        escaped = _REVIEW_ENGLISH_KEYWORD_FAMILY_PATTERNS.get(keyword.lower(), re.escape(keyword))
+        return re.compile(
+            rf"(?<![{_REVIEW_ENGLISH_BOUNDARY_CHAR_CLASS}])(?:{escaped})(?![{_REVIEW_ENGLISH_BOUNDARY_CHAR_CLASS}])",
+            re.IGNORECASE,
+        )
+    return re.compile(re.escape(keyword))
+
+
+def _review_japanese_key_match_allowed(text: str, start: int, end: int) -> bool:
+    """Exclude bare single-character ``鍵`` when it is embedded in compounds or idioms."""
+    left = text[max(0, start - 1):start]
+    right = text[end:min(len(text), end + 1)]
+    if left and left[-1].isalnum() and left[-1] not in _REVIEW_JA_PARTICLES:
+        if not re.match(r"[ぁ-ゟ゠-ヿ]", left[-1]):
+            return False
+    if right and right[0].isalnum() and right[0] not in _REVIEW_JA_PARTICLES:
+        return False
+    if re.search(r"[一-龯ぁ-んァ-ヶ]+の$", text[max(0, start - 8):start]):
+        return False
+    return True
+
+
+def _review_segment_index(text: str, boundary_re: re.Pattern) -> tuple[list[int], list[tuple[int, int]]]:
+    """Precompute trimmed text segments once for O(log n) per-match lookup."""
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for boundary in boundary_re.finditer(text):
+        start, end = cursor, boundary.start()
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if start < end:
+            spans.append((start, end))
+        cursor = boundary.end()
+    start, end = cursor, len(text)
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    if start < end:
+        spans.append((start, end))
+    if not spans:
+        spans.append((0, len(text)))
+    return [start for start, _ in spans], spans
+
+
+def _review_segment_span(
+    index: tuple[list[int], list[tuple[int, int]]],
+    start: int,
+    end: int,
+) -> tuple[int, int]:
+    """Find the precomputed segment containing a source span."""
+    starts, spans = index
+    position = max(0, bisect_right(starts, start) - 1)
+    segment_start, segment_end = spans[position]
+    if segment_start <= start and end <= segment_end:
+        return segment_start, segment_end
+    return start, end
+
+
+def _review_has_technical_noun_suffix(mission_text: str, start: int, end: int) -> bool:
+    """Suppress public-operation keywords when they form a compound technical noun."""
+    suffix = mission_text[end:].lstrip()
+    return bool(_REVIEW_TECHNICAL_NOUN_SUFFIX_RE.match(suffix))
+
+
+def _review_quote_span_index(
+    text: str,
+    offset: int,
+) -> tuple[list[int], list[tuple[int, int]]]:
+    """Index common quoted ranges once for constant/logarithmic match lookup."""
+    spans: list[tuple[int, int]] = []
+    paired_open: dict[str, list[int]] = {"「": [], "『": []}
+    paired_close = {"」": "「", "』": "『"}
+    symmetric_open: dict[str, int | None] = {'"': None, "`": None}
+    for position, char in enumerate(text):
+        absolute = offset + position
+        if char in paired_open:
+            paired_open[char].append(absolute)
+        elif char in paired_close:
+            opening = paired_close[char]
+            if paired_open[opening]:
+                spans.append((paired_open[opening].pop() + 1, absolute))
+        elif char in symmetric_open and (position == 0 or text[position - 1] != "\\"):
+            opening = symmetric_open[char]
+            if opening is None:
+                symmetric_open[char] = absolute
+            else:
+                spans.append((opening + 1, absolute))
+                symmetric_open[char] = None
+    absolute_end = offset + len(text)
+    for openings in paired_open.values():
+        spans.extend((opening + 1, absolute_end) for opening in openings)
+    spans.extend(
+        (opening + 1, absolute_end)
+        for opening in symmetric_open.values()
+        if opening is not None
+    )
+    spans.sort()
+    return [start for start, _ in spans], spans
+
+
+def _review_regex_span_index(
+    text: str,
+    offset: int,
+    pattern: re.Pattern,
+) -> tuple[list[int], list[tuple[int, int]]]:
+    spans = [(offset + match.start(), offset + match.end()) for match in pattern.finditer(text)]
+    return [start for start, _ in spans], spans
+
+
+def _review_index_container(
+    index: tuple[list[int], list[tuple[int, int]]],
+    start: int,
+    end: int,
+) -> tuple[int, int] | None:
+    starts, spans = index
+    position = bisect_right(starts, start) - 1
+    while position >= 0 and spans[position][0] <= start:
+        span_start, span_end = spans[position]
+        if span_start <= start and end <= span_end:
+            return span_start, span_end
+        position -= 1
+    return None
+
+
+def _review_index_contains(
+    index: tuple[list[int], list[tuple[int, int]]],
+    start: int,
+    end: int,
+) -> bool:
+    return _review_index_container(index, start, end) is not None
+
+
+def _review_text_has_ambiguous_execution(text: str) -> bool:
+    """Find execution intent not explained by a directly named operation target."""
+    named_targets = _review_regex_span_index(text, 0, _REVIEW_NAMED_EXECUTION_RE)
+    quote_spans = _review_quote_span_index(text, 0)
+    non_operation_markers = _review_regex_span_index(
+        text,
+        0,
+        _REVIEW_GLOBAL_NON_OPERATION_RE,
+    )
+    return any(
+        not _review_index_contains(named_targets, match.start(), match.end())
+        and not _review_index_contains(quote_spans, match.start(), match.end())
+        and not _review_index_contains(
+            non_operation_markers,
+            match.start(),
+            match.end(),
+        )
+        for match in _REVIEW_EXECUTION_CUE_RE.finditer(text)
+    )
+
+
+def _review_text_has_quote_only_unknown_residual(text: str) -> bool:
+    """Require quote-only intent plus known named actions to explain the whole unit."""
+    quote_spans = _review_quote_span_index(text, 0)[1]
+    removable_spans = [
+        *quote_spans,
+        *[(match.start(), match.end()) for match in _REVIEW_QUOTE_ONLY_RE.finditer(text)],
+        *[(match.start(), match.end()) for match in _REVIEW_NAMED_EXECUTION_RE.finditer(text)],
+        *[(match.start(), match.end()) for match in _REVIEW_GLOBAL_NON_OPERATION_RE.finditer(text)],
+    ]
+    masked = list(text)
+    for start, end in removable_spans:
+        masked[start:end] = " " * (end - start)
+    residual = _REVIEW_QUOTE_RESIDUAL_NOISE_RE.sub("", "".join(masked))
+    return bool(residual)
+
+
+def _review_quote_has_execution_target(
+    mission_text: str,
+    quote_span: tuple[int, int],
+) -> bool:
+    """Require execution language to grammatically target the quoted command."""
+    quote_start, quote_end = quote_span
+    before = mission_text[max(0, quote_start - 80):max(0, quote_start - 1)]
+    after = mission_text[quote_end:min(len(mission_text), quote_end + 80)]
+    return bool(
+        _REVIEW_QUOTED_EXECUTION_BEFORE_RE.search(before)
+        or _REVIEW_QUOTED_EXECUTION_AFTER_RE.search(after)
+    )
+
+
+def _review_context_analysis(
+    mission_text: str,
+    context_span: tuple[int, int],
+    cache: dict[tuple[int, int], dict],
+) -> dict:
+    """Compute regex flags and span indexes once for each logical context."""
+    if context_span not in cache:
+        start, end = context_span
+        context = mission_text[start:end]
+        quote_index = _review_quote_span_index(context, start)
+        cache[context_span] = {
+            "text": context,
+            "double_negation": bool(_REVIEW_DOUBLE_NEGATION_RE.search(context)),
+            "conditional": bool(_REVIEW_CONDITIONAL_RE.search(context)),
+            "quote_only": bool(_REVIEW_QUOTE_ONLY_RE.search(context)),
+            "quotes": quote_index,
+            "meta_only": bool(_REVIEW_META_ONLY_RE.fullmatch(context)),
+            "negation_cue_starts": [
+                match.start() for match in _REVIEW_NEGATION_CUE_RE.finditer(context)
+            ],
+            "actual_operation_starts": sorted({
+                match.start()
+                for keywords, ignore_case in (
+                    (_IRREVERSIBLE_KEYWORDS_EN, True),
+                    (_IRREVERSIBLE_KEYWORDS_JA, False),
+                )
+                for keyword in keywords
+                for match in _review_keyword_matches(
+                    context,
+                    keyword,
+                    ignore_case=ignore_case,
+                )
+                if not (
+                    keyword == "公開"
+                    and _review_has_technical_noun_suffix(context, match.start(), match.end())
+                )
+            }),
+            "negated_operations": _review_regex_span_index(
+                context,
+                start,
+                _REVIEW_EN_NEGATED_OPERATION_RE,
+            ),
+        }
+    return cache[context_span]
+
+
+def _review_audit_context(text: str, start: int, end: int, *, radius: int = 80) -> str:
+    """Keep persisted provenance readable and bounded for long mission descriptions."""
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    prefix = "…" if left else ""
+    suffix = "…" if right < len(text) else ""
+    return f"{prefix}{text[left:right].strip()}{suffix}"
+
+
+def _review_operation_is_explicitly_negated(
+    context: str,
+    keyword: str,
+    relative_start: int,
+    relative_end: int,
+    absolute_start: int,
+    absolute_end: int,
+    negated_operations: tuple[list[int], list[tuple[int, int]]],
+) -> bool:
+    """Suppress only when negation is grammatically anchored to this operation."""
+    after = context[relative_end:min(len(context), relative_end + 64)]
+    if _review_index_contains(negated_operations, absolute_start, absolute_end):
+        return True
+    if _REVIEW_JA_POST_NEGATION_RE.search(after):
+        return True
+    # 本番 is a qualifier preceding the directly negated operation.
+    if keyword == "本番" and _REVIEW_HONBAN_QUALIFIER_RE.search(after):
+        return True
+    return False
+
+
+def _review_operation_has_negation_reversal(
+    context: str,
+    cue_starts: list[int],
+    operation_starts: list[int],
+    relative_start: int,
+    relative_end: int,
+) -> bool:
+    """Treat multiple post-operation negation cues as ambiguous, never suppressible."""
+    next_operation_index = bisect_right(operation_starts, relative_start)
+    limit = (
+        operation_starts[next_operation_index]
+        if next_operation_index < len(operation_starts)
+        else None
+    )
+    first_cue = bisect_left(cue_starts, relative_end)
+    final_cue = bisect_left(cue_starts, limit) if limit is not None else len(cue_starts)
+    cue_count = final_cue - first_cue
+    if cue_count < 2:
+        return False
+    cue_end = limit if limit is not None else len(context)
+    if cue_count == 2 and _REVIEW_CAUSAL_ASSURANCE_AFTER_NEGATION_RE.fullmatch(
+        context[cue_starts[first_cue]:cue_end]
+    ):
+        return False
+    return True
+
+
+def _actual_operation_signal_detail(
+    mission_text: str,
+    keyword: str,
+    match: re.Match,
+    signal: str,
+    context_index: tuple[list[int], list[tuple[int, int]]],
+    unit_index: tuple[list[int], list[tuple[int, int]]],
+    context_analysis_cache: dict[tuple[int, int], dict],
+    unit_flags_cache: dict[tuple[int, int], dict],
+) -> dict:
+    start, end = match.span()
+    context_start, context_end = _review_segment_span(context_index, start, end)
+    context_analysis = _review_context_analysis(
+        mission_text,
+        (context_start, context_end),
+        context_analysis_cache,
+    )
+    logical_context = context_analysis["text"]
+    unit_start, unit_end = _review_segment_span(unit_index, start, end)
+    relative_start = start - context_start
+    relative_end = end - context_start
+    quote_span = _review_index_container(context_analysis["quotes"], start, end)
+    quoted = quote_span is not None
+    quoted_execution_target = bool(
+        quote_span and _review_quote_has_execution_target(mission_text, quote_span)
+    )
+    quote_only = context_analysis["quote_only"]
+    unit_key = (unit_start, unit_end)
+    if unit_key not in unit_flags_cache:
+        logical_unit = mission_text[unit_start:unit_end]
+        unit_flags_cache[unit_key] = {
+            "global_markers": _review_regex_span_index(
+                logical_unit,
+                unit_start,
+                _REVIEW_GLOBAL_NON_OPERATION_RE,
+            ),
+            "double_negation": bool(_REVIEW_DOUBLE_NEGATION_RE.search(logical_unit)),
+            "conditional": bool(_REVIEW_CONDITIONAL_RE.search(logical_unit)),
+            "ambiguous_execution": bool(
+                _review_text_has_ambiguous_execution(logical_unit)
+            ),
+            "quote_only_unknown_residual": (
+                _review_text_has_quote_only_unknown_residual(logical_unit)
+            ),
+        }
+    unit_flags = unit_flags_cache[unit_key]
+    global_markers = unit_flags["global_markers"]
+    global_non_operation = bool(global_markers[1])
+    unit_double_negation = unit_flags["double_negation"]
+    unit_conditional = unit_flags["conditional"]
+    unit_ambiguous_execution = unit_flags["ambiguous_execution"]
+    quote_only_unknown_residual = unit_flags["quote_only_unknown_residual"]
+
+    if keyword == "release" and _release_noun_reference(mission_text, start, end):
+        # #313: 版名・文書名への substring マッチはエスカレート対象外 (監査 FP 36%)
+        decision, reason = "suppressed", "noun-reference-non-operation"
+    elif keyword == "公開" and _review_has_technical_noun_suffix(mission_text, start, end):
+        decision, reason = "suppressed", "compound-technical-noun"
+    elif quoted and quoted_execution_target:
+        decision, reason = "included", "affirmative-actual-operation"
+    elif quoted and quote_only and quote_only_unknown_residual:
+        decision, reason = "included", "ambiguous-execution-reference"
+    elif quoted and unit_ambiguous_execution:
+        decision, reason = "included", "ambiguous-execution-reference"
+    elif quoted and quote_only:
+        decision, reason = "suppressed", "quoted-non-operation"
+    elif quoted:
+        decision, reason = "included", "quoted-context-conservative"
+    elif context_analysis["double_negation"] or _review_operation_has_negation_reversal(
+        logical_context,
+        context_analysis["negation_cue_starts"],
+        context_analysis["actual_operation_starts"],
+        relative_start,
+        relative_end,
+    ):
+        decision, reason = "included", "uncertain-or-double-negation"
+    elif context_analysis["conditional"] or unit_conditional:
+        decision, reason = "included", "conditional-or-uncertain-context"
+    elif _review_operation_is_explicitly_negated(
+        logical_context,
+        keyword,
+        relative_start,
+        relative_end,
+        start,
+        end,
+        context_analysis["negated_operations"],
+    ):
+        decision, reason = "suppressed", "negated-actual-operation"
+    elif global_non_operation and unit_double_negation:
+        decision, reason = "included", "uncertain-or-double-negation"
+    elif global_non_operation and unit_conditional:
+        decision, reason = "included", "conditional-or-uncertain-context"
+    elif global_non_operation and unit_ambiguous_execution:
+        decision, reason = "included", "ambiguous-execution-reference"
+    elif global_non_operation and context_analysis["meta_only"]:
+        decision, reason = "suppressed", "global-explicit-non-operation"
+    elif global_non_operation:
+        decision, reason = "included", "contradictory-global-operation"
+    else:
+        decision, reason = "included", "affirmative-actual-operation"
+
+    return {
+        "signal": signal,
+        "category": "actual-operation",
+        "keyword": keyword,
+        "match": match.group(0),
+        "context": _review_audit_context(mission_text, start, end),
+        "decision": decision,
+        "reason": reason,
+        "source": "mission_text",
+        "start": start,
+        "end": end,
+    }
+
+
+def _conservative_signal_detail(
+    mission_text: str,
+    keyword: str,
+    match: re.Match,
+    signal: str,
+) -> dict:
+    start, end = match.span()
+    return {
+        "signal": signal,
+        "category": "security",
+        "keyword": keyword,
+        "match": match.group(0),
+        "context": _review_audit_context(mission_text, start, end),
+        "decision": "included",
+        "reason": "security-context-conservative",
+        "source": "mission_text",
+        "start": start,
+        "end": end,
+    }
+
+
+def derive_review_tier_decision(
+    mission_text: str,
+    complexity: str | None,
+    task_profile_risk: str | None = None,
+) -> dict:
+    """Derive tier plus additive per-occurrence decision provenance (Issue #209)."""
+    base_tier = REVIEW_TIER_BASE.get(complexity or "", "standard")
+    signals: list[str] = []
+    signal_details: list[dict] = []
+    context_index = _review_segment_index(mission_text, _REVIEW_CONTEXT_BOUNDARY_RE)
+    unit_index = _review_segment_index(mission_text, _REVIEW_UNIT_BOUNDARY_RE)
+    context_analysis_cache: dict[tuple[int, int], dict] = {}
+    unit_flags_cache: dict[tuple[int, int], dict] = {}
+
+    if task_profile_risk == "high":
+        signal = "task_profile.risk=high"
+        signals.append(signal)
+        signal_details.append({
+            "signal": signal,
+            "category": "task-profile-risk",
+            "keyword": "high",
+            "match": "high",
+            "context": "task_profile.risk=high",
+            "decision": "included",
+            "reason": "task-profile-high-risk",
+            "source": "task_profile.risk",
+            "start": None,
+            "end": None,
+        })
+
+    for keywords, ignore_case in (
+        (_IRREVERSIBLE_KEYWORDS_EN, True),
+        (_IRREVERSIBLE_KEYWORDS_JA, False),
+    ):
+        for keyword in keywords:
+            signal = f"irreversible-keyword:{keyword}"
+            details = [
+                _actual_operation_signal_detail(
+                    mission_text,
+                    keyword,
+                    match,
+                    signal,
+                    context_index,
+                    unit_index,
+                    context_analysis_cache,
+                    unit_flags_cache,
+                )
+                for match in _review_keyword_matches(mission_text, keyword, ignore_case=ignore_case)
+            ]
+            signal_details.extend(details)
+            if any(item["decision"] == "included" for item in details):
+                signals.append(signal)
+
+    for keywords, ignore_case in (
+        (_SECURITY_KEYWORDS_EN, True),
+        (_SECURITY_KEYWORDS_JA, False),
+    ):
+        for keyword in keywords:
+            signal = f"security-keyword:{keyword}"
+            matches = _review_keyword_matches(mission_text, keyword, ignore_case=ignore_case)
+            signal_details.extend(
+                _conservative_signal_detail(mission_text, keyword, match, signal)
+                for match in matches
+            )
+            if matches:
+                signals.append(signal)
+
+    tier = "full" if signals and base_tier != "full" else base_tier
+    return {
+        "mission_text": mission_text,
+        "base_tier": base_tier,
+        "tier": tier,
+        "signals": signals,
+        "signal_details": signal_details,
+    }
+
+
+def derive_review_tier(
+    mission_text: str,
+    complexity: str | None,
+    task_profile_risk: str | None = None,
+) -> tuple[str, list[str]]:
+    """review_tier と signals を導出する純関数 (Issue #168).
+
+    ベースは REVIEW_TIER_BASE から取得し、エスカレータ条件を満たす場合は "full" に昇格する。
+    降格ロジックは存在しない。
+
+    Args:
+        mission_text: ミッション記述テキスト
+        complexity: 複雑度文字列 ("Simple" | "Standard" | "Complex" | "Critical" | None | "Unknown")
+        task_profile_risk: task_profile の risk 値 (オプション)
+
+    Returns:
+        (tier, signals): tier は "light"/"standard"/"full"、signals はエスカレータ理由リスト
+    """
+    decision = derive_review_tier_decision(mission_text, complexity, task_profile_risk)
+    return decision["tier"], decision["signals"]
+
+
+def _parse_files_arg(files: str | None) -> list[str]:
+    """--files のカンマ区切りを project-root 相対パスのリストに正規化する."""
+    if not files:
+        return []
+    return [p.strip() for p in files.split(",") if p.strip()]
+
+
+def _warn_s3_file_overlap(cwd: Path, planned_files: list[str], cur_sid: str) -> None:
+    """同一 project 内 active session の planned_files 重複を WARN する (reject はしない)."""
+    planned = set(planned_files)
+    if not planned:
+        return
+    for sf_other in _iter_state_files(cwd):
+        try:
+            other = read_session_json(sf_other)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except Exception:
+            continue
+        if not other.get("loop_active") or other.get("session_id") == cur_sid:
+            continue
+        overlap = planned & set(other.get("planned_files") or [])
+        if overlap:
+            print(
+                f"WARNING [S3-files]: active session {other.get('session_id', '?')} "
+                f"と対象ファイルが重複: {sorted(overlap)}。マージ衝突の可能性を確認。",
+                file=sys.stderr,
+            )
+            break
+
+
+def _split_csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def _coerce_scalar(value: str):
+    value = value.strip().strip('"').strip("'")
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    return value
+
+
+def _coerce_yaml_value(value: str):
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        return [_coerce_scalar(v) for v in inner.split(",") if v.strip()]
+    return _coerce_scalar(value)
+
+
+def _parse_specialist_registry_text(txt: str) -> list[dict]:
+    """Parse the documented version 1 JSON/limited-YAML registry shape."""
+    try:
+        data = _strict_json_loads(txt)
+        return list(data.get("specialists") or [])
+    except json.JSONDecodeError:
+        pass
+
+    specialists: list[dict] = []
+    in_specialists = False
+    cur: dict | None = None
+    nested_key: str | None = None
+    for raw in txt.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        stripped = line.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+        if not raw.startswith(" ") and stripped.endswith(":"):
+            in_specialists = stripped == "specialists:"
+            nested_key = None
+            continue
+        if not in_specialists:
+            continue
+        if stripped.startswith("- "):
+            if cur:
+                specialists.append(cur)
+            cur = {}
+            nested_key = None
+            rest = stripped[2:].strip()
+            if rest and ":" in rest:
+                k, v = rest.split(":", 1)
+                key = k.strip()
+                if v.strip():
+                    cur[key] = _coerce_yaml_value(v)
+                else:
+                    cur[key] = {}
+                    nested_key = key
+            continue
+        if cur is not None and ":" in stripped:
+            k, v = stripped.split(":", 1)
+            key = k.strip()
+            if nested_key and indent >= 6:
+                nested = cur.setdefault(nested_key, {})
+                if isinstance(nested, dict):
+                    nested[key] = _coerce_yaml_value(v)
+                continue
+            if v.strip():
+                cur[key] = _coerce_yaml_value(v)
+                nested_key = None
+            else:
+                cur[key] = {}
+                nested_key = key
+    if cur:
+        specialists.append(cur)
+    return specialists
+
+
+def _load_specialist_registry(path: str | None) -> list[dict]:
+    """Compatibility loader for callers that explicitly request the legacy parser."""
+    if not path:
+        return []
+    p = Path(path).expanduser()
+    try:
+        raw = p.read_bytes()
+        return _parse_specialist_registry_text(raw.decode("utf-8"))
+    except (OSError, UnicodeError):
+        return []
+
+
+def _registry_arg_paths(value) -> list[Path]:
+    if not value:
+        return []
+    values = value if isinstance(value, list) else [value]
+    paths: list[Path] = []
+    for item in values:
+        paths.extend(Path(p).expanduser() for p in _split_csv(item))
+    return paths
+
+
+def _portable_registry_identity(path: Path) -> str:
+    resolved = Path(os.path.abspath(os.fspath(path.expanduser())))
+    for anchor, label in (
+        (Path.cwd().resolve(strict=False), "$PROJECT"),
+        (Path.home().resolve(strict=False), "$HOME"),
+    ):
+        try:
+            relative = resolved.relative_to(anchor)
+        except ValueError:
+            continue
+        suffix = relative.as_posix()
+        return label if suffix == "." else f"{label}/{suffix}"
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()
+    return f"$EXTERNAL/sha256:{digest}"
+
+
+def _registry_source(path: Path, kind: str) -> str:
+    identity = _portable_registry_identity(path)
+    if kind == "explicit":
+        return f"registry:{identity}"
+    if kind == "installed":
+        return f"skill-manifest:{identity}"
+    if kind == "skill-root":
+        return f"skill-root:{identity}"
+    return identity
+
+
+def _read_registry_input(
+    path: Path, source: str, kind: str, version: int, tier: int, order: int
+) -> tuple[
+    dict,
+    bytes | None,
+    tuple[int, int] | None,
+    RegistryContractError | None,
+]:
+    record = {
+        "kind": kind,
+        "source": source,
+        "canonical_identity": _portable_registry_identity(path),
+        "version": version,
+        "precedence_tier": tier,
+        "order": order,
+        "status": "missing",
+        "content_digest": None,
+    }
+    if record["canonical_identity"].startswith("$EXTERNAL/sha256:"):
+        record["resolution_mode"] = "explicit-resupply-required"
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(path, flags)
+    except OSError as error:
+        if error.errno not in {errno.ENOENT, errno.ENOTDIR}:
+            record["status"] = "invalid"
+            return (
+                record,
+                None,
+                None,
+                RegistryContractError("registry-input-unreadable"),
+            )
+        return record, None, None, None
+    physical_identity: tuple[int, int] | None = None
+    try:
+        before = os.fstat(fd)
+        physical_identity = (before.st_dev, before.st_ino)
+        if not stat.S_ISREG(before.st_mode):
+            record["status"] = "invalid"
+            return (
+                record,
+                None,
+                physical_identity,
+                RegistryContractError("registry-input-not-regular"),
+            )
+        chunks: list[bytes] = []
+        remaining = MAX_REGISTRY_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(fd)
+        if len(raw) > MAX_REGISTRY_BYTES:
+            record["status"] = "invalid"
+            return (
+                record,
+                None,
+                physical_identity,
+                RegistryContractError("registry-input-too-large"),
+            )
+        if (
+            (
+                after.st_dev,
+                after.st_ino,
+                after.st_mode,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            )
+            != (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            or len(raw) != after.st_size
+        ):
+            record["status"] = "invalid"
+            return (
+                record,
+                None,
+                physical_identity,
+                RegistryContractError("registry-input-changed"),
+            )
+    except OSError:
+        record["status"] = "invalid"
+        return (
+            record,
+            None,
+            physical_identity,
+            RegistryContractError("registry-input-unreadable"),
+        )
+    finally:
+        os.close(fd)
+    record["status"] = "present"
+    record["content_digest"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    return record, raw, physical_identity, None
+
+
+def _discover_specialist_registry_candidates(args) -> tuple[list[dict], list[dict], dict]:
+    """Discover registry candidates in deterministic precedence order.
+
+    Explicit CLI registries have the highest precedence, then project, user, and
+    skill/plugin manifests. Built-in presets are appended later by the ranker so
+    registry-level `enabled: false` entries can suppress lower-precedence defaults.
+    """
+    request = SpecialistRegistryDiscoveryRequest(
+        raw_registry=getattr(args, "registry", None),
+        no_default_skill_roots=getattr(args, "no_default_skill_roots", False),
+        skills_dir=getattr(args, "skills_dir", None),
+    )
+    services = SpecialistRegistryDiscoveryServices(
+        path_from_string=Path,
+        path_expanduser=Path.expanduser,
+        current_directory=Path.cwd,
+        home_directory=Path.home,
+        join_path=Path.joinpath,
+        path_is_directory=Path.is_dir,
+        path_glob=Path.glob,
+        environment_get=os.environ.get,
+        path_separator=os.pathsep,
+        registry_source=_registry_source,
+        read_registry_input=_read_registry_input,
+        detect_registry_version=detect_registry_version,
+        contract_error=RegistryContractError,
+        registry_contract_error=RegistryContractError,
+        parse_v1_registry=_parse_specialist_registry_text,
+        parse_v2_registry=parse_v2_registry_json,
+        registry_entry_digest=registry_entry_digest,
+        portable_registry_identity=_portable_registry_identity,
+        value_digest=provider_value_digest,
+    )
+    return discover_specialist_registry_candidates(request, services)
+
+
+def _skill_roots(args) -> list[Path]:
+    roots = [Path(p).expanduser() for p in _split_csv(getattr(args, "skills_dir", None))]
+    env = os.environ.get("MISSION_SKILL_ROOTS")
+    if env:
+        roots.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p)
+    if not getattr(args, "no_default_skill_roots", False):
+        roots.extend([
+            Path.home() / ".codex" / "skills",
+            Path.home() / ".claude" / "skills",
+        ])
+    # Preserve order while deduplicating.
+    out: list[Path] = []
+    seen = set()
+    for r in roots:
+        key = str(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def _discover_installed_skills(args) -> dict[str, dict]:
+    installed: dict[str, dict] = {}
+    for name in _split_csv(getattr(args, "installed_skills", None)):
+        installed[name] = {"skill": name, "source": "argument", "available": True, "description": ""}
+    for root in _skill_roots(args):
+        if not root.is_dir():
+            continue
+        for skill_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+            skill_md = skill_dir / "SKILL.md"
+            if not skill_md.is_file():
+                continue
+            name = skill_dir.name
+            description = ""
+            try:
+                for line in skill_md.read_text(encoding="utf-8", errors="ignore").splitlines()[:40]:
+                    if line.startswith("name:"):
+                        name = line.split(":", 1)[1].strip().strip('"').strip("'") or name
+                    elif line.startswith("description:"):
+                        description = line.split(":", 1)[1].strip().strip('"').strip("'")
+            except OSError:
+                continue
+            installed.setdefault(name, {
+                "skill": name,
+                "source": str(root),
+                "available": True,
+                "description": description,
+            })
+    return installed
+
+
+def classify_task_profile(task: str, files: list[str] | None = None) -> dict:
+    files = files or []
+    haystack = " ".join([task, *files]).lower()
+    matches: list[tuple[str, int, list[str]]] = []
+    for profile, keywords in PROFILE_KEYWORDS.items():
+        signals = [kw for kw in keywords if kw in haystack]
+        if signals:
+            matches.append((profile, len(signals), signals[:5]))
+    matches.sort(key=lambda item: (-item[1], item[0]))
+    if not matches:
+        return {
+            "primary": "general",
+            "secondary": [],
+            "confidence": 0.3,
+            "risk": "low",
+            "signals": [],
+        }
+    primary, top_count, top_signals = matches[0]
+    secondary = [p for p, _, _ in matches[1:4]]
+    risk = "high" if any(kw in haystack for kw in HIGH_RISK_KEYWORDS) else "medium"
+    confidence = min(0.95, 0.55 + (0.1 * top_count))
+    if secondary and matches[1][1] == top_count:
+        confidence = min(confidence, 0.68)
+    return {
+        "primary": primary,
+        "secondary": secondary,
+        "confidence": round(confidence, 2),
+        "risk": risk,
+        "signals": top_signals,
+    }
+
+
+def _candidate_profiles(candidate: dict) -> list[str]:
+    profiles = candidate.get("task_profiles") or candidate.get("profiles") or []
+    if isinstance(profiles, str):
+        return [profiles]
+    return list(profiles)
+
+
+def _disable_keys(candidate: dict) -> set[str]:
+    if candidate.get("registry_version") == 2:
+        provider_id = _provider_id(candidate)
+        return {provider_id} if provider_id else set()
+    return {str(v) for v in (
+        candidate.get("provider_id"),
+        candidate.get("role"),
+        candidate.get("skill"),
+        candidate.get("name"),
+        candidate.get("command"),
+    ) if v}
+
+
+def _enabled_registry_candidates(registry_candidates: list[dict]) -> list[dict]:
+    disabled: set[str] = set()
+    enabled_keys: set[str] = set()
+    enabled: list[dict] = []
+    block_builtins = any(
+        isinstance(item, dict) and item.get("_blocks_builtin_candidates") is True
+        for item in registry_candidates
+    )
+    source_candidates = list(registry_candidates)
+    if not block_builtins:
+        source_candidates.extend(BUILTIN_SPECIALIST_CANDIDATES)
+    for raw in source_candidates:
+        if not isinstance(raw, dict):
+            continue
+        keys = _disable_keys(raw)
+        if not keys:
+            continue
+        if raw.get("enabled") is False:
+            disabled.update(keys)
+            continue
+        if keys & disabled or keys & enabled_keys:
+            continue
+        enabled_keys.update(keys)
+        enabled.append(raw)
+    return enabled
+
+
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def _string_map(value) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v) for k, v in value.items() if k is not None and v is not None}
+
+
+def _command_is_available(command: str | None) -> bool:
+    if not command:
+        return False
+    if os.sep in command:
+        path = Path(command).expanduser()
+        return path.is_file() and os.access(path, os.X_OK)
+    return shutil.which(command) is not None
+
+
+def _classify_non_portable_execution_config(candidate: dict) -> str | None:
+    if any(
+        not _portable_provider_identifier(candidate.get(field))
+        for field in ("provider_id", "role", "skill")
+    ):
+        return "provider-identity"
+    if candidate.get("kind") != "command":
+        return None
+    if "$EXTERNAL/sha256:" in str(candidate.get("source") or ""):
+        return "external-registry-resupply"
+    command = candidate.get("command")
+    if not command or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}", str(command)):
+        return "command-locator"
+    args = candidate.get("args") or []
+    if args:
+        return "argument-locator"
+    if candidate.get("env"):
+        return "environment-values"
+    return None
+
+
+def _public_specialist_record(record: dict) -> dict:
+    """Project one internal provider record onto the portable public contract."""
+    identity = _provider_id(record)
+    public: dict = {"provider_id": _safe_provider_reference(identity)}
+    for field in ("role", "skill"):
+        value = record.get(field)
+        if value:
+            public[field] = (
+                str(value)
+                if _portable_provider_identifier(value)
+                else _safe_provider_reference(value)
+            )
+    kind = record.get("kind")
+    if kind in {"skill", "command"}:
+        public["kind"] = kind
+    command = record.get("command")
+    if command and _portable_provider_identifier(command):
+        public["command"] = str(command)
+        public["args"] = []
+    timeout = record.get("timeout")
+    if type(timeout) is int and 1 <= timeout <= 86400:
+        public["timeout"] = timeout
+    for field in ("task_profiles", "phases", "matched_conditions"):
+        values = record.get(field)
+        if isinstance(values, list):
+            public[field] = [
+                str(value)
+                for value in values
+                if isinstance(value, str)
+                and len(value) <= 128
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+                and "/" not in value
+                and "\\" not in value
+            ]
+    for field in (
+        "required",
+        "bounded_use",
+        "bounded_purpose_required",
+        "installed",
+        "available",
+        "first_use",
+    ):
+        if type(record.get(field)) is bool:
+            public[field] = record[field]
+    if (
+        type(record.get("max_calls_per_iteration")) is int
+        and 1 <= record["max_calls_per_iteration"] <= 1000
+    ):
+        public["max_calls_per_iteration"] = record["max_calls_per_iteration"]
+    for field in (
+        "source",
+        "registry_entry_digest",
+        "registry_projection_digest",
+        "context_digest",
+        "activation_digest",
+        "status",
+        "eligibility_reason",
+        "selection_source",
+        "selection_source_raw",
+        "eligibility_selection_source",
+        "selection_id",
+    ):
+        value = record.get(field)
+        if isinstance(value, str):
+            public[field] = value
+    if type(record.get("registry_version")) is int:
+        public["registry_version"] = record["registry_version"]
+    score = record.get("score")
+    if (
+        (type(score) is int and 0 <= score <= 1)
+        or (type(score) is float and math.isfinite(score) and 0.0 <= score <= 1.0)
+    ):
+        public["score"] = score
+    normalized = record.get("normalized_activation")
+    if isinstance(normalized, dict):
+        public["normalized_activation"] = {
+            key: normalized[key]
+            for key in (
+                "min_complexity",
+                "auto_select_if",
+                "explicit_below_min",
+                "when_any",
+            )
+            if key in normalized
+        }
+    risk = record.get("risk")
+    if isinstance(risk, dict):
+        public["risk_confirmation_required"] = bool(
+            risk.get("first_use_confirmation")
+        )
+    result_contract = record.get("result_contract")
+    if isinstance(result_contract, dict) and result_contract:
+        public["result_contract_digest"] = provider_value_digest(result_contract)
+    planning = record.get("planning")
+    if isinstance(planning, dict) and planning.get("mode") in {"advisory", "primary"}:
+        public["planning_mode"] = planning["mode"]
+        public["planning_contract_digest"] = provider_value_digest(planning)
+    return public
+
+
+def _public_specialist_records(records: list[dict]) -> list[dict]:
+    return [
+        _public_specialist_record(record)
+        for record in records
+        if isinstance(record, dict)
+    ]
+
+
+def _public_registry_input_record(record: dict) -> dict:
+    return {
+        field: record[field]
+        for field in (
+            "kind",
+            "source",
+            "canonical_identity",
+            "version",
+            "precedence_tier",
+            "order",
+            "status",
+            "content_digest",
+            "resolution_mode",
+        )
+        if field in record
+    }
+
+
+def _public_specialist_diagnostic(record: dict) -> dict:
+    identity = str(record.get("provider_id") or "<registry>")
+    public = {
+        "provider_id": (
+            "<registry>"
+            if identity == "<registry>"
+            else _safe_provider_reference(identity)
+        )
+    }
+    for field in (
+        "source",
+        "reason_code",
+        "field_code",
+        "blocked_config_class",
+        "registry_entry_digest",
+        "registry_projection_digest",
+        "context_digest",
+        "activation_digest",
+        "selection_source",
+        "selection_source_raw",
+        "requested_phase",
+        "current_complexity",
+        "minimum_complexity",
+    ):
+        value = record.get(field)
+        if isinstance(value, str):
+            public[field] = value
+    registry_input = record.get("registry_input")
+    if isinstance(registry_input, dict):
+        public["registry_input"] = _public_registry_input_record(registry_input)
+    return public
+
+
+def _public_specialist_diagnostics(records: list[dict]) -> list[dict]:
+    return [
+        _public_specialist_diagnostic(record)
+        for record in records
+        if isinstance(record, dict)
+    ]
+
+
+def _public_eligibility_context_fields(eligibility: dict, complexity: object) -> dict:
+    """Expose only contract enums; bind rejected raw policy through digests."""
+    fields: dict = {}
+    if complexity in {"Simple", "Standard", "Complex", "Critical"}:
+        fields["current_complexity"] = complexity
+    minimum = (eligibility.get("normalized_activation") or {}).get("min_complexity")
+    if minimum in {"Simple", "Standard", "Complex", "Critical"}:
+        fields["minimum_complexity"] = minimum
+    elif minimum is not None:
+        fields["field_code"] = "activation.min_complexity"
+    return fields
+
+
+def _merge_result_contract(defaults: dict, explicit: dict) -> dict:
+    merged = dict(defaults)
+    merged.update(explicit)
+    markers = [
+        *[str(v) for v in defaults.get("forbidden_markers") or []],
+        *[str(v) for v in explicit.get("forbidden_markers") or []],
+    ]
+    if markers:
+        merged["forbidden_markers"] = list(dict.fromkeys(markers))
+    return merged
+
+
+def _is_bounded_orchestrator_candidate(candidate: dict) -> bool:
+    if any(candidate.get(key) is True for key in ("bounded", "bounded_use", "broad_orchestrator")):
+        return True
+    notes = str(candidate.get("notes") or "").lower()
+    return "broad" in notes and "orchestrator" in notes
+
+
+def _normalize_candidate(candidate: dict, source: str) -> dict:
+    kind = candidate.get("kind") or "skill"
+    command = candidate.get("command")
+    skill = candidate.get("skill") or candidate.get("name") or candidate.get("role")
+    role = candidate.get("role") or skill
+    raw_phases = candidate.get("phases")
+    phases = (
+        ([] if candidate.get("registry_version") == 2 else ["planning", "review"])
+        if raw_phases is None
+        else raw_phases
+    )
+    if isinstance(phases, str):
+        phases = [phases]
+    args = _as_list(candidate.get("args"))
+    env = _string_map(candidate.get("env"))
+    auto_use = candidate.get("auto_use") if isinstance(candidate.get("auto_use"), dict) else {}
+    risk = candidate.get("risk") if isinstance(candidate.get("risk"), dict) else {}
+    explicit_result_contract = candidate.get("result_contract") if isinstance(candidate.get("result_contract"), dict) else {}
+    result_contract = _merge_result_contract({}, explicit_result_contract)
+    if kind == "command" and not skill:
+        skill = role or command
+    bounded_use = _is_bounded_orchestrator_candidate(candidate)
+    if bounded_use:
+        phases = [phase for phase in phases if phase != "execution"]
+    return {
+        "role": role,
+        "skill": skill,
+        "kind": kind,
+        "command": command,
+        "args": args,
+        "env": env,
+        "timeout": candidate.get("timeout"),
+        "task_profiles": _candidate_profiles(candidate),
+        "phases": phases,
+        "required": bool(candidate.get("required", False)),
+        "max_calls_per_iteration": candidate.get("max_calls_per_iteration"),
+        "source": candidate.get("source") or source,
+        "unavailable": candidate.get("unavailable", "continue"),
+        "confirm": bool(candidate.get("confirm", False)),
+        "auto_use": auto_use,
+        "activation": candidate.get("activation"),
+        "risk": risk,
+        "result_contract": result_contract,
+        "planning": candidate.get("planning") if isinstance(candidate.get("planning"), dict) else {},
+        "bounded_use": bounded_use,
+        "bounded_purpose_required": bool(candidate.get("bounded_purpose_required", bounded_use)),
+        "install_hint": bool(candidate.get("install_hint", True)),
+        "provider_id": _provider_id(candidate),
+        "registry_version": candidate.get("registry_version", 1),
+        "registry_entry_digest": candidate.get("registry_entry_digest") or registry_entry_digest(candidate),
+        "registry_projection_digest": candidate.get("registry_projection_digest"),
+        "_registry_error": candidate.get("_registry_error"),
+        "_v2_auto_use_present": candidate.get("_v2_auto_use_present"),
+        "_explicit_result_contract_present": "result_contract" in candidate,
+    }
+
+
+def _candidate_source_rank(candidate: dict) -> int:
+    source = str(candidate.get("source") or "")
+    if source.startswith("registry:"):
+        return 0
+    if source.startswith("project:"):
+        return 1
+    if source.startswith("user:"):
+        return 2
+    if source.startswith("skill-manifest:"):
+        return 3
+    if source.startswith("preset:"):
+        return 4
+    return 5
+
+
+def _default_consent_file() -> Path:
+    return Path.home() / ".config" / "mission" / "provider-consent.json"
+
+
+def _load_provider_consent(path_text: str | None) -> set[str]:
+    path = Path(path_text).expanduser() if path_text else _default_consent_file()
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    providers = data.get("providers", {})
+    if isinstance(providers, dict):
+        return {str(k) for k in providers}
+    if isinstance(providers, list):
+        return {str(v) for v in providers}
+    return set()
+
+
+def rank_specialist_candidates(task_profile: dict, registry_candidates: list[dict],
+                               installed: dict[str, dict], first_use: set[str] | None = None,
+                               complexity: str | None = None, consented: set[str] | None = None,
+                               user_specified: list[str] | None = None,
+                               mission_context: dict | None = None) -> tuple[list[dict], list[dict]]:
+    first_use = first_use or set()
+    consented = consented or set()
+    profiles = [task_profile.get("primary"), *(task_profile.get("secondary") or [])]
+    ranked = []
+    ineligible = []
+    named = set(user_specified or [])
+    mission_context = mission_context or {
+        "complexity": complexity,
+        "task_profile": task_profile,
+        "iteration": 1,
+        "previous_iteration_passed": None,
+    }
+    for raw in _enabled_registry_candidates(registry_candidates):
+        c = _normalize_candidate(raw, raw.get("source", "registry") if isinstance(raw, dict) else "registry")
+        skill = c.get("skill")
+        if not skill:
+            continue
+        overlap = [p for p in c.get("task_profiles", []) if p in profiles]
+        raw_source = "user-specified" if skill in named else "automatic"
+        canonical_source = normalize_selection_source(raw_source)["selection_source"]
+        requested_phase = (
+            "planning"
+            if "complexity" in ((c.get("activation") or {}).get("auto_select_if") or [])
+            else None
+        )
+        blocked_config_class = _classify_non_portable_execution_config(c)
+        if blocked_config_class is not None:
+            eligibility = evaluate_provider_eligibility(
+                c,
+                mission_context,
+                requested_phase=requested_phase,
+                selection_source=raw_source,
+            )
+            ineligible.append({
+                "provider_id": _safe_provider_reference(_provider_id(c)),
+                "source": c["source"],
+                "registry_entry_digest": c["registry_entry_digest"],
+                "selection_source": canonical_source,
+                "selection_source_raw": raw_source,
+                "requested_phase": requested_phase,
+                "reason_code": "non-portable-execution-config",
+                "blocked_config_class": blocked_config_class,
+                "context_digest": eligibility["context_digest"],
+                "activation_digest": eligibility["activation_digest"],
+                "registry_projection_digest": c.get("registry_projection_digest"),
+                **_public_eligibility_context_fields(eligibility, complexity),
+            })
+            continue
+        if c.get("kind") == "command":
+            installed_info = {"available": True} if _command_is_available(c.get("command")) else None
+        else:
+            installed_info = installed.get(skill)
+        c["available"] = bool(installed_info)
+        eligibility = evaluate_provider_eligibility(
+            c,
+            mission_context,
+            requested_phase=requested_phase,
+            selection_source=raw_source,
+        )
+        c.update({
+            "eligibility_reason": eligibility["reason_code"],
+            "matched_conditions": eligibility["matched_conditions"],
+            "context_digest": eligibility["context_digest"],
+            "activation_digest": eligibility["activation_digest"],
+            "normalized_activation": eligibility["normalized_activation"],
+            "eligibility_selection_source": canonical_source,
+        })
+        if not eligibility["eligible"] and eligibility["reason_code"] != "provider-unavailable":
+            ineligible.append({
+                "provider_id": c["provider_id"],
+                "source": c["source"],
+                "registry_entry_digest": c["registry_entry_digest"],
+                "selection_source": canonical_source,
+                "selection_source_raw": raw_source,
+                "requested_phase": requested_phase,
+                "reason_code": eligibility["reason_code"],
+                "context_digest": eligibility["context_digest"],
+                "activation_digest": eligibility["activation_digest"],
+                "registry_projection_digest": c.get("registry_projection_digest"),
+                **_public_eligibility_context_fields(eligibility, complexity),
+            })
+            continue
+        base = 0.45 + (0.25 if task_profile.get("primary") in overlap else 0.1)
+        base += min(0.2, 0.05 * len(overlap))
+        if installed_info:
+            base += 0.1
+        if c.get("required"):
+            base += 0.05
+        provider_id = _provider_id(c)
+        confirmation = resolve_provider_confirmation(c, provider_id, consented, first_use)
+        score = min(0.99, round(base * float(task_profile.get("confidence", 0.5)), 3))
+        ranked.append({
+            **c,
+            "score": score,
+            "installed": bool(installed_info),
+            "available": bool(installed_info),
+            "status": "available" if installed_info else "missing",
+            "first_use": confirmation.first_use,
+            # ``confirm`` is the legacy spelling of first-use confirmation.
+            # The consent-aware ``first_use`` projection above is authoritative.
+            "confirm": False,
+            "_confirmation_decision": confirmation.decision,
+            "reason": (
+                "complexity activation match"
+                if "complexity" in eligibility["matched_conditions"]
+                else f"{', '.join(overlap)} profile match"
+            ),
+        })
+    ranked.sort(key=lambda c: (-c["score"], _candidate_source_rank(c), c["skill"]))
+    return ranked, ineligible
+
+
+def decide_specialists(task_profile: dict, candidates: list[dict],
+                       user_specified: list[str] | None = None) -> dict:
+    if not candidates:
+        return {
+            "policy": "fallback",
+            "action": "continue-core",
+            "reason": "no specialist candidate matched the task profile",
+            "prompted_user": False,
+        }
+    # Issue #100: ミッション本文でユーザーが名指ししたスキルは実質 confirmed-user。
+    # high-risk task profile でも ask-user に倒さず selected として記録する。
+    # 安全弁 (名指しでもバイパスしない条件):
+    # - required specialist が未インストール → 従来フロー (required-missing はブロッカー)
+    # - 名指しに first-use consent が必要な provider が 1 つでも混在 → 全体を従来フローに倒す
+    #   (consent 完了後に recommend を再実行すれば user-specified が効く。risk consent は別次元)
+    named = [s for s in (user_specified or []) if s]
+    if named:
+        required_missing_for_named = [c for c in candidates if c.get("required") and not c.get("installed")]
+        matched = [c for c in candidates if str(c.get("skill") or "") in named and c.get("installed")]
+        if matched and not required_missing_for_named and not any(c.get("first_use") for c in matched):
+            skills = [str(c.get("skill")) for c in matched]
+            return {
+                "policy": "user-specified",
+                "action": "select",
+                "reason": f"user explicitly named specialists in the mission description: {', '.join(skills)}",
+                "prompted_user": False,
+                "user_specified": skills,
+            }
+    top = candidates[0]
+    second = candidates[1] if len(candidates) > 1 else None
+    if task_profile.get("risk") == "high":
+        return {
+            "policy": "confirm",
+            "action": "ask-user",
+            "reason": "high-risk task profile requires specialist plan confirmation",
+            "prompted_user": True,
+        }
+    required_missing = [c for c in candidates if c.get("required") and not c.get("installed")]
+    if required_missing:
+        return {
+            "policy": "required-missing",
+            "action": "ask-user",
+            "reason": f"required specialist is missing: {required_missing[0]['skill']}",
+            "prompted_user": True,
+        }
+    confirmation_decision = top.get("_confirmation_decision")
+    if confirmation_decision:
+        return confirmation_decision
+    if not top.get("installed") and top.get("kind") == "command":
+        return {
+            "policy": "provider-unavailable",
+            "action": "continue-core",
+            "reason": f"top command provider is unavailable: {top['skill']}",
+            "prompted_user": False,
+        }
+    if not top.get("installed"):
+        if not top.get("install_hint", True):
+            return {
+                "policy": "fallback",
+                "action": "continue-core",
+                "reason": f"top preset specialist is not installed: {top['skill']}",
+                "prompted_user": False,
+            }
+        return {
+            "policy": "install-recommended",
+            "action": "recommend-install",
+            "reason": f"top specialist is missing: {top['skill']}",
+            "prompted_user": True,
+        }
+    if (
+        second
+        and top.get("installed")
+        and second.get("installed")
+        and not top.get("required")
+        and not second.get("required")
+        and abs(top["score"] - second["score"]) <= 0.05
+    ):
+        return {
+            "policy": "auto",
+            "action": "select",
+            "reason": f"tie-break: auto-selected {top['skill']} over {second['skill']} (score delta <= 0.05)",
+            "prompted_user": False,
+        }
+    if (
+        "complexity" not in (top.get("matched_conditions") or [])
+        and (task_profile.get("confidence", 0) < 0.5 or top.get("score", 0) < 0.45)
+    ):
+        return {
+            "policy": "fallback",
+            "action": "continue-core",
+            "reason": "task profile confidence is too low for automatic specialist selection",
+            "prompted_user": False,
+        }
+    return {
+        "policy": "auto",
+        "action": "select",
+        "reason": f"top candidate {top['skill']} is installed with score {top['score']}",
+        "prompted_user": False,
+    }
+
+
+def _selection_from_decision(candidates: list[dict], decision: dict) -> tuple[list[dict], list[dict]]:
+    unavailable = [c for c in candidates if not c.get("installed")]
+    if decision.get("policy") == "user-specified":
+        names = set(decision.get("user_specified") or [])
+        selected = [
+            {
+                **c,
+                "status": "selected",
+                **normalize_selection_source("user-specified"),
+            }
+            for c in candidates
+            if str(c.get("skill") or "") in names and c.get("installed")
+        ]
+        return selected, unavailable
+    if decision.get("policy") == "auto" and candidates:
+        return [{
+            **candidates[0],
+            "status": "selected",
+            **normalize_selection_source("automatic"),
+        }], unavailable
+    return [], unavailable
+
+
+def build_phase_plan(
+    candidates: list[dict],
+    complexity: str | None = None,
+    mission_context: dict | None = None,
+) -> list[dict]:
+    """Return a bounded advisory provider plan grouped by mission phase."""
+    if not candidates:
+        return []
+    context = mission_context or {
+        "complexity": complexity,
+        "task_profile": {"primary": "general", "secondary": [], "confidence": 0.0},
+        "iteration": 1,
+        "previous_iteration_passed": None,
+    }
+    max_per_phase = 1 if complexity in {None, "Simple", "Standard"} else 2
+    plan: list[dict] = []
+    seen_skills: set[str] = set()
+    for phase, preferred_roles in PHASE_ROLE_ORDER.items():
+        phase_candidates = []
+        for candidate in candidates:
+            if (
+                not candidate.get("installed")
+                or phase not in (candidate.get("phases") or [])
+                or str(candidate.get("skill") or "") in seen_skills
+            ):
+                continue
+            try:
+                eligibility = evaluate_provider_eligibility(
+                    candidate,
+                    context,
+                    requested_phase=phase,
+                    selection_source=candidate.get(
+                        "eligibility_selection_source", "automatic"
+                    ),
+                )
+            except ValueError:
+                continue
+            if eligibility["eligible"]:
+                phase_candidates.append(candidate)
+        if not phase_candidates:
+            continue
+
+        def _phase_key(candidate: dict) -> tuple[int, float, str]:
+            role = str(candidate.get("role") or candidate.get("skill") or "")
+            try:
+                role_rank = preferred_roles.index(role)
+            except ValueError:
+                role_rank = len(preferred_roles)
+            return (role_rank, -float(candidate.get("score") or 0), str(candidate.get("skill") or ""))
+
+        selected = sorted(phase_candidates, key=_phase_key)[:max_per_phase]
+        for candidate in selected:
+            seen_skills.add(str(candidate.get("skill") or ""))
+        plan.append({
+            "phase": phase,
+            "roles": [c.get("role") or c.get("skill") for c in selected],
+            "providers": [c.get("skill") for c in selected],
+            "max_providers": max_per_phase,
+        })
+    return plan
+
+
+def _reject_specialist_state_context_mismatch(
+    args, *, state_complexity, state_iteration, observed_complexity, observed_iteration
+) -> None:
+    result = {
+        "ok": False,
+        "reason_code": "state-context-mismatch",
+        "state_context": {
+            "complexity": state_complexity,
+            "iteration": state_iteration,
+        },
+        "observed_context": {
+            "complexity": observed_complexity,
+            "iteration": observed_iteration,
+        },
+        "specialists_candidates": [],
+        "specialists_selected": [],
+        "specialists_unavailable": [],
+        "specialists_ineligible": [],
+        "specialist_registry_projection": None,
+        "specialists_decision": None,
+        "specialists_phase_plan": [],
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(
+            "ERROR: mission state changed or disagrees with the requested specialist context",
+            file=sys.stderr,
+        )
+    raise SystemExit(2)
+
+
+def cmd_specialists(args):
+    task = getattr(args, "task", "") or ""
+    files = _split_csv(getattr(args, "files", None))
+    state_context = None
+    try:
+        state_path = resolve_state_file(Path.cwd())
+        if state_path.exists():
+            state_context = read_session_json(state_path)
+            _validate_specialist_public_state(state_context)
+    except (OSError, UnicodeError, json.JSONDecodeError, RuntimeError):
+        state_context = None
+    state_iteration_snapshot = (
+        state_context.get("iteration") if isinstance(state_context, dict) else None
+    )
+    requested_complexity = getattr(args, "complexity", None)
+    record_state = bool(getattr(args, "record_state", False))
+    if record_state and isinstance(state_context, dict):
+        _is_v5_head = state_context.get("schema") == "mission-head/1"
+        if _is_v5_head:
+            # v5 HEAD file does not expose complexity/iteration at the top level.
+            # Accept the caller's value; the repository transaction will verify
+            # against the actual embedded session data.
+            effective_complexity = requested_complexity
+        else:
+            state_complexity = state_context.get("complexity")
+            state_iteration = state_context.get("iteration")
+            if requested_complexity is not None and requested_complexity != state_complexity:
+                _reject_specialist_state_context_mismatch(
+                    args,
+                    state_complexity=state_complexity,
+                    state_iteration=state_iteration,
+                    observed_complexity=requested_complexity,
+                    observed_iteration=state_iteration,
+                )
+            effective_complexity = state_complexity
+    else:
+        effective_complexity = requested_complexity
+    if effective_complexity is None and isinstance(state_context, dict):
+        effective_complexity = state_context.get("complexity")
+    iteration = state_context.get("iteration", 1) if isinstance(state_context, dict) else 1
+    installed = _discover_installed_skills(args)
+    registry_candidates, registry_ineligible, registry_projection = _discover_specialist_registry_candidates(args)
+    task_profile = classify_task_profile(task, files)
+    mission_context = {
+        "complexity": effective_complexity,
+        "task_profile": task_profile,
+        "iteration": iteration if type(iteration) is int and iteration >= 1 else 1,
+        "previous_iteration_passed": (
+            bool(state_context.get("passes"))
+            if isinstance(state_context, dict) and type(iteration) is int and iteration >= 2
+            else None
+        ),
+    }
+    candidates, eligibility_ineligible = rank_specialist_candidates(
+        task_profile,
+        registry_candidates,
+        installed,
+        set(_split_csv(getattr(args, "first_use", None))),
+        effective_complexity,
+        _load_provider_consent(getattr(args, "consent_file", None)),
+        _split_csv(getattr(args, "user_specified", None)),
+        mission_context,
+    )
+    decision = decide_specialists(task_profile, candidates,
+                                  _split_csv(getattr(args, "user_specified", None)))
+    selected, unavailable = _selection_from_decision(candidates, decision)
+    decision, candidates, selected, unavailable = _finalize_specialist_selection_checkpoint(
+        decision, candidates, selected, unavailable
+    )
+    phase_plan = build_phase_plan(candidates, effective_complexity, mission_context)
+    public_candidates = _public_specialist_records(candidates)
+    public_selected = _public_specialist_records(selected)
+    public_unavailable = _public_specialist_records(unavailable)
+    public_ineligible = _public_specialist_diagnostics(
+        [*registry_ineligible, *eligibility_ineligible]
+    )
+    result = {
+        "ok": True,
+        "task_profile": task_profile,
+        "installed_skills": sorted(
+            {_safe_provider_reference(identity) for identity in installed}
+        ),
+        "specialists_candidates": public_candidates,
+        "specialists_selected": public_selected,
+        "specialists_unavailable": public_unavailable,
+        "specialists_ineligible": public_ineligible,
+        "specialist_registry_projection": registry_projection,
+        "specialists_decision": decision,
+        "specialists_phase_plan": phase_plan,
+    }
+    _validate_specialist_public_state(result)
+
+    if record_state:
+        cwd = Path.cwd()
+        sf = resolve_state_file(cwd)
+        if not sf.exists():
+            print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+            sys.exit(1)
+        session_id = sf.stem
+        _command_name_recommend = "specialists-recommend"
+        _command_arguments_recommend = {
+            "task": getattr(args, "task", None) or "",
+            "phase": getattr(args, "phase", None) or "",
+            "complexity": str(effective_complexity),
+        }
+        try:
+            _target_bytes_recommend = sf.read_bytes()
+            _inspected_recommend = inspect_repository_bytes(_target_bytes_recommend, expected_session_id=session_id)
+            _target_digest_recommend = "sha256:" + hashlib.sha256(_target_bytes_recommend).hexdigest()
+            _caller_op_recommend, _op_args_recommend = _compatibility_operation_arguments(
+                _command_arguments_recommend, target_digest=_target_digest_recommend,
+                require_caller=_inspected_recommend.format is RepositoryFormat.V5,
+            )
+            _op_id_recommend, _op_cmd_recommend = _canonical_compatibility_operation(
+                session_id, _command_name_recommend, _op_args_recommend,
+                caller_operation_id=_caller_op_recommend,
+            )
+        except (OSError, RepositorySelectionError, ValueError) as _err_recommend:
+            print(f"ERROR: {_err_recommend}", file=sys.stderr)
+            sys.exit(2)
+        _repo_recommend = _legacy_lifecycle_repository(
+            cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+            operation_id=_op_id_recommend, operation_command=_op_cmd_recommend,
+            operation_command_type=_command_name_recommend,
+        )
+        recommend_at = iso_now()
+        recommendation_context = {}
+
+        def prepare_recommendation(data):
+            _validate_specialist_public_state(data)
+            # A v5 HEAD does not expose these values. Bind the command to the
+            # repository-loaded projection while retaining the caller snapshot
+            # when one was observable before admission.
+            expected_iteration = (
+                state_iteration_snapshot
+                if state_iteration_snapshot is not None
+                else data.get("iteration")
+            )
+            expected_complexity = (
+                effective_complexity
+                if effective_complexity is not None
+                else data.get("complexity")
+            )
+            recommendation_context.update(
+                {
+                    "state_complexity": data.get("complexity"),
+                    "state_iteration": data.get("iteration"),
+                    "expected_complexity": expected_complexity,
+                    "expected_iteration": expected_iteration,
+                }
+            )
+            return prepare_specialist_recommendation(
+                data,
+                at=recommend_at,
+                expected_complexity=expected_complexity,
+                expected_iteration=expected_iteration,
+                result=result,
+            )
+
+        try:
+            # FencedCommitError passes through to main() (#747 item 6), whose
+            # _reject_fenced_lease_for_cli classifies the code.
+            _prepared_recommend, _execution_recommend = run_transition_effects(
+                _repo_recommend,
+                prepare_recommendation,
+                passthrough=(FencedCommitError,),
+                rejected=(OSError, PlanningFailure, ValueError),
+            )
+        except TransitionRejected as exc:
+            print(f"ERROR: specialist recommendation rejected: {exc}", file=sys.stderr)
+            sys.exit(2)
+        _recommend_decision = _execution_recommend.decision
+        if _recommend_decision is not None and not _recommend_decision.accepted:
+            _recommend_rejection = _recommend_decision.rejection
+            _recommend_reason = (
+                _recommend_rejection.code
+                if _recommend_rejection is not None
+                else "specialist-recommendation-rejected"
+            )
+            if _recommend_reason == "provider-invocation-active":
+                print(
+                    "ERROR: provider-invocation-active: specialists-recommend "
+                    "is fenced until the active invocation becomes terminal",
+                    file=sys.stderr,
+                )
+                _active_error = CommandOutcomeExit(2, "expected-gate")
+                _active_error.provider_reason_code = _recommend_reason
+                raise _active_error
+            if _recommend_reason == "specialist-recommendation-context-mismatch":
+                _reject_specialist_state_context_mismatch(
+                    args,
+                    state_complexity=recommendation_context.get(
+                        "state_complexity"
+                    ),
+                    state_iteration=recommendation_context.get(
+                        "state_iteration"
+                    ),
+                    observed_complexity=recommendation_context.get(
+                        "expected_complexity"
+                    ),
+                    observed_iteration=recommendation_context.get(
+                        "expected_iteration"
+                    ),
+                )
+            print(
+                f"ERROR: specialist recommendation rejected: {_recommend_reason}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(f"profile={task_profile['primary']} confidence={task_profile['confidence']} risk={task_profile['risk']}")
+        print(f"decision={decision['policy']} action={decision['action']} reason={decision['reason']}")
+        for idx, c in enumerate(candidates[:5], 1):
+            print(f"{idx}. {c['skill']} score={c['score']} installed={c['installed']} source={c['source']}")
+
+
+def cmd_specialists_consent(args):
+    try:
+        default_path = _default_consent_file()
+        resolved = (
+            Path(args.consent_file) if args.consent_file else default_path
+        ).expanduser().resolve(strict=False)
+        provider, _validated_parts = validate_provider_consent_request(
+            ProviderConsentRequest(
+                provider=args.provider,
+                resolved_path=ResolvedProviderConsentPathObservation(
+                    parts=tuple(resolved.parts)
+                ),
+            )
+        )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    path = resolved
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    providers = data.setdefault("providers", {})
+    providers[provider] = {"granted_at": iso_now()}
+    atomic_write_json(path, data)
+    result = {"ok": True, "provider": provider, "consent_file": str(path)}
+    print(json.dumps(result, indent=2 if getattr(args, "json", False) else None, ensure_ascii=False))
+
+
+def cmd_specialists_decline(args):
+    try:
+        result = decline_specialist_selection(
+            SpecialistDeclineRequest(
+                selection_id=args.selection_id,
+                reason=args.reason,
+            ),
+            SpecialistDeclineServices(
+                cwd=Path.cwd,
+                resolve_state_file=resolve_state_file,
+                read_bytes=Path.read_bytes,
+                inspect_repository_bytes=inspect_repository_bytes,
+                sha256=hashlib.sha256,
+                compatibility_operation_arguments=_compatibility_operation_arguments,
+                canonical_compatibility_operation=_canonical_compatibility_operation,
+                repository_factory=_legacy_lifecycle_repository,
+                repository_format_v5=RepositoryFormat.V5,
+                clock=iso_now,
+            ),
+        )
+    except SpecialistSelectionFailure as error:
+        sys.stderr.write(f"ERROR: {error.code}\n")
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def cmd_specialists_accounting(args):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    data = read_session_json(sf)
+    _validate_specialist_public_state(data)
+    report = {
+        "ok": True,
+        "session_id": data.get("session_id") or sf.stem,
+        "mission_id": data.get("mission_id") or "",
+        **candidate_accounting_report(data),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+    if not report["unaccounted_candidates"]:
+        print("specialist accounting: complete")
+        return
+    print(f"specialist accounting: {report['priority']} unaccounted candidates")
+    for candidate in report["unaccounted_candidates"]:
+        required = "required" if candidate["requires_accounting"] else "optional"
+        print(f"- {candidate['skill']} ({required}): {candidate.get('reason') or 'no reason recorded'}")
+    print("Record an explicit used/skipped/unavailable/failed invocation before completion when required.")
+
+
+def _specialist_kind_for(data: dict, skill: str | None, invocation: dict | None = None) -> str:
+    provider = _provider_for_skill(data, skill)
+    if provider and provider.get("kind"):
+        return str(provider.get("kind"))
+    if invocation and invocation.get("provider_kind"):
+        return str(invocation.get("provider_kind"))
+    if invocation and invocation.get("mode") == "command-provider":
+        return "command"
+    return "skill"
+
+
+def _specialist_source_for(data: dict, skill: str | None) -> str:
+    provider = _provider_for_skill(data, skill)
+    return str(provider.get("source") or "") if provider else ""
+
+
+def _summary_item(data: dict, invocation: dict) -> dict:
+    skill = str(invocation.get("skill") or "")
+    return {
+        "skill": skill,
+        "role": invocation.get("role") or "",
+        "kind": _specialist_kind_for(data, skill, invocation),
+        "source": _specialist_source_for(data, skill),
+        "mode": invocation.get("mode") or "",
+        "status": invocation.get("status") or "",
+        "selection_source": invocation.get("selection_source") or "",
+        "bounded_purpose": invocation.get("bounded_purpose") or "",
+        "evidence_path": invocation.get("evidence_path") or "",
+    }
+
+
+def specialist_usage_summary(data: dict) -> dict:
+    selected = [
+        {
+            "skill": item.get("skill") or "",
+            "role": item.get("role") or "",
+            "kind": item.get("kind") or _specialist_kind_for(data, item.get("skill")),
+            "source": item.get("source") or _specialist_source_for(data, item.get("skill")),
+            "selection_source": item.get("selection_source") or "",
+        }
+        for item in data.get("specialists_selected") or []
+        if isinstance(item, dict) and item.get("skill")
+    ]
+    selected_skills = {str(item["skill"]) for item in selected}
+    used: list[dict] = []
+    degraded: list[dict] = []
+    unselected_manual: list[dict] = []
+    for invocation in data.get("specialist_invocations") or []:
+        if not isinstance(invocation, dict) or not invocation.get("skill"):
+            continue
+        item = _summary_item(data, invocation)
+        status = str(invocation.get("status") or "")
+        if status in APPLIED_SPECIALIST_INVOCATION_STATUSES:
+            used.append(item)
+            if item["skill"] not in selected_skills:
+                unselected_manual.append(item)
+        elif status in SPECIALIST_INVOCATION_REASON_REQUIRED_STATUSES:
+            degraded.append(item)
+    return {
+        "selected": selected,
+        "used": used,
+        "degraded": degraded,
+        "unselected_manual": unselected_manual,
+    }
+
+
+def _format_summary_items(items: list[dict]) -> str:
+    if not items:
+        return "none"
+    parts = []
+    for item in items:
+        meta = [item.get("kind") or "skill"]
+        if item.get("source"):
+            meta.append(str(item["source"]))
+        detail = f"{item['skill']}[{' '.join(meta)}"
+        if item.get("mode"):
+            detail += f" {item['mode']}:{item.get('status') or ''}"
+        detail += "]"
+        parts.append(detail)
+    return ", ".join(parts)
+
+
+def cmd_specialists_summary(args):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    data = read_session_json(sf)
+    _validate_specialist_public_state(data)
+    summary = specialist_usage_summary(data)
+    result = {
+        "ok": True,
+        "session_id": data.get("session_id") or sf.stem,
+        "mission_id": data.get("mission_id") or "",
+        **summary,
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    print(
+        "selected: {selected} / used: {used} / degraded: {degraded} / unselected-manual: {unselected}".format(
+            selected=_format_summary_items(summary["selected"]),
+            used=_format_summary_items(summary["used"]),
+            degraded=_format_summary_items(summary["degraded"]),
+            unselected=_format_summary_items(summary["unselected_manual"]),
+        )
+    )
+
+
+MAX_SPECIALIST_EVIDENCE_BYTES = 1024 * 1024
+
+
+class SpecialistEvidenceInputError(ValueError):
+    """An evidence input cannot be snapshotted without a disclosure or race."""
+
+    def __init__(self, reason_code: str):
+        self.reason_code = reason_code
+        self.field_path = "/specialist_invocations/pending/evidence_output"
+        super().__init__(reason_code)
+
+
+def _evidence_error(reason_code: str) -> None:
+    raise SpecialistEvidenceInputError(reason_code)
+
+
+def _read_specialist_evidence_input(path: Path) -> str:
+    """Read one bounded, non-symlink regular-file snapshot from a single FD."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            _evidence_error("specialist-evidence-symlink")
+        _evidence_error("specialist-evidence-unreadable")
+    try:
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                _evidence_error("specialist-evidence-non-regular")
+            if before.st_size < 0 or before.st_size > MAX_SPECIALIST_EVIDENCE_BYTES:
+                _evidence_error("specialist-evidence-too-large")
+            chunks = []
+            remaining = MAX_SPECIALIST_EVIDENCE_BYTES + 1
+            while remaining:
+                chunk = os.read(fd, min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            after = os.fstat(fd)
+        except SpecialistEvidenceInputError:
+            raise
+        except OSError:
+            _evidence_error("specialist-evidence-unreadable")
+    finally:
+        os.close(fd)
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    after_identity = (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    if (
+        len(raw) > MAX_SPECIALIST_EVIDENCE_BYTES
+        or len(raw) != after.st_size
+        or before_identity != after_identity
+    ):
+        _evidence_error("specialist-evidence-changed")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        _evidence_error("specialist-evidence-invalid-encoding")
+    redacted = _redact_provider_output(text)
+    if contains_local_locator(redacted):
+        _evidence_error("specialist-evidence-unsafe-content")
+    return redacted
+
+
+def _planned_specialist_archive_path(
+    cwd: Path, iteration: int, data: dict, entry: dict
+) -> Path:
+    archive_dir = state_dir(cwd) / "archive"
+    gid = (data.get("mission_id") or "unknown")[:8]
+    invocation_id = entry.get("invocation_id")
+    if not isinstance(invocation_id, str) or not invocation_id.strip():
+        raise SpecialistLifecycleError("invocation_id is required for specialist evidence archiving")
+    skill_slug = _slug_for_filename(entry.get("skill") or "unknown")
+    return archive_dir / f"iter-{iteration}-{gid}-{invocation_id}-specialist-{skill_slug}.md"
+
+
+def _specialist_archive_document(text: str, iteration: int, data: dict, entry: dict) -> str:
+    return (
+        f"<!-- mission-specialist-meta: session_id={data.get('session_id')} "
+        f"agent={data.get('agent') or 'unknown'} mission_id={data.get('mission_id')} "
+        f"iteration={iteration} phase={entry.get('phase')} role={entry.get('role')} "
+        f"skill={entry.get('skill')} mode={entry.get('mode')} status={entry.get('status')} "
+        f"timestamp={entry['timestamp']} -->\n"
+        f"{text}"
+    )
+
+
+def _stage_specialist_archive(dst: Path, document: str) -> Path:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{dst.name}.", dir=dst.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(document)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return temp_path
+
+
+def _publish_staged_specialist_archive(temp_path: Path, dst: Path) -> Path | None:
+    if dst.exists() or dst.is_symlink():
+        raise FileExistsError(f"specialist evidence already exists at {dst}")
+    os.replace(temp_path, dst)
+    return None
+
+
+def _rollback_specialist_archive(
+    temp_path: Path | None, dst: Path | None, previous: Path | None, published: bool
+) -> None:
+    if temp_path is not None:
+        temp_path.unlink(missing_ok=True)
+    if published and dst is not None:
+        dst.unlink(missing_ok=True)
+    if previous is not None and dst is not None and previous.exists():
+        os.replace(previous, dst)
+
+
+def _commit_specialist_state_with_archive(
+    sf: Path,
+    cwd: Path,
+    data: dict,
+    entry: dict,
+    iteration: int,
+    evidence_text: str | None,
+) -> str | None:
+    """Publish validated evidence and state together, restoring the archive on failure."""
+    dst = (
+        _planned_specialist_archive_path(cwd, iteration, data, entry)
+        if evidence_text is not None
+        else None
+    )
+    if evidence_text is not None:
+        document = _specialist_archive_document(evidence_text, iteration, data, entry)
+        entry["content_digest"] = "sha256:" + hashlib.sha256(
+            document.encode("utf-8")
+        ).hexdigest()
+    _validate_specialist_public_state(data)
+    temp_path = None
+    published = False
+    try:
+        if dst is not None:
+            document = _specialist_archive_document(evidence_text, iteration, data, entry)
+            temp_path = _stage_specialist_archive(dst, document)
+            _validate_specialist_public_state(data)
+            _publish_staged_specialist_archive(temp_path, dst)
+            temp_path = None
+            published = True
+        atomic_write_json(sf, data, before_publish=backup_state)
+    except BaseException:
+        _rollback_specialist_archive(temp_path, dst, None, published)
+        raise
+    return str(dst) if dst is not None else None
+
+
+def _commit_specialist_state_with_save(
+    cwd: Path,
+    data: dict,
+    entry: dict,
+    iteration: int,
+    evidence_text,
+    *,
+    save_state,
+) -> "str | None":
+    """Like _commit_specialist_state_with_archive but uses injectable save_state callable."""
+    dst = (
+        _planned_specialist_archive_path(cwd, iteration, data, entry)
+        if evidence_text is not None
+        else None
+    )
+    if evidence_text is not None:
+        document = _specialist_archive_document(evidence_text, iteration, data, entry)
+        entry["content_digest"] = "sha256:" + hashlib.sha256(
+            document.encode("utf-8")
+        ).hexdigest()
+    _validate_specialist_public_state(data)
+    temp_path = None
+    published = False
+    try:
+        if dst is not None:
+            document = _specialist_archive_document(evidence_text, iteration, data, entry)
+            temp_path = _stage_specialist_archive(dst, document)
+            _validate_specialist_public_state(data)
+            _publish_staged_specialist_archive(temp_path, dst)
+            temp_path = None
+            published = True
+        save_state(data)
+    except BaseException:
+        _rollback_specialist_archive(temp_path, dst, None, published)
+        raise
+    return str(dst) if dst is not None else None
+
+
+def _find_provider(data: dict, provider_id: str) -> dict | None:
+    for provider in [*(data.get("specialists_selected") or []), *(data.get("specialists_candidates") or [])]:
+        if provider_id in {
+            str(provider.get("role") or ""),
+            str(provider.get("skill") or ""),
+            str(provider.get("command") or ""),
+        }:
+            return provider
+    return None
+
+
+# provider が出す credential は二形態ある。`key=value` の形と、CLI が地の文へ
+# そのまま流す裸のトークン ("Using sk-... to authenticate")。後者は key 名を
+# 伴わないため、値の形そのものから判定するしかない。
+#
+# 判定は prefix + 最小長で行う。長さを外すと `sk not a key` のような通常文まで
+# 潰して証跡を壊すため、各 provider が実際に発行する下限に合わせている。
+#
+# 既知の未カバー: prefix を持たない形式は原理的に拾えない。Azure OpenAI の
+# API key (32 桁 hex) が代表例で、通常の hex 文字列と区別できないため、拾おうと
+# すると commit SHA・ダイジェスト・ID を巻き込んで証跡を壊す。prefix なし形式は
+# `key=value` 側のパターンでのみ捕捉される。
+_BARE_CREDENTIAL_RE = re.compile(
+    r"""(?x)
+    (?:
+        \bsk-ant-[A-Za-z0-9_-]{24,}
+      | \bsk-or-v1-[A-Za-z0-9]{32,}
+      | \bsk-proj-[A-Za-z0-9_-]{32,}
+      | \bxai-[A-Za-z0-9]{40,}
+      | \bxox[abposr]-[A-Za-z0-9-]{12,}
+      | \bxapp-[0-9]-[A-Za-z0-9-]{20,}
+      | \bnpm_[A-Za-z0-9]{30,}
+      | \bdckr_pat_[A-Za-z0-9_-]{20,}
+      | \b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}
+      | \bgithub_pat_[A-Za-z0-9_]{50,}
+      | \bglpat-[A-Za-z0-9_-]{20,}
+      | \bAIza[0-9A-Za-z_-]{35,}
+      | \bGOCSPX-[A-Za-z0-9_-]{20,}
+      | \bntn_[A-Za-z0-9]{40,}
+      | \bsecret_[A-Za-z0-9]{40,}
+      | \bsbp_[a-f0-9]{40,}
+      | \b(?:AKIA|ASIA)[0-9A-Z]{16}\b
+      | \b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}
+      | \beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}
+    )
+    """
+)
+
+# PEM は改行を跨ぐので行単位では捕まらない。marker から marker までを丸ごと落とす。
+#
+# END marker は任意にしてある。provider の出力は切り詰められることがあり、その
+# 場合 BEGIN だけが残って本体が続く。対を必須にすると、まさに異常系で鍵が素通り
+# する。END が無ければ本文の終端まで落とす。
+_PEM_BLOCK_RE = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*)",
+    re.DOTALL,
+)
+
+
+def _redact_provider_output(text: str) -> str:
+    patterns = [
+        re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*([^\s]+)"),
+        re.compile(r"(?i)\b(bearer)\s+([A-Za-z0-9._~+/=-]+)"),
+    ]
+    redacted = text
+    for pattern in patterns:
+        redacted = pattern.sub(lambda m: f"{m.group(1)}=[REDACTED]", redacted)
+    redacted = _PEM_BLOCK_RE.sub("[REDACTED]", redacted)
+    redacted = _BARE_CREDENTIAL_RE.sub("[REDACTED]", redacted)
+    return redact_local_locators(redacted)
+
+
+def _selected_specialist_skills(data: dict) -> set[str]:
+    return {
+        str(item.get("skill"))
+        for item in data.get("specialists_selected") or []
+        if isinstance(item, dict) and item.get("skill")
+    }
+
+
+def _confirmed_selection_required(data: dict, skill: str | None, status: str) -> bool:
+    if status not in APPLIED_SPECIALIST_INVOCATION_STATUSES or not skill:
+        return False
+    if skill in _selected_specialist_skills(data):
+        return False
+    decision = data.get("specialists_decision") if isinstance(data.get("specialists_decision"), dict) else {}
+    return decision.get("action") == "ask-user" and decision.get("prompted_user") is True
+
+
+def _provider_for_skill(data: dict, skill: str | None) -> dict | None:
+    if not skill:
+        return None
+    for provider in [*(data.get("specialists_selected") or []), *(data.get("specialists_candidates") or [])]:
+        if isinstance(provider, dict) and str(provider.get("skill") or "") == str(skill):
+            return provider
+    return None
+
+
+def _require_current_provider_application(
+    data: dict,
+    provider: dict | None,
+    *,
+    requested_phase: str,
+    requested_iteration: int,
+    application_kind: str,
+    selection_source: str | None = None,
+    invocation_id: str | None = None,
+    cwd: Path | None = None,
+    registry_args=None,
+) -> dict:
+    """Reject an application before it can mutate state or start a process."""
+    if provider is None:
+        _provider_gate("provider-not-selected")
+    if cwd is not None and isinstance(data.get("specialist_registry_projection"), dict):
+        provider = _require_current_registry_application(
+            data,
+            provider,
+            cwd=cwd,
+            registry_args=registry_args,
+            requested_phase=requested_phase,
+            requested_iteration=requested_iteration,
+            selection_source=selection_source,
+        )
+    verdict = validate_provider_application(
+        provider,
+        data,
+        requested_phase=requested_phase,
+        requested_iteration=requested_iteration,
+        application_kind=application_kind,
+        selection_source=selection_source,
+        invocation_id=invocation_id,
+    )
+    if not verdict["eligible"]:
+        _provider_gate(str(verdict["reason_code"]))
+    current = dict(provider)
+    current["_application_context_digest"] = verdict["application_context_digest"]
+    return current
+
+
+def _registry_identity_path(identity: str, cwd: Path) -> Path | None:
+    if identity == "$PROJECT":
+        return cwd
+    if identity.startswith("$PROJECT/"):
+        return cwd / identity.removeprefix("$PROJECT/")
+    if identity == "$HOME":
+        return Path.home()
+    if identity.startswith("$HOME/"):
+        return Path.home() / identity.removeprefix("$HOME/")
+    return None
+
+
+def _require_current_registry_application(
+    data: dict,
+    provider: dict,
+    *,
+    cwd: Path,
+    registry_args,
+    requested_phase: str,
+    requested_iteration: int,
+    selection_source: str | None,
+) -> dict:
+    """Re-resolve the recorded registry projection from safe current inputs."""
+    recorded = data.get("specialist_registry_projection") or {}
+    inputs = recorded.get("ordered_inputs") or []
+    supplied = _registry_arg_paths(getattr(registry_args, "registry", None))
+    supplied_by_identity = {
+        _portable_registry_identity(path): path for path in supplied
+    }
+    explicit_paths: list[Path] = []
+    for item in inputs:
+        if not isinstance(item, dict) or item.get("kind") != "explicit":
+            continue
+        identity = str(item.get("canonical_identity") or "")
+        path = supplied_by_identity.get(identity) or _registry_identity_path(identity, cwd)
+        if path is None:
+            _provider_gate("explicit-registry-resupply-required")
+        explicit_paths.append(path)
+    if set(supplied_by_identity) - {
+        str(item.get("canonical_identity") or "")
+        for item in inputs if isinstance(item, dict) and item.get("kind") == "explicit"
+    }:
+        _provider_gate("registry-input-mismatch")
+
+    recorded_roots = [
+        _registry_identity_path(str(item.get("canonical_identity") or ""), cwd)
+        for item in inputs
+        if isinstance(item, dict) and item.get("kind") == "skill-root"
+    ]
+    default_roots = {Path.home() / ".codex" / "skills", Path.home() / ".claude" / "skills"}
+    custom_roots = [path for path in recorded_roots if path is not None and path not in default_roots]
+    probe = argparse.Namespace(
+        registry=[str(path) for path in explicit_paths],
+        no_default_skill_roots=not any(
+            isinstance(item, dict) and item.get("kind") in {"user", "skill-root"}
+            for item in inputs
+        ),
+        skills_dir=os.pathsep.join(str(path) for path in custom_roots) or None,
+    )
+    current_candidates, _diagnostics, current_projection = _discover_specialist_registry_candidates(probe)
+    if current_projection.get("effective_projection_digest") != recorded.get("effective_projection_digest"):
+        _provider_gate("registry-projection-mismatch")
+    provider_id = str(provider.get("provider_id") or "")
+    skill = str(provider.get("skill") or provider.get("role") or "")
+    matches = [
+        candidate for candidate in current_candidates
+        if _safe_provider_reference(_provider_id(candidate)) == provider_id
+        and str(candidate.get("skill") or candidate.get("role") or "") == skill
+    ]
+    if len(matches) != 1:
+        _provider_gate("provider-not-selected")
+    candidate = matches[0]
+    if candidate.get("registry_entry_digest") != provider.get("registry_entry_digest"):
+        _provider_gate("registry-entry-mismatch")
+    normalized = _normalize_candidate(candidate, str(candidate.get("source") or "registry"))
+    for field in ("selection_id", "eligibility_selection_source", "registry_projection_digest", "context_digest", "activation_digest"):
+        if field in provider:
+            normalized[field] = provider[field]
+    current_iteration = data.get("iteration")
+    eligibility = evaluate_provider_eligibility(
+        normalized,
+        {
+            "complexity": data.get("complexity"),
+            "task_profile": data.get("task_profile") or {},
+            "iteration": current_iteration,
+            "previous_iteration_passed": (
+                bool(data.get("passes")) if isinstance(current_iteration, int) and current_iteration >= 2 else None
+            ),
+        },
+        requested_phase=requested_phase,
+        selection_source=(selection_source or provider.get("eligibility_selection_source") or "automatic"),
+    )
+    if eligibility.get("activation_digest") != provider.get("activation_digest"):
+        _provider_gate("activation-digest-mismatch")
+    if not eligibility.get("eligible"):
+        _provider_gate(str(eligibility.get("reason_code")))
+    return normalized
+
+
+def _is_provider_backed_application(data: dict, skill: str, args, provider: dict | None) -> bool:
+    """Keep core activity records compatible; fail closed for any provider signal."""
+    selected_provider_signal = bool(
+        provider
+        and (
+            provider.get("kind") == "command"
+            or provider.get("registry_projection_digest")
+        )
+    )
+    return bool(
+        selected_provider_signal
+        or getattr(args, "selection_source", None)
+        or getattr(args, "mode", None) == "command-provider"
+        or any(
+            isinstance(item, dict)
+            and str(item.get("skill") or "") == skill
+            and (
+                item.get("mode") == "command-provider"
+                or item.get("provider_kind") == "command"
+                or any(key in item for key in ("provider_id", "registry_entry_digest"))
+            )
+            for item in data.get("specialist_invocations") or []
+        )
+    )
+
+
+ACTIVE_PROVIDER_INVOCATION_STATUSES = frozenset({"reserved", "dispatch-unknown", "running"})
+
+
+def _active_provider_invocations(data: dict, *, exclude: str | None = None) -> list[dict]:
+    return [
+        item for item in data.get("specialist_invocations") or []
+        if isinstance(item, dict)
+        and item.get("status") in ACTIVE_PROVIDER_INVOCATION_STATUSES
+        and item.get("invocation_id") != exclude
+    ]
+
+
+def _reject_active_provider_mutation(data: dict, operation: str, *, exclude: str | None = None) -> None:
+    active = _active_provider_invocations(data, exclude=exclude)
+    if active:
+        print(
+            f"ERROR: provider-invocation-active: {operation} is fenced until "
+            f"{active[0].get('invocation_id')} becomes terminal",
+            file=sys.stderr,
+        )
+        error = CommandOutcomeExit(2, "expected-gate")
+        error.provider_reason_code = "provider-invocation-active"
+        raise error
+
+
+def _replace_provider_invocation(data: dict, entry: dict) -> None:
+    for index, item in enumerate(data.get("specialist_invocations") or []):
+        if isinstance(item, dict) and item.get("invocation_id") == entry.get("invocation_id"):
+            data["specialist_invocations"][index] = entry
+            return
+    raise SpecialistLifecycleError("invocation_id must identify exactly one invocation")
+
+
+def _bounded_purpose_required(data: dict, skill: str | None, phase: str, status: str) -> bool:
+    if status not in APPLIED_SPECIALIST_INVOCATION_STATUSES:
+        return False
+    provider = _provider_for_skill(data, skill)
+    return bool(provider and provider.get("bounded_use") and provider.get("bounded_purpose_required"))
+
+
+def _reject_unbounded_orchestrator_execution(data: dict, skill: str | None, phase: str):
+    provider = _provider_for_skill(data, skill)
+    if provider and provider.get("bounded_use") and phase == "execution":
+        print(
+            f"ERROR: bounded orchestrator specialist cannot be applied in execution phase: {skill}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _add_selected_specialist_metadata(data: dict, entry: dict, selection_source: str,
+                                      now: str, provider: dict | None = None,
+                                      reason: str | None = None) -> dict | None:
+    selected = data.setdefault("specialists_selected", [])
+    skill = str(entry.get("skill") or "")
+    if not skill or skill in _selected_specialist_skills(data):
+        return None
+    provider = provider or _provider_for_skill(data, skill) or {}
+    selected_entry = {
+        "role": entry.get("role") or provider.get("role") or skill,
+        "skill": skill,
+        "kind": provider.get("kind", "skill"),
+        "phases": [entry.get("phase")] if entry.get("phase") else provider.get("phases", []),
+        "required": bool(provider.get("required", False)),
+        "status": "selected",
+        "source": f"{selection_source}:log-invocation",
+        "selection_source": selection_source,
+        "selected_at": now,
+    }
+    selection_id = entry.get("selection_id") or _current_selection_id(data)
+    if selection_id:
+        selected_entry["selection_id"] = selection_id
+    for key in (
+        "source",
+        "command",
+        "args",
+        "env",
+        "timeout",
+        "bounded_use",
+        "bounded_purpose_required",
+        "result_contract",
+    ):
+        if key in provider and key not in selected_entry:
+            selected_entry[key] = provider[key]
+    if reason:
+        selected_entry["reason"] = reason
+    public_entry = _public_specialist_record(selected_entry)
+    selected.append(public_entry)
+    decision = data.get("specialists_decision")
+    if isinstance(decision, dict) and selection_id:
+        decision.update({
+            "action": "select",
+            "decision": "selected",
+            "reason_code": "confirmed-selection" if selection_source == "confirmed-user" else "explicit-selection",
+            "lifecycle_state": "selected",
+            "selection_id": selection_id,
+        })
+        if selection_source == "confirmed-user":
+            decision["confirmation_resolved"] = True
+    return public_entry
+
+
+def _prepare_specialist_invocation_state(
+    data: dict,
+    entry: dict,
+    *,
+    cwd: Path,
+    iteration: int,
+    evidence_planned: bool,
+    selection_source: str | None = None,
+    provider: dict | None = None,
+    selection_reason: str | None = None,
+) -> tuple[dict, dict, dict | None]:
+    """Build and validate the complete public state before any invocation side effect."""
+    prospective = copy.deepcopy(data)
+    pending_entry = copy.deepcopy(entry)
+    validation_probe = copy.deepcopy(prospective)
+    validation_probe.setdefault("specialist_invocations", []).append(
+        copy.deepcopy(pending_entry)
+    )
+    _validate_specialist_public_state(validation_probe)
+    if evidence_planned:
+        planned = _planned_specialist_archive_path(
+            cwd, iteration, prospective, pending_entry
+        )
+        pending_entry["evidence_path"] = _state_relative_path(cwd, planned)
+    selected_entry = None
+    if selection_source:
+        selected_entry = _add_selected_specialist_metadata(
+            prospective,
+            pending_entry,
+            selection_source,
+            pending_entry.get("timestamp") or iso_now(),
+            provider,
+            selection_reason,
+        )
+    prospective.setdefault("specialist_invocations", []).append(pending_entry)
+    _validate_specialist_public_state(prospective)
+    return prospective, pending_entry, selected_entry
+
+
+def _command_provider_packet(data: dict, provider: dict, args) -> str:
+    body = ""
+    if getattr(args, "input_file", None):
+        body = Path(args.input_file).read_text(encoding="utf-8")
+    elif not sys.stdin.isatty():
+        body = sys.stdin.read()
+    packet = {
+        "mission": data.get("mission"),
+        "mission_id": data.get("mission_id"),
+        "correlation": {
+            field: data.get(field)
+            for field in ("host_run_id", "root_run_id", "parent_run_id", "child_run_id", "logical_group_id")
+        },
+        "iteration": args.iteration,
+        "phase": args.phase,
+        "provider": {
+            "role": provider.get("role"),
+            "skill": provider.get("skill"),
+            "kind": provider.get("kind"),
+            "source": provider.get("source"),
+        },
+        "input": body,
+    }
+    return json.dumps(packet, indent=2, ensure_ascii=False)
+
+
+def _publish_preflight_pointer_transaction(packet_path: Path, packet_bytes: bytes, commit_state) -> None:
+    """Publish a private packet only when its pointer state also commits."""
+    published = False
+    try:
+        atomic_write_bytes(packet_path, packet_bytes)
+        published = True
+        commit_state()
+    except BaseException:
+        if published:
+            with contextlib.suppress(OSError):
+                packet_path.unlink()
+        raise
+
+
+def _dispatch_provider_execution(execution_context: object, packet_bytes: bytes, plain_runner, strict_runner):
+    """Route a strict packet exclusively through the host strict runner."""
+    if not isinstance(execution_context, dict):
+        raise ProviderPreflightError("execution-context-invalid")
+    if execution_context.get("isolation") != "strict":
+        if not callable(plain_runner):
+            raise ProviderPreflightError("execution-context-invalid")
+        return plain_runner(packet_bytes)
+    attestation = execution_context.get("isolator")
+    if not isinstance(attestation, dict) or not isinstance(attestation.get("policy_digest"), str):
+        raise ProviderPreflightError("isolator-unavailable")
+    if not callable(strict_runner):
+        raise ProviderPreflightError("isolator-unavailable")
+    return strict_runner(dict(attestation), attestation["policy_digest"], packet_bytes)
+
+
+def _provider_preflight_subject(data: dict, provider: dict, args) -> dict:
+    """Project the exact current command-provider request into #396 inputs."""
+    command = provider.get("command")
+    if not isinstance(command, str) or not _portable_provider_identifier(command):
+        _provider_gate("command-identity-invalid")
+    execution_context = {
+        "isolation": "declared-ambient", "assurance": "stdin-exact-ambient-declared",
+        "cwd": "session-local-empty", "resource_mounts": [],
+        "env_allowlist": sorted(_string_map(provider.get("env")).keys()),
+        "ambient_scopes": ["inherited-env"], "network_destination_policy": "unverified",
+    }
+    isolator_name = getattr(args, "execution_isolator", None)
+    if isolator_name:
+        descriptor = _configured_execution_isolator(Path.cwd(), isolator_name)
+        if descriptor is None:
+            _provider_gate("isolator-unavailable")
+        execution_context = {
+            "isolation": "strict", "assurance": "host-attested-execution-isolator/1",
+            "cwd": "session-local-empty", "resource_mounts": [], "env_allowlist": [],
+            "ambient_scopes": [], "network_destination_policy": "verified",
+            "isolator": descriptor["attestation"],
+        }
+    risk_scopes = (["external-context", "destination-unverified", "inherited-env"]
+                   if execution_context["isolation"] == "declared-ambient" else ["external-context"])
+    return {
+        "session_id": str(data.get("session_id") or resolve_session_id()),
+        "mission_id": str(data.get("mission_id") or ""),
+        "mission": str(data.get("mission") or ""),
+        "correlation": {
+            field: data.get(field)
+            for field in (
+                "host_run_id", "root_run_id", "parent_run_id",
+                "child_run_id", "logical_group_id",
+            )
+        },
+        "provider_id": str(provider.get("provider_id") or provider.get("skill") or ""),
+        "registry_entry_digest": provider.get("registry_entry_digest"),
+        "selection_id": provider.get("selection_id"),
+        "selection_source": args.selection_source or provider.get("eligibility_selection_source") or "automatic",
+        "invocation_id": getattr(args, "invocation_id", None) or new_invocation_id(),
+        "iteration": args.iteration,
+        "phase": args.phase,
+        "destination": {"kind": "external-service", "display_name": str(provider.get("role") or "provider")},
+        "risk_scopes": risk_scopes,
+        "quota_mode": "unknown",
+        "effective_argv": [command, *[str(value) for value in provider.get("args") or []]],
+        "env_keys": sorted(_string_map(provider.get("env")).keys()),
+        "execution_context": execution_context,
+    }
+
+
+def _verified_preflight_packet(
+    cwd: Path, data: dict, provider: dict, args, *, consuming_invocation_id: str | None = None
+) -> tuple[dict, bytes]:
+    """Rebuild #396's exact packet and reject every drift before process reservation."""
+    pointers = data.get("provider_preflights")
+    pointer = pointers.get(args.preflight_id) if isinstance(pointers, dict) else None
+    if not isinstance(pointer, dict):
+        _provider_gate("approval-required")
+    status = pointer.get("status")
+    if status == "consuming" and pointer.get("consuming_invocation_id") == consuming_invocation_id:
+        pass
+    elif status == "consumed":
+        _provider_gate("receipt-replayed")
+    elif status != "approved":
+        _provider_gate("approval-required")
+    # An approved state bit is never a receipt.  Receipt issuance is a host
+    # verifier responsibility; do not let a hand-edited pointer authorize I/O.
+    receipt_ref = pointer.get("receipt")
+    if not isinstance(receipt_ref, dict):
+        _provider_gate("receipt-invalid")
+    if not isinstance(args.input_file, str) or not args.input_file:
+        _provider_gate("preflight-input-required")
+    try:
+        subject = _provider_preflight_subject(data, provider, args)
+        subject["invocation_id"] = pointer.get("invocation_id")
+        stored_context = pointer.get("execution_context")
+        if isinstance(stored_context, dict) and stored_context.get("isolation") == "strict":
+            isolator_name = getattr(args, "execution_isolator", None)
+            if not isolator_name:
+                _provider_gate("isolator-unavailable")
+            try:
+                live_isolator = _configured_execution_isolator(cwd, isolator_name)
+            except ValueError:
+                _provider_gate("isolator-unavailable")
+            if live_isolator is None or live_isolator.get("attestation") != stored_context.get("isolator"):
+                _provider_gate("isolator-drift")
+            subject["execution_context"] = stored_context
+        rebuilt = build_preflight(subject, [safe_input_snapshot(args.input_file, root=cwd)])
+        if (rebuilt["outbound_context_digest"] != pointer.get("outbound_context_digest")
+                or rebuilt["outbound_packet_digest"] != pointer.get("outbound_packet_digest")):
+            _provider_gate("payload-drift")
+        artifact_path = pointer.get("artifact_path")
+        if not isinstance(artifact_path, str) or not artifact_path:
+            _provider_gate("preflight-artifact-invalid")
+        artifact = state_dir(cwd) / artifact_path
+        raw = artifact.read_bytes()
+        if raw != rebuilt["outbound_packet_bytes"]:
+            _provider_gate("payload-drift")
+        receipt_path = receipt_ref.get("artifact_path")
+        receipt_digest = receipt_ref.get("digest")
+        if not isinstance(receipt_path, str) or not isinstance(receipt_digest, str):
+            _provider_gate("receipt-invalid")
+        receipt_bytes = (state_dir(cwd) / receipt_path).read_bytes()
+        if "sha256:" + hashlib.sha256(receipt_bytes).hexdigest() != receipt_digest:
+            _provider_gate("receipt-invalid")
+        receipt = json.loads(receipt_bytes)
+        expected = {
+            "preflight_id": args.preflight_id, "session_id": rebuilt["session_id"],
+            "mission_id": rebuilt["mission_id"], "outbound_context_digest": rebuilt["outbound_context_digest"],
+            "invocation_id": rebuilt["invocation_id"], "outbound_packet_digest": rebuilt["outbound_packet_digest"],
+            "registry_entry_digest": rebuilt["registry_entry_digest"], "selection_id": rebuilt["selection_id"],
+            "selection_source": rebuilt["selection_source"], "iteration": rebuilt["iteration"], "phase": rebuilt["phase"],
+            "risk_scopes": rebuilt["risk_scopes"],
+        }
+        receipt_preflight = {**expected, "risk_scopes": rebuilt["risk_scopes"]}
+        # The verifier registry already pins source/version before receipt
+        # creation.  Re-read it here to reject registry churn before spawn.
+        provenance = receipt.get("approval_provenance") if isinstance(receipt, dict) else {}
+        verifier = provenance.get("verifier_id") if isinstance(provenance, dict) else None
+        descriptor = _configured_approval_entry_point(cwd, verifier) if isinstance(verifier, str) else None
+        if descriptor is None:
+            _provider_gate("verifier-untrusted")
+        validate_provider_receipt(receipt_preflight, receipt, trusted_verifiers={verifier: provenance.get("verifier_version")}, now=iso_now())
+        return pointer, raw
+    except (ProviderPreflightError, ValueError) as error:
+        _provider_gate(str(error))
+
+
+def cmd_verify_provider_approval(args):
+    """Ask only a host-registered verifier to turn evidence into a receipt."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        _provider_gate("state-missing")
+    session_id = sf.stem
+    _command_name_verify = "specialists-verify-approval"
+    _command_arguments_verify = {
+        "preflight_id": str(args.preflight_id),
+        "evidence_ref": str(args.evidence_ref),
+        "approval_verifier": str(args.approval_verifier),
+    }
+    try:
+        _target_bytes_verify = sf.read_bytes()
+        _inspected_verify = inspect_repository_bytes(_target_bytes_verify, expected_session_id=session_id)
+        _target_digest_verify = "sha256:" + hashlib.sha256(_target_bytes_verify).hexdigest()
+        _caller_op_verify, _op_args_verify = _compatibility_operation_arguments(
+            _command_arguments_verify, target_digest=_target_digest_verify,
+            require_caller=_inspected_verify.format is RepositoryFormat.V5,
+        )
+        _op_id_verify, _op_cmd_verify = _canonical_compatibility_operation(
+            session_id, _command_name_verify, _op_args_verify,
+            caller_operation_id=_caller_op_verify,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as _err_verify:
+        print(f"ERROR: {_err_verify}", file=sys.stderr)
+        sys.exit(2)
+    _repo_verify = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+        operation_id=_op_id_verify, operation_command=_op_cmd_verify,
+        operation_command_type=_command_name_verify,
+    )
+    with _repo_verify.transaction():
+        data = _repo_verify.load()
+        if not getattr(_repo_verify, "operation_replayed", False):
+            pointer = (data.get("provider_preflights") or {}).get(args.preflight_id)
+            if not isinstance(pointer, dict) or pointer.get("status") != "awaiting-approval":
+                _provider_gate("preflight-not-awaiting-approval")
+            try:
+                packet_path = state_dir(cwd) / str(pointer["artifact_path"])
+                packet_bytes = packet_path.read_bytes()
+                if "sha256:" + hashlib.sha256(packet_bytes).hexdigest() != pointer["outbound_packet_digest"]:
+                    _provider_gate("preflight-artifact-invalid")
+                packet = json.loads(packet_bytes)
+                request = {
+                    "schema": "mission-provider-approval-request/1", "preflight_id": args.preflight_id,
+                    "session_id": packet["session_id"], "mission_id": packet["mission_id"],
+                    "outbound_context_digest": packet["outbound_context_digest"], "invocation_id": packet["invocation_id"],
+                    "outbound_packet_digest": pointer["outbound_packet_digest"],
+                    "registry_entry_digest": packet["provider"]["registry_entry_digest"],
+                    "selection_id": packet["selection"]["id"], "selection_source": packet["selection"]["source"],
+                    "iteration": packet["iteration"], "phase": packet["phase"], "risk_scopes": packet["risk_scopes"],
+                    "evidence_ref": args.evidence_ref,
+                }
+                descriptor = _configured_approval_entry_point(cwd, args.approval_verifier)
+                if descriptor is None:
+                    _provider_gate("verifier-untrusted")
+                evidence = _run_approval_verifier(descriptor, request, cwd=cwd)
+                if not isinstance(evidence, dict) or evidence.get("schema") != "approval-evidence/1":
+                    _provider_gate("approval-evidence-invalid")
+                if evidence.get("verifier_id") != args.approval_verifier:
+                    _provider_gate("verifier-untrusted")
+                for key, value in request.items():
+                    if key != "schema" and evidence.get(key) != value:
+                        _provider_gate("approval-evidence-binding-mismatch")
+                expires_at = evidence.get("expires_at")
+                nonce = evidence.get("single_use_nonce")
+                if not isinstance(expires_at, str) or not isinstance(nonce, str) or not re.fullmatch(r"[0-9A-Za-z_-]{32,128}", nonce):
+                    _provider_gate("approval-evidence-invalid")
+                receipt = {
+                    "schema": "mission-provider-approval-receipt/1",
+                    **{key: request[key] for key in request if key not in {"schema", "risk_scopes", "evidence_ref"}},
+                    "approved_scopes": request["risk_scopes"], "expires_at": expires_at,
+                    "single_use_nonce": nonce, "approval_provenance": {
+                        "issuer_id": evidence.get("issuer_id"), "verifier_id": args.approval_verifier,
+                        "verifier_version": evidence.get("verifier_version"), "proof_kind": evidence.get("proof_kind"),
+                        "proof_digest": evidence.get("proof_digest"), "actor_kind": evidence.get("actor_kind"),
+                        "actor_id": evidence.get("actor_id"),
+                    },
+                }
+                receipt_bytes = json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                receipt_dir = state_dir(cwd) / "private-receipts"; receipt_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                receipt_file = receipt_dir / f"{args.preflight_id}.json"; atomic_write_bytes(receipt_file, receipt_bytes)
+                pointer["receipt"] = {"artifact_path": str(receipt_file.resolve().relative_to(state_dir(cwd).resolve())),
+                                      "digest": "sha256:" + hashlib.sha256(receipt_bytes).hexdigest()}
+                pointer["status"] = "approved"
+                data["updated_at"] = iso_now()
+                _repo_verify.save(data)
+            except (OSError, KeyError, ValueError, json.JSONDecodeError) as error:
+                # Exception type is bounded and contains no evidence values.
+                print(f"ERROR: provider approval verification failed: {type(error).__name__}", file=sys.stderr)
+                _provider_gate("approval-evidence-invalid")
+    print(json.dumps({"ok": True, "preflight_id": args.preflight_id, "status": "approved"}, ensure_ascii=False))
+
+
+def cmd_prepare_provider_invocation(args):
+    """Create a side-effect-free, private exact-packet preflight pointer."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        _provider_gate("state-missing")
+    session_id = sf.stem
+    _command_name_prepare = "specialists-prepare-invocation"
+    _command_arguments_prepare = {
+        "provider": str(args.provider),
+        "iteration": int(args.iteration),
+        "phase": str(args.phase),
+    }
+    try:
+        _target_bytes_prepare = sf.read_bytes()
+        _inspected_prepare = inspect_repository_bytes(_target_bytes_prepare, expected_session_id=session_id)
+        _target_digest_prepare = "sha256:" + hashlib.sha256(_target_bytes_prepare).hexdigest()
+        _caller_op_prepare, _op_args_prepare = _compatibility_operation_arguments(
+            _command_arguments_prepare, target_digest=_target_digest_prepare,
+            require_caller=_inspected_prepare.format is RepositoryFormat.V5,
+        )
+        _op_id_prepare, _op_cmd_prepare = _canonical_compatibility_operation(
+            session_id, _command_name_prepare, _op_args_prepare,
+            caller_operation_id=_caller_op_prepare,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as _err_prepare:
+        print(f"ERROR: {_err_prepare}", file=sys.stderr)
+        sys.exit(2)
+    _repo_prepare = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+        operation_id=_op_id_prepare, operation_command=_op_cmd_prepare,
+        operation_command_type=_command_name_prepare,
+    )
+    preflight = None
+    with _repo_prepare.transaction():
+        data = _repo_prepare.load()
+        if getattr(_repo_prepare, "operation_replayed", False):
+            # Reconstruct preflight from state for output
+            preflights = data.get("provider_preflights") or {}
+            # Prefer exact match by operation_id to avoid returning a different
+            # preflight when the same session has multiple prepare operations.
+            _cached_preflight_id = next(
+                (pid for pid, ptr in preflights.items()
+                 if isinstance(ptr, dict) and ptr.get("operation_id") == _op_id_prepare),
+                None,
+            )
+            if _cached_preflight_id is None:
+                # Backwards-compatible fallback for pointers that predate operation_id recording
+                _cached_preflight_id = next(
+                    (pid for pid, ptr in preflights.items()
+                     if isinstance(ptr, dict) and ptr.get("status") in {"awaiting-approval", "approved", "consuming", "consumed"}
+                     and ptr.get("invocation_id", "").startswith("inv_")),
+                    None,
+                )
+            if _cached_preflight_id:
+                _ptr = preflights[_cached_preflight_id]
+                preflight = {
+                    "preflight_id": _cached_preflight_id,
+                    "invocation_id": _ptr.get("invocation_id"),
+                    "outbound_packet_digest": _ptr.get("outbound_packet_digest"),
+                    "outbound_context_digest": _ptr.get("outbound_context_digest"),
+                    "status": _ptr.get("status"),
+                }
+        else:
+            _validate_specialist_public_state(data)
+            provider = _require_current_provider_application(
+                data, _find_provider(data, args.provider), requested_phase=args.phase,
+                requested_iteration=args.iteration, application_kind="preflight",
+                selection_source=args.selection_source, cwd=cwd, registry_args=args,
+            )
+            try:
+                snapshot = safe_input_snapshot(args.input_file, root=cwd)
+                preflight = build_preflight(_provider_preflight_subject(data, provider, args), [snapshot])
+            except ProviderPreflightError as error:
+                _provider_gate(str(error))
+            except ValueError:
+                _provider_gate("isolator-unavailable")
+            private_dir = state_dir(cwd) / "private-preflights"
+            private_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            artifact = private_dir / f"{preflight['preflight_id']}.json"
+            pointer = {
+                "artifact_path": str(artifact.resolve().relative_to(state_dir(cwd).resolve())),
+                "outbound_packet_digest": preflight["outbound_packet_digest"],
+                "outbound_context_digest": preflight["outbound_context_digest"],
+                "invocation_id": preflight["invocation_id"], "status": "awaiting-approval",
+                "execution_context": preflight["outbound_packet"]["execution_context"],
+                "operation_id": _op_id_prepare,
+            }
+            data.setdefault("provider_preflights", {})[preflight["preflight_id"]] = pointer
+            data["updated_at"] = iso_now()
+            def _commit_pointer_state_repo(saved_data=data, repo=_repo_prepare):
+                repo.save(saved_data)
+            _publish_preflight_pointer_transaction(artifact, preflight["outbound_packet_bytes"], _commit_pointer_state_repo)
+    if preflight is not None:
+        public = {key: value for key, value in preflight.items() if key not in {"outbound_packet_bytes"}}
+        print(json.dumps(public, indent=2 if args.json else None, ensure_ascii=False))
+
+
+def cmd_invoke_command_provider(args):
+    request = CommandProviderRequest(
+        provider_id=args.provider,
+        iteration=args.iteration,
+        phase=args.phase,
+        specialists_cmd=getattr(args, "specialists_cmd", None),
+        preflight_id=getattr(args, "preflight_id", None),
+        selection_source=getattr(args, "selection_source", None),
+        timeout_override=getattr(args, "timeout", None),
+        input_file=getattr(args, "input_file", None),
+        execution_isolator=getattr(args, "execution_isolator", None),
+        registry=getattr(args, "registry", None),
+        json_output=bool(getattr(args, "json", False)),
+        event_id=getattr(args, "event_id", None),
+        root_event_id=getattr(args, "root_event_id", None),
+        raw_attempt=getattr(args, "attempt", ...),
+        retry_of=getattr(args, "retry_of", None),
+    )
+    workspace = CommandProviderWorkspaceServices(
+        current_directory=Path.cwd,
+        resolve_state_file=resolve_state_file,
+        path_exists=Path.exists,
+        read_bytes=Path.read_bytes,
+        read_text=Path.read_text,
+        read_session_json=read_session_json,
+        inspect_repository_bytes=inspect_repository_bytes,
+        v5_format=RepositoryFormat.V5,
+    )
+    provider_policy = CommandProviderPolicyServices(
+        find_provider=_find_provider,
+        provider_gate=_provider_gate,
+        validate_specialist_public_state=_validate_specialist_public_state,
+        verified_preflight_packet=_verified_preflight_packet,
+        confirmed_selection_required=_confirmed_selection_required,
+        require_current_provider_application=_require_current_provider_application,
+        reject_unbounded_orchestrator_execution=_reject_unbounded_orchestrator_execution,
+        current_selection_id=_current_selection_id,
+        reject_active_provider_mutation=_reject_active_provider_mutation,
+        enforce_session_lease_for_write=_enforce_session_lease_for_write,
+        resolve_session_id=resolve_session_id,
+        invocation_by_id=invocation_by_id,
+        validate_invocation_transition=validate_invocation_transition,
+        specialist_lifecycle_error=SpecialistLifecycleError,
+        applied_statuses=APPLIED_SPECIALIST_INVOCATION_STATUSES,
+    )
+    state_effects = CommandProviderStateEffectsServices(
+        compatibility_operation_arguments=_compatibility_operation_arguments,
+        canonical_compatibility_operation=_canonical_compatibility_operation,
+        repository_factory=_legacy_lifecycle_repository,
+        prepare_specialist_invocation_state=_prepare_specialist_invocation_state,
+        record_activity_event=record_activity_event,
+        replace_provider_invocation=_replace_provider_invocation,
+        command_outcome=_command_outcome,
+        end_activity_segment=end_activity_segment,
+        stamp_metadata=stamp_metadata,
+        add_selected_specialist_metadata=_add_selected_specialist_metadata,
+        append_command_outcome=_append_command_outcome,
+        commit_specialist_state_with_save=_commit_specialist_state_with_save,
+    )
+    execution = CommandProviderExecutionServices(
+        base_environment=os.environ,
+        command_available=_command_is_available,
+        strict_dispatch=_dispatch_provider_execution,
+        configured_execution_isolator=_configured_execution_isolator,
+        strict_backend=_run_strict_provider_backend,
+        Popen=subprocess.Popen,
+        PIPE=subprocess.PIPE,
+        TimeoutExpired=subprocess.TimeoutExpired,
+        redact=_redact_provider_output,
+        value_digest=provider_value_digest,
+        clock=iso_now,
+        json_loads=json.loads,
+        provider_preflight_error=ProviderPreflightError,
+    )
+    try:
+        result = invoke_command_provider(
+            request, workspace, provider_policy, state_effects, execution
+        )
+    except CommandProviderFailure as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(exc.exit_code)
+    print(result.rendered)
+def _process_identity_is_live(entry: dict) -> bool:
+    pid = entry.get("child_pid")
+    if type(pid) is not int or pid < 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+    return True
+
+
+def cmd_reconcile_provider_invocation(args):
+    """Fenced recovery; receipt-less dispatches may only be abandoned."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        raise SystemExit(1)
+    session_id = sf.stem
+    _command_name_reconcile = "specialists-reconcile-invocation"
+    _command_arguments_reconcile = {
+        "invocation_id": str(args.invocation_id),
+        "status": str(args.status),
+        "expected_fencing_epoch": int(args.expected_fencing_epoch),
+    }
+    try:
+        _target_bytes_reconcile = sf.read_bytes()
+        _inspected_reconcile = inspect_repository_bytes(_target_bytes_reconcile, expected_session_id=session_id)
+        _target_digest_reconcile = "sha256:" + hashlib.sha256(_target_bytes_reconcile).hexdigest()
+        _caller_op_reconcile, _op_args_reconcile = _compatibility_operation_arguments(
+            _command_arguments_reconcile, target_digest=_target_digest_reconcile,
+            require_caller=_inspected_reconcile.format is RepositoryFormat.V5,
+        )
+        _op_id_reconcile, _op_cmd_reconcile = _canonical_compatibility_operation(
+            session_id, _command_name_reconcile, _op_args_reconcile,
+            caller_operation_id=_caller_op_reconcile,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as _err_reconcile:
+        print(f"ERROR: {_err_reconcile}", file=sys.stderr)
+        sys.exit(2)
+    _repo_reconcile = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+        operation_id=_op_id_reconcile, operation_command=_op_cmd_reconcile,
+        operation_command_type=_command_name_reconcile,
+    )
+    archived_to = None
+    terminal = None
+    with _repo_reconcile.transaction():
+        data = _repo_reconcile.load()
+        if getattr(_repo_reconcile, "operation_replayed", False):
+            invocations_cached = data.get("specialist_invocations") or []
+            terminal = next(
+                (inv for inv in invocations_cached if inv.get("invocation_id") == args.invocation_id),
+                {"invocation_id": args.invocation_id, "status": args.status},
+            )
+            archived_to = terminal.get("evidence_path", "")
+        else:
+            _validate_specialist_public_state(data)
+            lease_decision = _enforce_session_lease_for_write(sf, data)
+            try:
+                existing = dict(invocation_by_id(data, args.invocation_id))
+            except SpecialistLifecycleError as exc:
+                _provider_gate(str(exc))
+            if existing.get("status") not in {"dispatch-unknown", "running"}:
+                _provider_gate("invocation-not-reconcilable")
+            reservation_epoch = existing.get("fencing_epoch")
+            current_epoch = int(data.get("fencing_epoch") or lease_decision.fencing_epoch)
+            if args.expected_fencing_epoch != reservation_epoch or current_epoch < reservation_epoch:
+                _provider_gate("stale-fencing-epoch")
+            reservation_owner = existing.get("reservation_owner_session_id")
+            current_owner = str(data.get("owner_session_id") or resolve_session_id())
+            if current_epoch == reservation_epoch and current_owner != reservation_owner:
+                _provider_gate("reservation-owner-mismatch")
+            if current_epoch > reservation_epoch and args.status != "abandoned-unknown":
+                _provider_gate("recovered-result-unknown")
+            if existing.get("status") == "dispatch-unknown" and args.status != "abandoned-unknown":
+                _provider_gate("receiptless-reconciliation-must-abandon")
+            if existing.get("status") == "dispatch-unknown":
+                try:
+                    reconciled = reconcile_dispatch_unknown(
+                        [existing],
+                        {
+                            "invocation_id": existing.get("invocation_id"),
+                            "operation_id": existing.get("operation_id"),
+                            "outbound_packet_digest": existing.get("outbound_packet_digest"),
+                            "iteration": existing.get("iteration"),
+                            "fencing_epoch": existing.get("fencing_epoch"),
+                        },
+                        observed_receipt=None,
+                    )
+                except PlanningFailure as exc:
+                    _provider_gate(exc.code)
+                if reconciled["status"] != args.status:
+                    _provider_gate("receiptless-reconciliation-must-abandon")
+            if _process_identity_is_live(existing):
+                _provider_gate("process-still-running")
+            if args.status in {"completed", "failed"} and not existing.get("process_identity_digest"):
+                _provider_gate("process-identity-unknown")
+            try:
+                evidence = _read_specialist_evidence_input(Path(args.evidence))
+            except SpecialistEvidenceInputError as exc:
+                _provider_gate(exc.reason_code)
+            completed_at = iso_now()
+            terminal = {
+                **existing,
+                "status": args.status,
+                "lifecycle_state": "terminal",
+                "transitioned_at": completed_at,
+                "completed_at": completed_at,
+                "result_artifact_digest": provider_value_digest(evidence),
+                "reason_code": (
+                    "reconciled-result" if args.status in {"completed", "failed"}
+                    else "reconciled-outcome-unknown"
+                ),
+            }
+            if args.status == "abandoned-unknown":
+                terminal["reason"] = "operator could not establish a trustworthy child result"
+            validate_invocation_transition(existing, terminal)
+            _replace_provider_invocation(data, terminal)
+            data["updated_at"] = completed_at
+            archived_to = _commit_specialist_state_with_save(
+                cwd, stamp_metadata(data, cwd), terminal, terminal["iteration"], evidence,
+                save_state=_repo_reconcile.save,
+            )
+    print(json.dumps({
+        "ok": True,
+        "invocation_id": args.invocation_id,
+        "status": args.status,
+        "evidence_path": str(archived_to),
+    }, indent=2 if args.json else None, ensure_ascii=False))
+
+
+def _state_relative_path(cwd: Path, path_text: str) -> str:
+    path = Path(path_text)
+    try:
+        rel = path.resolve().relative_to(cwd.resolve())
+        return str(rel)
+    except ValueError:
+        return str(path)
+
+
+WORKTREE_ARCHIVE_SCHEMA = "mission-worktree-archive/1"
+WORKTREE_ARCHIVE_POINTER_SCHEMA = "mission-worktree-current/1"
+
+
+class WorktreeArchiveError(ValueError):
+    """A worktree archive cannot be created without losing evidence integrity."""
+
+
+def _archive_source_file(cwd: Path, reference: str, evidence_kind: str) -> tuple[Path, str]:
+    """Resolve one allowlisted state reference without following symlinks or escaping state."""
+    if not isinstance(reference, str) or not reference.strip():
+        raise WorktreeArchiveError(f"required evidence reference is missing: {evidence_kind}")
+    state_root = Path(os.path.abspath(str(state_dir(cwd))))
+    raw = Path(reference).expanduser()
+    candidate = raw if raw.is_absolute() else cwd / raw
+    candidate = Path(os.path.abspath(str(candidate)))
+    state_root = Path(os.path.abspath(str(state_root)))
+    try:
+        relative = candidate.resolve(strict=False).relative_to(state_root.resolve(strict=False))
+    except ValueError as exc:
+        raise WorktreeArchiveError(
+            f"required evidence is outside .mission-state: {evidence_kind}: {reference}"
+        ) from exc
+
+    current = Path(candidate.anchor or candidate.root)
+    for part in candidate.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise WorktreeArchiveError(f"required evidence must not be a symlink: {evidence_kind}: {reference}")
+
+    current = state_root
+    if current.is_symlink():
+        raise WorktreeArchiveError("source .mission-state must not be a symlink")
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise WorktreeArchiveError(f"required evidence must not be a symlink: {evidence_kind}: {reference}")
+    if not current.exists() or not current.is_file():
+        raise WorktreeArchiveError(f"required evidence file is missing: {evidence_kind}: {reference}")
+    try:
+        current.resolve(strict=True).relative_to(state_root.resolve(strict=True))
+    except (FileNotFoundError, ValueError) as exc:
+        raise WorktreeArchiveError(
+            f"required evidence is outside .mission-state: {evidence_kind}: {reference}"
+        ) from exc
+    return current, (Path(".mission-state") / relative).as_posix()
+
+
+def _worktree_bundle_name(cwd: Path) -> str:
+    slug = _slug_for_filename(cwd.name)[:48]
+    identity = hashlib.sha256(str(cwd.resolve()).encode("utf-8")).hexdigest()[:8]
+    return f"worktree-{slug}-{identity}"
+
+
+def _collect_worktree_archive_specs(
+    cwd: Path,
+    state_file_path: Path,
+    data: dict,
+    authoritative: Optional[AuthoritativeSnapshot] = None,
+) -> list[dict]:
+    """Collect current-session evidence through the archive application use case."""
+    request = WorktreeArchiveSpecsRequest(
+        cwd=cwd,
+        state_file_path=state_file_path,
+        data=data,
+        authoritative=authoritative,
+    )
+    services = WorktreeArchiveSpecsServices(
+        read_authoritative_snapshot=read_authoritative_snapshot,
+        archive_source_file=_archive_source_file,
+        typed_score_bindings=worktree_archive_typed_score_bindings,
+        read_verified_review_input_evidence=read_verified_review_input_evidence,
+        read_verified_content_addressed_evidence=read_verified_content_addressed_evidence,
+        normalized_state_reference=_normalized_state_reference,
+        resolve_repo_artifact_reference=resolve_repo_artifact_reference,
+        tracked_repo_artifact_spec=_tracked_repo_artifact_spec,
+        lineage_references=worktree_archive_lineage_references,
+        path_name=archive_path_name,
+        path_stem=archive_path_stem,
+        path_suffix=archive_path_suffix,
+        path_from_string=Path,
+        sanitize_session_id=_sanitize_sid,
+        slug_for_filename=_slug_for_filename,
+        failure=WorktreeArchiveError,
+    )
+    return collect_worktree_archive_specs(request, services)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_archive_relative_path(value: object, field: str, *, state_reference: bool = False) -> Path:
+    if not isinstance(value, str) or not value or "://" in value:
+        raise WorktreeArchiveError(f"invalid archive manifest {field}")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or path.as_posix() != value:
+        raise WorktreeArchiveError(f"invalid archive manifest {field}: {value}")
+    if state_reference and (not path.parts or path.parts[0] != ".mission-state"):
+        raise WorktreeArchiveError(f"invalid archive manifest {field}: {value}")
+    return path
+
+
+def _normalized_state_reference(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if ".mission-state" not in path.parts:
+        return None
+    index = path.parts.index(".mission-state")
+    return Path(*path.parts[index:]).as_posix()
+
+
+def _git_command_bytes(cwd: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise WorktreeArchiveError("required evidence is outside .mission-state")
+    return result.stdout
+
+
+def _git_command_text(cwd: Path, *args: str) -> str:
+    return _git_command_bytes(cwd, *args).decode("utf-8").strip()
+
+
+def _tracked_repo_artifact_spec(
+    cwd: Path, reference: str, kind: str, iteration: int,
+) -> dict[str, Any]:
+    relative = _safe_archive_relative_path(reference, kind)
+    if not relative:
+        raise WorktreeArchiveError(f"required evidence is outside .mission-state: {kind}: {reference}")
+    tracked = subprocess.run(
+        ["git", "-C", str(cwd), "ls-files", "--error-unmatch", "--", relative.as_posix()],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tracked.returncode != 0:
+        raise WorktreeArchiveError(f"required evidence is outside .mission-state: {kind}: {reference}")
+    head_sha = _git_command_text(cwd, "rev-parse", "HEAD")
+    tree_entry = subprocess.run(
+        ["git", "-C", str(cwd), "ls-tree", "-l", "HEAD", "--", relative.as_posix()],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tree_entry.returncode == 0 and tree_entry.stdout.strip():
+        mode = tree_entry.stdout.split(None, 1)[0]
+        if mode == "120000":
+            raise WorktreeArchiveError(f"repo artifact must not be a symlink: {reference}")
+    try:
+        content = _git_command_bytes(cwd, "show", f"{head_sha}:{relative.as_posix()}")
+    except WorktreeArchiveError as exc:
+        raise WorktreeArchiveError(
+            f"artifact is staged but not yet committed: {reference}; commit before archiving"
+        ) from exc
+    digest = hashlib.sha256(content).hexdigest()
+    return {
+        "evidence_kind": kind,
+        "kind": "repo-artifact",
+        "iteration": iteration,
+        "source_reference": relative.as_posix(),
+        "path": relative.as_posix(),
+        "digest": digest,
+        "head_sha": head_sha,
+    }
+
+
+def _ensure_regular_directory_path(root: Path, relative_parts: tuple[str, ...]) -> Path:
+    current = root
+    for part in relative_parts:
+        current = current / part
+        if current.is_symlink():
+            raise WorktreeArchiveError(f"archive destination must not contain symlinks: {current}")
+        if current.exists() and not current.is_dir():
+            raise WorktreeArchiveError(f"archive destination must be a directory: {current}")
+    return current
+
+
+def _git_checkout_identity(path: Path) -> tuple[Path, Path]:
+    if not path.exists() or not path.is_dir():
+        raise WorktreeArchiveError(
+            f"destination must be an existing checkout in the same git common directory: {path}"
+        )
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if result.returncode != 0 or len(lines) != 2:
+        raise WorktreeArchiveError(
+            f"destination must be an existing checkout in the same git common directory: {path}"
+        )
+    checkout_root = Path(lines[0]).resolve()
+    if checkout_root != path.resolve():
+        raise WorktreeArchiveError(f"archive root must be a git checkout root in the same git common directory: {path}")
+    common = Path(lines[1])
+    if not common.is_absolute():
+        common = path / common
+    return checkout_root, common.resolve()
+
+
+def _validate_archive_git_boundary(source: Path, destination: Path) -> None:
+    source_root, source_common = _git_checkout_identity(source)
+    destination_root, destination_common = _git_checkout_identity(destination)
+    if source_root == destination_root or source_common != destination_common:
+        raise WorktreeArchiveError(
+            "destination must be a different checkout in the same git common directory"
+        )
+
+
+def _build_worktree_archive_staging(staging: Path, data: dict, specs: list[dict], created_at: str) -> dict:
+    evidence: list[dict] = []
+    for spec in specs:
+        if spec.get("kind") == "repo-artifact":
+            evidence.append(
+                {
+                    "session_id": data["session_id"],
+                    "mission_id": data["mission_id"],
+                    "iteration": spec["iteration"],
+                    "evidence_kind": spec["evidence_kind"],
+                    "kind": spec["kind"],
+                    "source_reference": spec["source_reference"],
+                    "path": spec["path"],
+                    "digest": spec["digest"],
+                    "head_sha": spec["head_sha"],
+                }
+            )
+            continue
+        destination = staging / spec["archive_path"]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        verified_content = spec.get("verified_content")
+        if verified_content is not None:
+            source_hash = hashlib.sha256(verified_content).hexdigest()
+            destination.write_bytes(verified_content)
+        else:
+            source_hash = _sha256_file(spec["source"])
+            shutil.copy2(spec["source"], destination)
+        archived_hash = _sha256_file(destination)
+        if archived_hash != source_hash:
+            raise WorktreeArchiveError(f"checksum mismatch after copy: {spec['source_reference']}")
+        evidence.append(
+            {
+                "session_id": data["session_id"],
+                "mission_id": data["mission_id"],
+                "iteration": spec["iteration"],
+                "evidence_kind": spec["evidence_kind"],
+                "source_reference": spec["source_reference"],
+                "archive_path": spec["archive_path"].as_posix(),
+                "sha256": archived_hash,
+                "size": destination.stat().st_size,
+            }
+        )
+    core = {
+        "schema": WORKTREE_ARCHIVE_SCHEMA,
+        "session_id": data["session_id"],
+        "mission_id": data["mission_id"],
+        "iteration": data["iteration"],
+        "evidence": evidence,
+    }
+    content_digest = hashlib.sha256(
+        json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest = {**core, "created_at": created_at, "content_digest": content_digest}
+    atomic_write_json(staging / "manifest.json", manifest)
+    return manifest
+
+
+def _existing_archive_manifest(bundle: Path) -> dict | None:
+    if not bundle.exists():
+        return None
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise WorktreeArchiveError(f"archive destination is not a regular directory: {bundle}")
+    manifest_path = bundle / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise WorktreeArchiveError(f"existing archive manifest is missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise WorktreeArchiveError(f"existing archive manifest is invalid: {manifest_path}") from exc
+    if manifest.get("schema") != WORKTREE_ARCHIVE_SCHEMA:
+        raise WorktreeArchiveError(f"unsupported existing archive manifest schema: {manifest.get('schema')}")
+    evidence = manifest.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        raise WorktreeArchiveError(f"existing archive manifest has no evidence: {manifest_path}")
+    core = {
+        "schema": manifest.get("schema"),
+        "session_id": manifest.get("session_id"),
+        "mission_id": manifest.get("mission_id"),
+        "iteration": manifest.get("iteration"),
+        "evidence": evidence,
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(core, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if manifest.get("content_digest") != expected_digest:
+        raise WorktreeArchiveError(f"existing archive manifest digest mismatch: {manifest_path}")
+    seen_paths: set[str] = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise WorktreeArchiveError(f"existing archive manifest evidence is invalid: {manifest_path}")
+        _safe_archive_relative_path(item.get("source_reference"), "source_reference", state_reference=True)
+        if item.get("kind") == "repo-artifact":
+            if (
+                not isinstance(item.get("path"), str)
+                or not isinstance(item.get("digest"), str)
+                or len(item["digest"]) != 64
+                or not isinstance(item.get("head_sha"), str)
+                or len(item["head_sha"]) not in {40, 64}
+                or item.get("archive_path") is not None
+                or item.get("sha256") is not None
+                or item.get("size") is not None
+            ):
+                raise WorktreeArchiveError(f"existing archive manifest evidence is invalid: {manifest_path}")
+            _safe_archive_relative_path(item.get("path"), "path")
+            continue
+        relative = _safe_archive_relative_path(item.get("archive_path"), "archive_path")
+        if relative.as_posix() in seen_paths:
+            raise WorktreeArchiveError(f"duplicate archive path in existing manifest: {relative}")
+        seen_paths.add(relative.as_posix())
+        archived = bundle / relative
+        current = bundle
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                raise WorktreeArchiveError(f"existing archive evidence must not be a symlink: {relative}")
+        expected_size = item.get("size")
+        expected_hash = item.get("sha256")
+        if (
+            not archived.is_file()
+            or not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+            or not isinstance(expected_hash, str)
+            or len(expected_hash) != 64
+            or archived.stat().st_size != expected_size
+            or _sha256_file(archived) != expected_hash
+        ):
+            raise WorktreeArchiveError(f"existing archive evidence integrity mismatch: {relative}")
+    return manifest
+
+
+def _read_archive_pointer(bundle: Path) -> tuple[str, Path, dict] | None:
+    if not bundle.exists():
+        return None
+    if bundle.is_symlink() or not bundle.is_dir():
+        raise WorktreeArchiveError(f"archive destination is not a regular directory: {bundle}")
+    pointer_path = bundle / "current.json"
+    if not pointer_path.exists() and not pointer_path.is_symlink():
+        return None
+    if pointer_path.is_symlink() or not pointer_path.is_file():
+        raise WorktreeArchiveError(f"archive pointer is not a regular file: {pointer_path}")
+    try:
+        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise WorktreeArchiveError(f"archive pointer is invalid: {pointer_path}") from exc
+    generation = pointer.get("generation") if isinstance(pointer, dict) else None
+    if (
+        not isinstance(pointer, dict)
+        or pointer.get("schema") != WORKTREE_ARCHIVE_POINTER_SCHEMA
+        or not isinstance(generation, str)
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", generation)
+        or generation in {".", ".."}
+    ):
+        raise WorktreeArchiveError(f"archive pointer is invalid: {pointer_path}")
+    generation_root = bundle / "generations" / generation
+    if generation_root.is_symlink() or not generation_root.is_dir():
+        raise WorktreeArchiveError(f"archive generation is missing: {generation_root}")
+    manifest = _existing_archive_manifest(generation_root)
+    if manifest.get("content_digest") != generation:
+        raise WorktreeArchiveError(f"archive generation digest mismatch: {generation_root}")
+    return generation, generation_root, manifest
+
+
+def _atomic_write_archive_pointer(bundle: Path, generation: str) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", generation) or generation in {".", ".."}:
+        raise WorktreeArchiveError(f"invalid archive generation: {generation}")
+    atomic_write_json(
+        bundle / "current.json",
+        {"schema": WORKTREE_ARCHIVE_POINTER_SCHEMA, "generation": generation},
+    )
+
+
+def _publish_archive_generation(staging: Path, bundle: Path, generation: str) -> str:
+    """Publish an immutable generation, then atomically advance the stable pointer."""
+    existing_pointer = _read_archive_pointer(bundle)
+    legacy_exists = bundle.is_dir() and (bundle / "manifest.json").is_file()
+    bundle.mkdir(parents=True, exist_ok=True)
+    generations = _ensure_regular_directory_path(bundle, ("generations",))
+    generations.mkdir(parents=True, exist_ok=True)
+    generation_root = generations / generation
+    if generation_root.exists() or generation_root.is_symlink():
+        if generation_root.is_symlink() or not generation_root.is_dir():
+            raise WorktreeArchiveError(f"archive generation is not a regular directory: {generation_root}")
+        manifest = _existing_archive_manifest(generation_root)
+        if manifest.get("content_digest") != generation:
+            raise WorktreeArchiveError(f"archive generation digest mismatch: {generation_root}")
+        shutil.rmtree(staging)
+    else:
+        os.replace(staging, generation_root)
+
+    if existing_pointer and existing_pointer[0] == generation:
+        return "unchanged"
+    _atomic_write_archive_pointer(bundle, generation)
+    return "updated" if existing_pointer or legacy_exists else "created"
+
+
+def cmd_archive_worktree(args):
+    cwd = Path.cwd().resolve()
+    destination_root = Path(args.destination_root).expanduser().resolve()
+    if destination_root == cwd:
+        print("ERROR: destination root must differ from the source worktree", file=sys.stderr)
+        sys.exit(2)
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        _validate_archive_git_boundary(cwd, destination_root)
+        _ensure_regular_directory_path(destination_root, (".mission-state", "archive"))
+        _ensure_regular_directory_path(cwd, (".mission-state",))
+    except WorktreeArchiveError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    archive_root = state_dir(destination_root) / "archive"
+    bundle = archive_root / _worktree_bundle_name(cwd)
+    staging: Path | None = None
+    try:
+        authoritative, data = _load_authoritative_state(sf)
+        _validate_specialist_public_state(data)
+        if authoritative.loop_active:
+            raise WorktreeArchiveError(
+                "active session cannot be archived; mark pass or halt first"
+            )
+        source_lock = (
+            contextlib.nullcontext()
+            if authoritative.schema_origin.value == "v5"
+            else StateLock(lock_file(cwd))
+        )
+        with StateLock(lock_file(destination_root)):
+            with source_lock:
+                specs = _collect_worktree_archive_specs(
+                    cwd, sf, data, authoritative=authoritative
+                )
+                if args.dry_run:
+                    result = {
+                        "ok": True,
+                        "action": "dry-run",
+                        "bundle_path": str(bundle),
+                        "evidence_count": len(specs),
+                    }
+                    print(json.dumps(result, indent=2 if args.json else None, ensure_ascii=False))
+                    return
+                archive_root.mkdir(parents=True, exist_ok=True)
+                if bundle.is_symlink() or (bundle.exists() and not bundle.is_dir()):
+                    raise WorktreeArchiveError(f"archive destination is not a regular directory: {bundle}")
+                bundle.mkdir(parents=True, exist_ok=True)
+                generations = _ensure_regular_directory_path(bundle, ("generations",))
+                generations.mkdir(parents=True, exist_ok=True)
+                staging = Path(tempfile.mkdtemp(prefix=".tmp-", dir=str(generations)))
+                current = _read_archive_pointer(bundle)
+                existing = (
+                    current[2]
+                    if current
+                    else _existing_archive_manifest(bundle) if (bundle / "manifest.json").is_file() else None
+                )
+                created_at = str(existing.get("created_at")) if existing else iso_now()
+                manifest = _build_worktree_archive_staging(staging, data, specs, created_at)
+                action = _publish_archive_generation(staging, bundle, manifest["content_digest"])
+                staging = None
+        result = {
+            "ok": True,
+            "action": action,
+            "bundle_path": str(bundle),
+            "manifest": manifest,
+        }
+        print(json.dumps(result, indent=2 if args.json else None, ensure_ascii=False))
+    except (WorktreeArchiveError, json.JSONDecodeError, OSError, TimeoutError) as exc:
+        if staging and staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _artifact_dir(cwd: Path, session_id: str) -> Path:
+    return state_dir(cwd) / "artifacts" / _sanitize_sid(session_id)
+
+
+def _artifact_path(cwd: Path, session_id: str) -> Path:
+    return _artifact_dir(cwd, session_id) / "mission-artifact.md"
+
+
+def _resolve_project_output_path(cwd: Path, path_text: str) -> Path:
+    path = Path(path_text).expanduser()
+    if not path.is_absolute():
+        path = cwd / path
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(cwd.resolve())
+    except ValueError:
+        print(f"ERROR: output path must stay inside project root: {path_text}", file=sys.stderr)
+        sys.exit(2)
+    return resolved
+
+
+def _artifact_state(data: dict) -> dict:
+    artifact = data.get("artifact")
+    return artifact if isinstance(artifact, dict) else {}
+
+
+def _artifact_blocks(artifact: dict) -> list[dict]:
+    blocks = artifact.get("blocks")
+    return blocks if isinstance(blocks, list) else []
+
+
+def _require_artifact(data: dict) -> dict:
+    artifact = _artifact_state(data)
+    if not artifact:
+        print("ERROR: artifact is not initialized. Run `mission-state.py artifact init` first.", file=sys.stderr)
+        sys.exit(2)
+    return artifact
+
+
+def _read_artifact_input(args) -> tuple[str, str | None]:
+    has_text = getattr(args, "text", None) is not None
+    has_file = getattr(args, "file", None) is not None
+    if has_text == has_file:
+        print("ERROR: provide exactly one of --text or --file", file=sys.stderr)
+        sys.exit(2)
+    if has_text:
+        return args.text, None
+    if args.file == "-":
+        return sys.stdin.read(), "stdin"
+    src = Path(args.file)
+    if not (src.exists() and src.is_file()):
+        print(f"ERROR: artifact input file not found: {args.file}", file=sys.stderr)
+        sys.exit(2)
+    return src.read_text(encoding="utf-8"), str(src)
+
+
+def _format_artifact_block(block: dict) -> str:
+    content = str(block.get("content") or "").rstrip()
+    source = block.get("source")
+    timestamp = block.get("timestamp")
+    lines = []
+    if timestamp or source:
+        meta = []
+        if timestamp:
+            meta.append(f"timestamp={timestamp}")
+        if source:
+            meta.append(f"source={source}")
+        lines.append(f"<!-- artifact-block: {' '.join(meta)} -->")
+    lines.append(content if content else "_No content recorded._")
+    return "\n".join(lines).rstrip()
+
+
+def _render_artifact_markdown(data: dict, artifact: dict) -> str:
+    title = artifact.get("title") or data.get("mission") or "Mission Artifact"
+    sid = data.get("session_id") or "unknown"
+    mission_id_text = data.get("mission_id") or "unknown"
+    path = artifact.get("path") or f".mission-state/artifacts/{sid}/mission-artifact.md"
+    status = artifact.get("status") or "draft"
+    redaction_status = artifact.get("redaction_status") or "unchecked"
+    blocks = _artifact_blocks(artifact)
+    by_section = {key: [] for key in ARTIFACT_SECTIONS}
+    for block in blocks:
+        section = block.get("section")
+        if section in by_section:
+            by_section[section].append(block)
+
+    lines = [
+        f"# {title}",
+        "",
+        "<!-- mission-artifact: generated-by=mission-state.py artifact render -->",
+        "",
+        "## Metadata",
+        "",
+        f"- session_id: {sid}",
+        f"- mission_id: {mission_id_text}",
+        f"- status: {status}",
+        f"- artifact_path: {path}",
+        f"- redaction_status: {redaction_status}",
+        "",
+    ]
+    if artifact.get("required_for_pass"):
+        lines.extend(["- required_for_pass: true", ""])
+
+    defaults = {
+        "mission": data.get("mission") or "",
+        "plan": "No plan blocks recorded yet.",
+        "execution": "No execution blocks recorded yet.",
+        "evidence": "No evidence blocks recorded yet.",
+        "review": "No review blocks recorded yet.",
+        "score_gate": _score_gate_summary(data),
+        "assumptions": f"See `{data.get('assumptions_path')}`." if data.get("assumptions_path") else "",
+        "follow_ups": "No follow-ups recorded.",
+    }
+    for section, heading in ARTIFACT_SECTIONS.items():
+        lines.extend([f"## {heading}", ""])
+        section_blocks = by_section.get(section) or []
+        if section_blocks:
+            for i, block in enumerate(section_blocks):
+                if i:
+                    lines.append("")
+                lines.append(_format_artifact_block(block))
+        else:
+            lines.append(defaults.get(section) or "_No content recorded._")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _score_gate_summary(data: dict) -> str:
+    history = data.get("score_history") or []
+    scored = [entry for entry in history if _is_valid_composite(entry.get("composite"))]
+    if not scored:
+        return "No score has been recorded yet."
+    latest = scored[-1]
+    return (
+        f"- composite: {latest.get('composite')}\n"
+        f"- min_item: {latest.get('min_item')}\n"
+        f"- threshold: {data.get('threshold', DEFAULT_THRESHOLD)}\n"
+        f"- open_high: {latest.get('open_high', 0)}"
+    )
+
+
+def _artifact_gate_error(data: dict, cwd: Path) -> str | None:
+    artifact = _artifact_state(data)
+    if not artifact.get("required_for_pass"):
+        return None
+    path_text = artifact.get("path")
+    if not path_text:
+        return "artifact is required but no artifact.path is recorded"
+    path = _resolve_project_output_path(cwd, path_text)
+    if not path.exists():
+        return f"artifact is required but file is missing: {path_text}"
+    if artifact.get("status") not in {"rendered", "exported", "publish-prepared", "published"}:
+        return f"artifact is required but status is {artifact.get('status')!r}; run `mission-state.py artifact render`"
+    if not artifact.get("last_rendered_at"):
+        return "artifact is required but last_rendered_at is missing; run `mission-state.py artifact render`"
+    return None
+
+
+def _artifact_profile_coverage(cwd: Path, data: dict) -> dict:
+    states = []
+    for path in _iter_state_files(cwd, include_archive=True):
+        try:
+            candidate = read_session_json(path)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except (OSError, UnicodeError, ValueError, TypeError):
+            continue
+        if isinstance(candidate, dict):
+            states.append(candidate)
+    summary = summarize_artifact_coverage(states)
+    profile = data.get("task_profile")
+    primary = profile.get("primary") if isinstance(profile, dict) else None
+    name = primary.strip() if isinstance(primary, str) and primary.strip() else "unclassified"
+    return (summary.get("by_profile") or {}).get(name) or {
+        "coverage": None,
+        "threshold": summary.get("threshold", 0.95),
+        "gate_active": False,
+    }
+
+
+def _resolve_evidence_output_path(cwd: Path, path_text: str) -> Path:
+    """Resolve parent directories without following the final output entry."""
+    path = Path(path_text).expanduser()
+    if not path.is_absolute():
+        path = cwd / path
+    parent = path.parent.resolve()
+    try:
+        parent.relative_to(cwd.resolve())
+    except ValueError:
+        print(f"ERROR: output path must stay inside project root: {path_text}", file=sys.stderr)
+        sys.exit(2)
+    if not path.name or path.name in {".", ".."}:
+        print("ERROR: output filename is invalid", file=sys.stderr)
+        sys.exit(2)
+    return parent / path.name
+
+
+def _legacy_evidence_repository(cwd: Path, sf: Path, *, stamp: bool) -> LegacyV4Repository:
+    """Bind A3 decisions to the current fenced v4 state transaction."""
+    lease: dict[str, object] = {}
+    aggregate = RecoverableAggregateIndex(
+        state_dir(cwd),
+        session_id=sf.stem,
+        authority_format="legacy-v4",
+        clock=lambda: parse_iso_datetime(iso_now()) or datetime.now(timezone.utc),
+    )
+
+    def read_state() -> dict:
+        data = read_session_json(sf)
+        lease["decision"] = _enforce_session_lease_for_write(sf, data)
+        return data
+
+    def write_state(data: dict) -> None:
+        proposed = stamp_metadata(data, cwd) if stamp else data
+        atomic_write_json(sf, proposed, lease_decision=lease["decision"], before_publish=backup_state)
+
+    return _select_legacy_repository_for_cli(
+        sf.stem,
+        sf,
+        lambda format_guard: LegacyV4Repository(
+            lock=lambda: StateLock(lock_file(cwd)),
+            read_state=read_state,
+            write_state=write_state,
+            backup_state=lambda: None,
+            effect_publisher=_publish_evidence_effects,
+            effect_context=cwd,
+            aggregate_recover=aggregate.recover,
+            aggregate_prepare=aggregate.prepare,
+            aggregate_finalize=aggregate.finalize,
+            format_guard=format_guard,
+        ),
+    )
+
+
+@contextlib.contextmanager
+def _publish_evidence_effects(
+    cwd: Path,
+    effects: tuple[EvidenceEffect, ...],
+    prepared: object = None,
+):
+    """Publish already-bound bytes as one rollback-capable v4 file set."""
+    publication_paths = evidence_publication_paths(prepared, effects)
+    with _PublishedFilesTransaction() as transaction:
+        published = []
+        for effect, publication_path in zip(effects, publication_paths):
+            with open_publication_directory(
+                cwd, publication_path, _resolve_evidence_output_path
+            ) as destination:
+                item = transaction.add(
+                    _publish_output_transaction(
+                        destination.path,
+                        effect.content,
+                        directory_fd=destination.directory_fd,
+                    )
+                )
+            published.append(item)
+        _bind_artifact_publication(cwd, effects, publication_paths, published)
+        yield effects
+
+
+def _bind_artifact_publication(
+    cwd: Path,
+    effects: tuple[EvidenceEffect, ...],
+    publication_paths: tuple[str, ...],
+    published: object,
+) -> None:
+    """Verify published artifact bytes; the legacy name is kept for ratchet history."""
+    verify_published_evidence_effects(
+        cwd,
+        effects,
+        publication_paths,
+        published,
+        capture_artifact_identity,
+        _state_relative_path,
+        _verify_published_file,
+    )
+
+
+def cmd_artifact_init(args):
+    print(run_artifact_init_cli(args, Path.cwd(), _ARTIFACT_CLI_SERVICES))
+
+
+def cmd_artifact_append(args):
+    print(run_artifact_append_cli(args, Path.cwd(), _ARTIFACT_CLI_SERVICES))
+
+
+def cmd_artifact_render(args):
+    print(run_artifact_render_cli(args, Path.cwd(), _ARTIFACT_CLI_SERVICES))
+
+
+def cmd_artifact_export(args):
+    print(run_artifact_export_cli(args, Path.cwd(), _ARTIFACT_CLI_SERVICES))
+
+
+def cmd_artifact_publish(args):
+    print(run_artifact_publish_cli(args, Path.cwd(), _ARTIFACT_CLI_SERVICES))
+
+
+def _progress_archive_path(cwd: Path, data: dict, iteration: int) -> str:
+    gid = progress_mission_segment(data.get("mission_id"))
+    return _state_relative_path(
+        cwd, str(state_dir(cwd) / "archive" / f"iter-{iteration}-{gid}-progress.md")
+    )
+
+
+def cmd_progress_update(args):
+    print(run_progress_update_cli(args, Path.cwd(), _EVIDENCE_CLI_SERVICES))
+
+
+def cmd_progress_get(args):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    _snapshot, data = _load_authoritative_state(sf, legacy_compatibility=True)
+    progress = data.get("progress") or {}
+    if args.json:
+        print(json.dumps({"ok": True, "progress": progress}, indent=2, ensure_ascii=False))
+    elif progress:
+        print(f"progress {progress.get('kind')}: {progress.get('completed')}/{progress.get('total')} remaining={progress.get('remaining')}")
+    else:
+        print("progress: none")
+
+
+def cmd_progress_clear(args):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    try:
+        run_progress_clear(
+            ProgressClearRequest(now=iso_now()),
+            _legacy_lifecycle_repository(cwd, sf, stamp=True, pre_admit_lease=True),
+        )
+    except EvidenceFailure as exc:
+        print(f"ERROR: {exc.code}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps({"ok": True}, indent=2 if args.json else None, ensure_ascii=False))
+
+
+def cmd_log_specialist_invocation(args):
+    """specialist の実呼び出し/inline/skip/unavailable 証跡を append する."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    if not 0 <= args.iteration <= 1_000_000:
+        print("ERROR: --iteration は 0..1000000 で指定してください", file=sys.stderr)
+        sys.exit(2)
+    role = (args.role or "").strip()
+    skill = (args.skill or "").strip()
+    if not role:
+        print("ERROR: --role は空にできません", file=sys.stderr)
+        sys.exit(2)
+    if not skill:
+        print("ERROR: --skill は空にできません", file=sys.stderr)
+        sys.exit(2)
+    reason = (getattr(args, "reason", None) or "").strip()
+    notes = (getattr(args, "notes", None) or "").strip()
+    if args.status in SPECIALIST_INVOCATION_REASON_REQUIRED_STATUSES and not (reason or notes):
+        print(
+            f"ERROR: status={args.status} は --reason か --notes で判断理由を記録してください",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    session_id = sf.stem
+    _command_name_loginv = "specialists-log-invocation"
+    _command_arguments_loginv = {
+        "iteration": int(args.iteration),
+        "phase": str(args.phase),
+        "role": str(role),
+        "skill": str(skill),
+        "mode": str(args.mode),
+    }
+    try:
+        _target_bytes_loginv = sf.read_bytes()
+        _inspected_loginv = inspect_repository_bytes(_target_bytes_loginv, expected_session_id=session_id)
+        _target_digest_loginv = "sha256:" + hashlib.sha256(_target_bytes_loginv).hexdigest()
+        _caller_op_loginv, _op_args_loginv = _compatibility_operation_arguments(
+            _command_arguments_loginv, target_digest=_target_digest_loginv,
+            require_caller=_inspected_loginv.format is RepositoryFormat.V5,
+        )
+        _op_id_loginv, _op_cmd_loginv = _canonical_compatibility_operation(
+            session_id, _command_name_loginv, _op_args_loginv,
+            caller_operation_id=_caller_op_loginv,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as _err_loginv:
+        print(f"ERROR: {_err_loginv}", file=sys.stderr)
+        sys.exit(2)
+    _repo_loginv = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+        operation_id=_op_id_loginv, operation_command=_op_cmd_loginv,
+        operation_command_type=_command_name_loginv,
+    )
+    entry = None
+    selected_entry = None
+    archived_to = None
+    with _repo_loginv.transaction():
+        data = _repo_loginv.load()
+        if getattr(_repo_loginv, "operation_replayed", False):
+            invocations_cached = data.get("specialist_invocations") or []
+            _matched = [inv for inv in invocations_cached if inv.get("skill") == skill and inv.get("phase") == args.phase and inv.get("iteration") == args.iteration]
+            entry = _matched[-1] if _matched else {"invocation_id": "replayed", "skill": skill, "phase": args.phase, "iteration": args.iteration, "mode": args.mode, "status": args.status}
+        else:
+            _validate_specialist_public_state(data)
+            provider = _provider_for_skill(data, skill)
+            if _confirmed_selection_required(data, skill, args.status) and not getattr(args, "selection_source", None):
+                print(
+                    "ERROR: specialists_decision requested user confirmation; pass --selection-source confirmed-user "
+                    "when recording applied specialist evidence after confirmation.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            if args.status in APPLIED_SPECIALIST_INVOCATION_STATUSES and _is_provider_backed_application(
+                data, skill, args, provider
+            ):
+                _require_current_provider_application(
+                    data,
+                    provider,
+                    requested_phase=args.phase,
+                    requested_iteration=args.iteration,
+                    application_kind="result-import",
+                    selection_source=getattr(args, "selection_source", None),
+                    invocation_id=getattr(args, "invocation_id", None),
+                    cwd=cwd,
+                    registry_args=args,
+                )
+            _reject_unbounded_orchestrator_execution(data, skill, args.phase)
+            if _bounded_purpose_required(data, skill, args.phase, args.status) and not getattr(args, "bounded_purpose", None):
+                print(
+                    f"ERROR: bounded orchestrator specialist requires --bounded-purpose for applied evidence: {skill}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            now = iso_now()
+            invocations = data.setdefault("specialist_invocations", [])
+            requested_id = getattr(args, "invocation_id", None)
+            existing_index = None
+            existing_entry = None
+            if requested_id:
+                matches = [(index, item) for index, item in enumerate(invocations)
+                           if isinstance(item, dict) and item.get("invocation_id") == requested_id]
+                if len(matches) != 1:
+                    print("ERROR: --invocation-id must identify exactly one invocation", file=sys.stderr)
+                    sys.exit(2)
+                existing_index, existing_entry = matches[0]
+            entry = {
+                **(existing_entry or {}),
+                "invocation_id": requested_id or new_invocation_id(),
+                "iteration": args.iteration,
+                "phase": args.phase,
+                "role": role,
+                "skill": skill,
+                "mode": args.mode,
+                "status": args.status,
+                "lifecycle_state": invocation_lifecycle_state(args.status),
+                "timestamp": (existing_entry or {}).get("timestamp") or now,
+                "transitioned_at": now,
+            }
+            selection_id = _current_selection_id(data)
+            if selection_id:
+                entry["selection_id"] = selection_id
+            if args.started_at:
+                entry["started_at"] = args.started_at
+            if args.completed_at:
+                entry["completed_at"] = args.completed_at
+            if notes:
+                entry["notes"] = notes
+            if reason:
+                entry["reason"] = reason
+            elif args.status in SPECIALIST_INVOCATION_REASON_REQUIRED_STATUSES and notes:
+                entry["reason"] = notes
+            if getattr(args, "selection_source", None):
+                entry["selection_source"] = args.selection_source
+            if getattr(args, "bounded_purpose", None):
+                entry["bounded_purpose"] = args.bounded_purpose
+
+            try:
+                validate_invocation_record(entry)
+                if existing_entry is not None:
+                    validate_invocation_transition(existing_entry, entry)
+            except SpecialistLifecycleError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                sys.exit(2)
+
+            evidence_src = Path(args.evidence_output) if args.evidence_output else None
+            evidence_planned = evidence_src is not None
+            data = stamp_metadata(data, cwd)
+            data["updated_at"] = now
+            if existing_entry is None:
+                data, entry, selected_entry = _prepare_specialist_invocation_state(
+                    data, entry, cwd=cwd, iteration=args.iteration,
+                    evidence_planned=evidence_planned,
+                )
+            else:
+                selected_entry = None
+                invocations[existing_index] = entry
+                _validate_specialist_public_state(data)
+            evidence_text = None
+            if evidence_planned and evidence_src is not None:
+                evidence_text = _read_specialist_evidence_input(evidence_src)
+            archived_to = _commit_specialist_state_with_save(
+                cwd, data, entry, args.iteration, evidence_text,
+                save_state=_repo_loginv.save,
+            )
+
+    result = {"ok": True, "entry": entry}
+    if selected_entry:
+        result["selected_entry"] = selected_entry
+    if archived_to:
+        result["archived_to"] = entry["evidence_path"]
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(json.dumps(result, ensure_ascii=False))
+
+
+
+def _read_init_peer_state(path: Path) -> dict:
+    """Read a peer across v1-v5, retaining bounded legacy warning fixtures."""
+
+    try:
+        _snapshot, document = _load_authoritative_state(path)
+        return document
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except (OSError, ValueError, FencedCommitError):
+        return _read_legacy_json_file(path)
+
+
+def _initialize_legacy_v4(args, *, write_state, lock_state: bool = True, admission_writer=None, preflight_writer=None, genesis_lock=None, preflight_only=False):
+    request = LegacyV4InitializationRequest(
+        mission=args.mission,
+        goal_dispatch=getattr(args, "goal_dispatch", None),
+        files=getattr(args, "files", None),
+        host_run_id=getattr(args, "host_run_id", None),
+        root_run_id=getattr(args, "root_run_id", None),
+        parent_run_id=getattr(args, "parent_run_id", None),
+        child_run_id=getattr(args, "child_run_id", None),
+        logical_group_id=getattr(args, "logical_group_id", None),
+        review_group_id=getattr(args, "review_group_id", None),
+        review_perspective=getattr(args, "review_perspective", None),
+        base_sha=getattr(args, "base_sha", None),
+        head_sha=getattr(args, "head_sha", None),
+        session_role=getattr(args, "session_role", None),
+        force_mission=getattr(args, "force_mission", False),
+        artifact_applicability=getattr(args, "artifact_applicability", "pending"),
+        max_iter=args.max_iter,
+        budget_minutes=getattr(args, "budget_minutes", None),
+        threshold=args.threshold,
+        issue_ref=getattr(args, "issue_ref", None),
+        complexity=getattr(args, "complexity", None),
+        review_tier=getattr(args, "review_tier", None),
+        new_mission=getattr(args, "new_mission", False),
+        new_mission_assumptions_path=args._new_mission_assumptions_path,
+        lock_state=lock_state,
+        preflight_only=preflight_only,
+    )
+    services = LegacyV4InitializationServices(
+        current_directory=Path.cwd,
+        resolve_goal_dispatch=_resolve_goal_dispatch,
+        ensure_regular_directory_path=_ensure_regular_directory_path,
+        parse_files_arg=_parse_files_arg,
+        clock=iso_now,
+        correlation_id=correlation_id,
+        opaque_token=opaque_token,
+        mission_id=mission_id,
+        new_specialist_selection_checkpoint=_new_specialist_selection_checkpoint,
+        validated_budget_minutes=_validated_budget_minutes,
+        normalize_issue_ref=_normalize_issue_ref,
+        start_phase_default_activity=start_phase_default_activity,
+        resolve_session_id=resolve_session_id,
+        iter_state_files=_iter_state_files,
+        read_init_peer_state=_read_init_peer_state,
+        state_age_since_update_sec=_state_age_since_update_sec,
+        stale_active_seconds=_stale_active_seconds,
+        warn_s3_file_overlap=_warn_s3_file_overlap,
+        derive_review_tier_decision=derive_review_tier_decision,
+        pregate_state_reference=_pregate_state_reference,
+        pregate_verdict_warning=_pregate_verdict_warning,
+        should_route_init_to_goal=should_route_init_to_goal,
+        goal_dispatch_route_fields=_goal_dispatch_route_fields,
+        goal_dispatch_guidance=_goal_dispatch_guidance,
+        stamp_metadata=stamp_metadata,
+        session_dir=session_dir,
+        session_file=session_file,
+        aggregate_file=aggregate_file,
+        guarded_init_state_lock=_guarded_init_state_lock,
+        nullcontext=contextlib.nullcontext,
+        read_legacy_json_file=_read_legacy_json_file,
+        validate_specialist_public_state=_validate_specialist_public_state,
+        atomic_write_bytes=atomic_write_bytes,
+        validated_assumptions_probe_path=_validated_assumptions_probe_path,
+        close_activity_for_resume=close_activity_for_resume,
+        resume_phase_timing=_resume_phase_timing,
+        datetime=datetime,
+        timezone=timezone,
+        move=shutil.move,
+        time=time,
+        atomic_write_text=atomic_write_text,
+        backup_state=backup_state,
+        atomic_write_json=atomic_write_json,
+        permission_preflight=_permission_preflight,
+        write_state=write_state,
+        capacity_writer=atomic_write_json,
+        admission_writer=admission_writer,
+        preflight_writer=preflight_writer,
+        genesis_lock=genesis_lock,
+        exit_init_write_failure=_exit_init_write_failure,
+        exit_init_evidence_write_failure=_exit_init_evidence_write_failure,
+        exit_internal_invariant=_exit_internal_invariant,
+        printer=print,
+        stderr=sys.stderr,
+        system_exit=sys.exit,
+        json_dumps=json.dumps,
+        default_max_iter=DEFAULT_MAX_ITER,
+        complexity_reviewer_count=COMPLEXITY_REVIEWER_COUNT,
+        tier_reviewer_count=TIER_REVIEWER_COUNT,
+        worktree_archive_error=WorktreeArchiveError,
+        activity_timing_error=ActivityTimingError,
+        specialist_public_contract_error=SpecialistPublicContractError,
+        json_decode_error=json.JSONDecodeError,
+        fenced_commit_error=FencedCommitError,
+        permission_halt_rejected=PermissionHaltRejected,
+    )
+    run_initialize_legacy_v4(request, services)
+
+
+def _canonical_init_command(args) -> tuple[object, bytes]:
+    """Return the stable command intent used to identify one init request."""
+    argument_names = (
+        "artifact_applicability",
+        "base_sha",
+        "budget_minutes",
+        "child_run_id",
+        "complexity",
+        "files",
+        "force_mission",
+        "goal_dispatch",
+        "head_sha",
+        "host_run_id",
+        "issue_ref",
+        "logical_group_id",
+        "max_iter",
+        "mission",
+        "parent_run_id",
+        "review_group_id",
+        "review_perspective",
+        "review_tier",
+        "root_run_id",
+        "session_role",
+        "threshold",
+    )
+    document = {
+        "arguments": {name: getattr(args, name, None) for name in argument_names},
+        "schema": "mission-command-intent/1",
+        "type": "init",
+    }
+    source = json.dumps(
+        document,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return _decode_strict_json_object(source), source
+
+
+def _initialize_v5_state(args, path: Path, initial: dict, *, prepare_only=False, preflight_only=False, capacity_base=None):
+    """Commit the v4-shaped bootstrap payload through the v5 genesis API."""
+    session_id = str(initial["session_id"])
+    presented_lease_id = os.environ.get("MISSION_LEASE_ID") or _new_lease_id()
+    now = _lease_now()
+    initial["owner_session_id"] = session_id
+    initial["lease_id"] = presented_lease_id
+    initial["fencing_epoch"] = 1
+    initial["lease_expires_at"] = _lease_expiry(now)
+    initial["last_activity_at"] = iso_now()
+    terminal_head_digest = getattr(
+        args, "_new_mission_expected_head_digest", None
+    )
+    initial = bind_reinitialized_mission_identity(initial, terminal_head_digest)
+    state_bytes = json.dumps(
+        initial,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    command, command_bytes = _canonical_init_command(args)
+    operation_id = initialization_operation_id(
+        session_id, command_bytes, terminal_head_digest
+    )
+    blobs = VerifiedBlobSet(())
+    request = ExecutionRequest(
+        session_id=session_id,
+        lease_owner_session_id=session_id,
+        command=command,
+        blobs=blobs,
+        operation_id=operation_id,
+        intent_digest=compute_intent_digest(
+            session_id=session_id,
+            lease_owner_session_id=session_id,
+            operation_id=operation_id,
+            command=command,
+            blobs=blobs,
+        ),
+        presented_lease_id=presented_lease_id,
+        audit=AuditMetadata("init", ()),
+    )
+    repository = LocalFencedRepository(
+        path.parent.parent,
+        # Freeze genesis admission and payload construction to the same
+        # instant.  Crossing a wall-clock second between them would otherwise
+        # produce a different pending lease expiry and reject the payload.
+        clock=lambda: now,
+        lease_ttl_seconds=_lease_ttl_seconds(),
+    )
+    def after_commit():
+        record_reinitialization_commit(args, terminal_head_digest)
+        decision = LeaseDecision("acquired", presented_lease_id, 1)
+        _PROCESS_LEASE_IDS[str(path.resolve())] = presented_lease_id
+        _emit_lease_carrier(initial, decision)
+    return run_initialize_v5_repository(
+        repository, request, state_bytes, terminal_head_digest,
+        prepare_only=prepare_only, after_commit=after_commit,
+        write_failure=lambda: _exit_init_write_failure(Path.cwd(), path),
+        commit_error=(FencedCommitError, CapacityWriteError), printer=print, stderr=sys.stderr,
+        preflight_only=preflight_only,
+        capacity_preflight=lambda content: repository.preflight_initialization(request,
+            state_bytes=content, base_bytes=capacity_base),
+    )
+
+
+def cmd_init(args):
+    """Create a v5 session by default while retaining existing v1-v4 writers."""
+    cwd = Path.cwd()
+    sf = session_file(cwd, resolve_session_id())
+    if sf.exists():
+        try:
+            source = _read_stable_bytes(sf, limit=4 * 1024 * 1024)
+            inspected = inspect_repository_bytes(
+                source,
+                expected_session_id=sf.stem,
+            )
+        except (OSError, RepositorySelectionError) as error:
+            print(
+                repository_format_error(
+                    error, getattr(args, "new_mission", False)
+                ),
+                file=sys.stderr,
+            )
+            raise SystemExit(2) from error
+        if inspected.format is RepositoryFormat.V5:
+            repository = InitServices(
+                repository_factory=V5MissionReinitializer,
+                repository_arguments=(
+                    cwd,
+                    sf,
+                    _initialize_new_v5_session,
+                    _preflight_new_v5_session,
+                ),
+            )
+        else:
+            repository = LegacyV4InitializerRepository(
+                initialize_state=_initialize_legacy_v4,
+                write_state=atomic_write_json,
+            )
+    else:
+        repository = InitServices(
+            repository_factory=select_new_session_initializer,
+            repository_arguments=(
+                NEW_SESSION_REPOSITORY_FORMAT,
+                RepositoryFormat.LEGACY_V4,
+                LegacyV4InitializerRepository(
+                    initialize_state=_initialize_legacy_v4,
+                    write_state=atomic_write_json,
+                ),
+                _initialize_new_v5_session,
+                cwd,
+            ),
+        )
+    try:
+        run_initialize(
+            repository,
+            InitRequest(
+                arguments=args,
+                new_mission=getattr(args, "new_mission", False),
+            ),
+        )
+    except LifecycleFailure as error:
+        print(f"ERROR: {error.message}", file=sys.stderr)
+        raise SystemExit(2) from error
+
+
+def _initialize_new_v5_session(args, cwd: Path) -> None:
+    """Serialize the complete genesis interval across session IDs."""
+
+    run_initialize_v5_session(args, cwd,
+        state_lock=StateLock, state_root=state_dir(cwd),
+        initialize_legacy=_initialize_legacy_v4, initialize_state=_initialize_v5_state)
+
+
+def _preflight_new_v5_session(args, cwd, base_bytes):
+    run_preflight_v5_session(args, cwd, base_bytes,
+        initialize_legacy=_initialize_legacy_v4, initialize_state=_initialize_v5_state)
+
+
+def cmd_pregate(args):
+    cwd = Path.cwd()
+    if args.pregate_cmd == "record":
+        try:
+            evaluation = load_handoff_payload(args.input)
+            result = record_pregate_cache(cwd, evaluation, issue_ref=args.issue_ref)
+        except (PregateCacheError, EvidenceHandoffError, OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    if args.pregate_cmd == "digest":
+        try:
+            payload = load_handoff_payload(args.input)
+            result = {"subject_digest": subject_digest_pregate_cache(payload)}
+        except (PregateCacheError, EvidenceHandoffError, OSError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    if args.pregate_cmd == "check":
+        try:
+            result = lookup_pregate_cache(cwd, args.issue_ref, args.subject_digest)
+        except Exception:
+            result = {"status": "miss"}
+        output = result if result.get("status") == "hit" else {"status": result.get("status", "miss")}
+        print(json.dumps(output, indent=2 if getattr(args, "json", False) else None, ensure_ascii=False))
+        return
+    raise AssertionError(f"unsupported pregate command: {args.pregate_cmd}")
+
+
+def _resolve_queue_enqueue_shas(cwd: Path, args) -> tuple[str, str]:
+    if not getattr(args, "from_state", False):
+        if args.head_sha is None or args.base_sha is None:
+            raise MergeQueueError("merge queue enqueue requires either --from-state or manual --head-sha/--base-sha")
+        return args.base_sha, args.head_sha
+
+    state_path = resolve_state_file(cwd)
+    if not state_path.exists():
+        raise MergeQueueError(
+            "merge queue --from-state requires a current session state file; use manual --head-sha/--base-sha fallback"
+        )
+    try:
+        state = read_session_json(state_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MergeQueueError(
+            "merge queue --from-state requires a readable JSON session state; use manual --head-sha/--base-sha fallback"
+        ) from exc
+    derived_base_sha, derived_head_sha = derive_queue_revision_scope_shas(state)
+    if args.base_sha is not None and args.base_sha != derived_base_sha:
+        raise MergeQueueError(
+            "merge queue --from-state sha mismatch: --base-sha does not match the latest score_history revision_scope; use manual --head-sha/--base-sha fallback"
+        )
+    if args.head_sha is not None and args.head_sha != derived_head_sha:
+        raise MergeQueueError(
+            "merge queue --from-state sha mismatch: --head-sha does not match the latest score_history revision_scope; use manual --head-sha/--base-sha fallback"
+        )
+    return derived_base_sha, derived_head_sha
+
+
+def cmd_queue(args):
+    cwd = Path.cwd()
+    try:
+        if args.queue_cmd == "enqueue":
+            depends_on = []
+            if args.depends_on:
+                depends_on = [item for item in (part.strip() for part in args.depends_on.split(",")) if item]
+            base_sha, head_sha = _resolve_queue_enqueue_shas(cwd, args)
+            result = enqueue_merge_queue(
+                cwd,
+                issue_ref=args.issue_ref,
+                pr_ref=args.pr_ref,
+                head_sha=head_sha,
+                base_sha=base_sha,
+                depends_on=depends_on,
+                session_id=args.session,
+            )
+        elif args.queue_cmd == "status":
+            result = status_merge_queue(cwd)
+        elif args.queue_cmd == "next":
+            result = next_merge_queue_candidate(cwd)
+        elif args.queue_cmd == "verify":
+            result = verify_merge_queue(cwd, queue_id=args.queue_id, current_base_sha=args.current_base_sha)
+        elif args.queue_cmd == "mark":
+            result = mark_merge_queue(cwd, queue_id=args.queue_id, status_value=args.status, reason=args.reason)
+        else:
+            raise AssertionError(f"unsupported queue command: {args.queue_cmd}")
+    except BaseMismatchError:
+        print("ERROR: base changed; refreeze required", file=sys.stderr)
+        print("HINT: base 統合 → refreeze（--head-sha を更新して再 enqueue）→ fresh review", file=sys.stderr)
+        sys.exit(2)
+    except MergeQueueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        if "use manual --head-sha/--base-sha fallback" in str(exc):
+            print(
+                "HINT: 正しい呼び出し例: mission-state.py queue enqueue --issue-ref <ref> --pr-ref <ref> --head-sha <40hex> --base-sha <40hex>",
+                file=sys.stderr,
+            )
+        sys.exit(2)
+    print(json.dumps(result, indent=2 if getattr(args, "json", False) else None, ensure_ascii=False))
+
+
+def cmd_changeset_digest(args):
+    """レビュー対象の変更集合 digest を算出して表示する (read-only)。
+
+    merge 側と同じ実装を通す。producer が手元で `git diff | shasum` を組み立てると
+    diff 設定の差で別の値が出て、恒常的な不一致になる。
+    """
+    request = ChangesetDigestRequest(
+        repository_root=".",
+        base_sha=args.base_sha,
+        head_sha=args.head_sha,
+    )
+    try:
+        result = run_changeset_digest(
+            request,
+            ChangesetDigestServices(execute=execute_changeset_digest),
+        )
+    except IntegrationGateFailure as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+def cmd_gate_and_merge(args):
+    request = IntegrationGateRequest(
+        repository_root=".",
+        pr_ref=str(args.pr),
+        expected_head_sha=args.expected_head_sha,
+        expected_base_sha=args.expected_base_sha,
+        expected_changeset_digest=args.reviewed_changeset_digest,
+        claimed_digest_source=args.claimed_digest_source,
+    )
+    try:
+        result = run_integration_gate(
+            request,
+            IntegrationGateServices(execute=execute_gate_and_merge),
+        )
+    except IntegrationGateFailure as exc:
+        # step と reason を出す。message だけだと、どの手順のどの検査で落ちたかを
+        # 呼び出し側が機械的に判別できず、失敗の分類が文面の一致に依存する。
+        # infra 側の CLI 経路 (`execute_gate_and_merge_cli`) と同じ書式に揃える。
+        print(f"ERROR: step={exc.step} reason={exc.reason}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+PARALLEL_GROUP_SCHEMA = "mission-parallel-group/1"
+PARALLEL_GROUP_MAX_BYTES = 256 * 1024
+STOP_GUARD_SCHEMA = "mission-stop-guard/1"
+STOP_GUARD_MAX_BYTES = 64 * 1024
+
+
+def _parallel_file_identity(metadata: os.stat_result) -> tuple:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _parallel_manifest_path(cwd: Path, group_id: str) -> Path:
+    return session_dir(cwd) / f"{group_id}.group.json"
+
+
+def _parallel_directory_flags() -> int:
+    return os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _parallel_same_directory(opened: os.stat_result, named: os.stat_result) -> bool:
+    return (
+        stat.S_ISDIR(opened.st_mode)
+        and stat.S_ISDIR(named.st_mode)
+        and opened.st_dev == named.st_dev
+        and opened.st_ino == named.st_ino
+        and opened.st_mode == named.st_mode
+    )
+
+
+def _open_parallel_child_directory(parent_fd: int, name: str, *, create: bool) -> int:
+    try:
+        child_fd = os.open(name, _parallel_directory_flags(), dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            raise ValueError("parallel group directory is missing")
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            child_fd = os.open(name, _parallel_directory_flags(), dir_fd=parent_fd)
+        except OSError as exc:
+            raise ValueError("parallel group directory is unsafe") from exc
+    except OSError as exc:
+        raise ValueError("parallel group directory is unsafe") from exc
+    try:
+        opened = os.fstat(child_fd)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if not _parallel_same_directory(opened, named):
+            raise ValueError("parallel group directory changed")
+        return child_fd
+    except BaseException:
+        os.close(child_fd)
+        raise
+
+
+class _ParallelGroupStore:
+    """Hold the project/state/sessions descriptor chain and shared state lock."""
+
+    def __init__(self, cwd: Path, *, create: bool):
+        self.cwd = cwd
+        self.create = create
+        self.root_fd = None
+        self.state_fd = None
+        self.sessions_fd = None
+        self.lock_fd = None
+
+    def __enter__(self):
+        try:
+            self.root_fd = os.open(os.fspath(self.cwd), _parallel_directory_flags())
+            self.state_fd = _open_parallel_child_directory(
+                self.root_fd, ".mission-state", create=self.create
+            )
+            lock_flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+            self.lock_fd = os.open(".state.lock", lock_flags, 0o600, dir_fd=self.state_fd)
+            opened_lock = os.fstat(self.lock_fd)
+            named_lock = os.stat(".state.lock", dir_fd=self.state_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(opened_lock.st_mode)
+                or opened_lock.st_nlink != 1
+                or _parallel_file_identity(opened_lock) != _parallel_file_identity(named_lock)
+            ):
+                raise ValueError("parallel group lock is unsafe")
+            deadline = time.time() + 5.0
+            while True:
+                try:
+                    fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.time() > deadline:
+                        raise ValueError("parallel group lock timed out")
+                    time.sleep(0.05)
+            self.sessions_fd = _open_parallel_child_directory(
+                self.state_fd, "sessions", create=self.create
+            )
+            self.verify()
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def verify(self) -> None:
+        if self.root_fd is None or self.state_fd is None or self.sessions_fd is None:
+            raise ValueError("parallel group directory is unavailable")
+        root_named = self.cwd.lstat()
+        if not _parallel_same_directory(os.fstat(self.root_fd), root_named):
+            raise ValueError("parallel group project root changed")
+        state_named = os.stat(".mission-state", dir_fd=self.root_fd, follow_symlinks=False)
+        if not _parallel_same_directory(os.fstat(self.state_fd), state_named):
+            raise ValueError("parallel group state directory changed")
+        sessions_named = os.stat("sessions", dir_fd=self.state_fd, follow_symlinks=False)
+        if not _parallel_same_directory(os.fstat(self.sessions_fd), sessions_named):
+            raise ValueError("parallel group sessions directory changed")
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.lock_fd is not None:
+            with contextlib.suppress(OSError):
+                fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
+        for attribute in ("sessions_fd", "lock_fd", "state_fd", "root_fd"):
+            descriptor = getattr(self, attribute)
+            if descriptor is not None:
+                with contextlib.suppress(OSError):
+                    os.close(descriptor)
+                setattr(self, attribute, None)
+
+
+def _read_parallel_regular_at(directory_fd: int, name: str, *, limit: int) -> tuple[bytes, tuple]:
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=directory_fd)
+        try:
+            before = os.fstat(fd)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or before.st_size < 1
+                or before.st_size > limit
+            ):
+                raise ValueError("parallel group file is unsafe")
+            remaining = before.st_size
+            chunks = []
+            while remaining:
+                chunk = os.read(fd, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            payload = b"".join(chunks)
+            after = os.fstat(fd)
+            named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            identity = _parallel_file_identity(before)
+            if (
+                len(payload) != before.st_size
+                or os.read(fd, 1)
+                or _parallel_file_identity(after) != identity
+                or _parallel_file_identity(named) != identity
+            ):
+                raise ValueError("parallel group file changed while being read")
+            return payload, identity
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise ValueError("parallel group file is missing or unsafe") from exc
+
+
+def _read_parallel_manifest(directory_fd: int, name: str) -> tuple[bytes, tuple]:
+    return _read_parallel_regular_at(
+        directory_fd, name, limit=PARALLEL_GROUP_MAX_BYTES
+    )
+
+
+def _validate_parallel_manifest(payload: object, group_id: str) -> dict:
+    if not isinstance(payload, dict) or payload.get("schema") != PARALLEL_GROUP_SCHEMA:
+        raise ValueError("parallel group manifest has an invalid schema")
+    allowed = {
+        "schema",
+        "group_id",
+        "created_at",
+        "planned_children",
+        "status",
+        "coverage",
+        "outcome",
+        "closed_at",
+    }
+    if set(payload) - allowed or payload.get("group_id") != group_id:
+        raise ValueError("parallel group manifest is malformed")
+    if parse_iso_datetime(payload.get("created_at")) is None:
+        raise ValueError("parallel group manifest created_at is invalid")
+    planned = payload.get("planned_children")
+    if not isinstance(planned, list) or not planned:
+        raise ValueError("parallel group manifest planned children are invalid")
+    normalized = []
+    for item in planned:
+        if not isinstance(item, dict) or set(item) != {"issue_ref"}:
+            raise ValueError("parallel group manifest child is invalid")
+        key = _normalize_issue_ref(item.get("issue_ref"))
+        if key is None:
+            raise ValueError("parallel group manifest child issue_ref is invalid")
+        normalized.append(key)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("parallel group manifest child issue_ref values are duplicated")
+    status = payload.get("status")
+    if status not in {"running", "terminal"} or not isinstance(payload.get("coverage"), dict):
+        raise ValueError("parallel group manifest status is invalid")
+    if status == "terminal":
+        if payload.get("outcome") not in {"pass", "halt"} or parse_iso_datetime(payload.get("closed_at")) is None:
+            raise ValueError("parallel group terminal metadata is invalid")
+    elif "outcome" in payload or "closed_at" in payload:
+        raise ValueError("running parallel group cannot contain terminal metadata")
+    return payload
+
+
+def _reject_duplicate_parallel_keys(pairs: list[tuple[str, object]]) -> dict:
+    document = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError(f"parallel group manifest has duplicate JSON key: {key}")
+        document[key] = value
+    return document
+
+
+def _parallel_manifest(store: _ParallelGroupStore, group_id: str) -> tuple[Path, dict, tuple]:
+    path = _parallel_manifest_path(store.cwd, group_id)
+    content, identity = _read_parallel_manifest(store.sessions_fd, path.name)
+    try:
+        parsed = json.loads(
+            content.decode("utf-8"), object_pairs_hook=_reject_duplicate_parallel_keys
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("parallel group manifest is malformed") from exc
+    return path, _validate_parallel_manifest(parsed, group_id), identity
+
+
+def _write_parallel_temp(directory_fd: int, payload: bytes) -> str:
+    name = f".parallel-{secrets.token_hex(12)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("parallel group manifest write made no progress")
+            view = view[written:]
+        os.fsync(fd)
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_size != len(payload):
+            raise ValueError("parallel group manifest temporary file is unsafe")
+    except BaseException:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(name, dir_fd=directory_fd)
+        raise
+    os.close(fd)
+    return name
+
+
+def _create_parallel_manifest(store: _ParallelGroupStore, path: Path, manifest: dict) -> None:
+    store.verify()
+    directory_fd = store.sessions_fd
+    temporary = None
+    try:
+        parent_before = os.fstat(directory_fd)
+        payload = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        temporary = _write_parallel_temp(directory_fd, payload)
+        try:
+            os.link(
+                temporary,
+                path.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise ValueError("parallel group manifest already exists") from exc
+        os.unlink(temporary, dir_fd=directory_fd)
+        temporary = None
+        os.fsync(directory_fd)
+        parent_after = os.fstat(directory_fd)
+        if (parent_before.st_dev, parent_before.st_ino) != (parent_after.st_dev, parent_after.st_ino):
+            raise ValueError("parallel group manifest directory changed")
+        store.verify()
+        _parallel_manifest(store, manifest["group_id"])
+    finally:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary, dir_fd=directory_fd)
+
+
+def _replace_parallel_manifest(
+    store: _ParallelGroupStore, path: Path, manifest: dict, expected_identity: tuple
+) -> None:
+    store.verify()
+    directory_fd = store.sessions_fd
+    temporary = None
+    try:
+        current = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        if _parallel_file_identity(current) != expected_identity:
+            raise ValueError("parallel group manifest changed before closeout")
+        payload = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        temporary = _write_parallel_temp(directory_fd, payload)
+        current = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        if _parallel_file_identity(current) != expected_identity:
+            raise ValueError("parallel group manifest changed before publish")
+        os.replace(temporary, path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        temporary = None
+        os.fsync(directory_fd)
+        store.verify()
+    finally:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary, dir_fd=directory_fd)
+
+
+def cmd_parallel_init(args):
+    """Create one immutable planned-child manifest before parallel child init."""
+    cwd = Path.cwd()
+    try:
+        group_id = opaque_token(args.group_id)
+        refs = list(args.issue_ref or [])
+        keys = [_normalize_issue_ref(ref) for ref in refs]
+        if not refs or any(key is None for key in keys) or len(set(keys)) != len(keys):
+            raise ValueError("planned issue_ref values must be unique")
+        manifest = {
+            "schema": PARALLEL_GROUP_SCHEMA,
+            "group_id": group_id,
+            "created_at": iso_now(),
+            "planned_children": [{"issue_ref": ref} for ref in refs],
+            "status": "running",
+            "coverage": {},
+        }
+        with _ParallelGroupStore(cwd, create=True) as store:
+            _create_parallel_manifest(
+                store, _parallel_manifest_path(cwd, group_id), manifest
+            )
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps({"ok": True, "manifest": str(_parallel_manifest_path(cwd, group_id)), "group_id": group_id}))
+
+
+def _parallel_artifact_observed(state: dict) -> bool:
+    applicability = state.get("artifact_applicability")
+    if applicability == "not-applicable":
+        return True
+    artifact = state.get("artifact")
+    return (
+        applicability == "producing"
+        and isinstance(artifact, dict)
+        and isinstance(artifact.get("path"), str)
+        and bool(artifact["path"].strip())
+    )
+
+
+def _parallel_activity_observed(state: dict) -> bool:
+    segments = state.get("activity_segments")
+    if not isinstance(segments, list) or not segments:
+        return False
+    return any(
+        isinstance(segment, dict)
+        and segment.get("kind") in ACTIVITY_KINDS
+        and isinstance(segment.get("started_at"), str)
+        and bool(segment["started_at"].strip())
+        for segment in segments
+    )
+
+
+def _parallel_review_provenance_observed(state: dict) -> bool:
+    history = state.get("score_history")
+    if not isinstance(history, list):
+        return False
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            _validate_provenance(entry.get("score_provenance"), require=True)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _parallel_coverage(records: dict[str, list[dict]], planned: list[str]) -> dict:
+    eligible = len(planned)
+    observed = {"artifact": 0, "activity": 0, "review_provenance": 0}
+    for ref in planned:
+        candidates = records.get(_normalize_issue_ref(ref), [])
+        if len(candidates) != 1:
+            continue
+        state = candidates[0]
+        observed["artifact"] += int(_parallel_artifact_observed(state))
+        observed["activity"] += int(_parallel_activity_observed(state))
+        observed["review_provenance"] += int(_parallel_review_provenance_observed(state))
+    result = {
+        key: {
+            "observed": value,
+            "eligible": eligible,
+            "ratio": round(value / eligible, 4) if eligible else 1.0,
+        }
+        for key, value in observed.items()
+    }
+    result["ratio"] = (
+        round(sum(observed.values()) / (3 * eligible), 4) if eligible else 1.0
+    )
+    return result
+
+
+def _parallel_status(store: _ParallelGroupStore, group_id: str) -> tuple[Path, dict, tuple, dict]:
+    path, manifest, manifest_identity = _parallel_manifest(store, group_id)
+    planned_children = [item["issue_ref"] for item in manifest["planned_children"]]
+    states = []
+    for name in sorted(os.listdir(store.sessions_fd)):
+        if not name.endswith(".json") or name.endswith(".group.json"):
+            continue
+        try:
+            state_content, _identity = _read_parallel_regular_at(
+                store.sessions_fd, name, limit=4 * 1024 * 1024
+            )
+            state = read_session_json(session_dir(store.cwd), name=name, source=state_content)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("parallel group session state is malformed or unsafe") from exc
+        if not _is_mission_state_record(state) or state.get("logical_group_id") != group_id:
+            continue
+        state["_mission_source_path"] = str(session_dir(store.cwd) / name)
+        states.append(state)
+    states, _duplicate_files = _dedupe_states(states)
+    by_issue: dict[str, list[dict]] = {}
+    for state in states:
+        key = _normalize_issue_ref(state.get("issue_ref"))
+        if key:
+            by_issue.setdefault(key, []).append(state)
+
+    categories = {name: [] for name in ("planned", "running", "waiting", "pass", "halt")}
+    children = {}
+    active_leases = []
+    duplicates = []
+    now = datetime.now(timezone.utc)
+    for ref in planned_children:
+        key = _normalize_issue_ref(ref)
+        records = by_issue.get(key, [])
+        status = "planned"
+        session_ids = [str(record.get("session_id") or "") for record in records]
+        if len(records) > 1:
+            status = "incomplete"
+            duplicates.append(ref)
+        elif records:
+            state = records[0]
+            expires = parse_iso_datetime(state.get("lease_expires_at"))
+            lease_active = expires is not None and expires > now
+            if lease_active:
+                active_leases.append(ref)
+            if state.get("loop_active") is True:
+                status = "running" if lease_active else "waiting"
+            elif state.get("passes") is True:
+                status = "pass"
+            elif isinstance(state.get("halt_reason"), str) and state["halt_reason"].strip():
+                status = "halt"
+            else:
+                status = "incomplete"
+        if status in categories:
+            categories[status].append(ref)
+        children[str(ref)] = {"status": status, "session_ids": session_ids}
+
+    planned_keys = {_normalize_issue_ref(ref) for ref in planned_children}
+    late = sorted(
+        str(state.get("issue_ref"))
+        for key, records in by_issue.items()
+        if key not in planned_keys
+        for state in records
+    )
+    incomplete = [
+        ref
+        for ref in planned_children
+        if children[str(ref)]["status"] not in {"pass", "halt"}
+    ]
+    coverage = _parallel_coverage(by_issue, planned_children)
+    status = {
+        "group_id": group_id,
+        "manifest_status": manifest["status"],
+        "planned_children": planned_children,
+        "children": children,
+        **categories,
+        "terminal": categories["pass"] + categories["halt"],
+        "incomplete": incomplete,
+        "duplicates": duplicates,
+        "late_children": late,
+        "active_leases": active_leases,
+        "coverage": coverage,
+    }
+    return path, manifest, manifest_identity, status
+
+
+def cmd_parallel_status(args):
+    try:
+        group_id = opaque_token(args.group_id)
+        with _ParallelGroupStore(Path.cwd(), create=False) as store:
+            _path, _manifest, _identity, status = _parallel_status(store, group_id)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps(status, ensure_ascii=False))
+
+
+def cmd_parallel_closeout(args):
+    cwd = Path.cwd()
+    try:
+        group_id = opaque_token(args.group_id)
+        with _ParallelGroupStore(cwd, create=False) as store:
+            path, manifest, manifest_identity, status = _parallel_status(store, group_id)
+            if manifest["status"] != "running":
+                raise ValueError("parallel group is already terminal")
+            if status["incomplete"] or status["duplicates"] or status["late_children"] or status["active_leases"]:
+                raise ValueError("parallel group has incomplete children or active leases")
+            manifest["status"] = "terminal"
+            manifest["outcome"] = "halt" if status["halt"] else "pass"
+            manifest["closed_at"] = iso_now()
+            manifest["coverage"] = status["coverage"]
+            _replace_parallel_manifest(store, path, manifest, manifest_identity)
+            status["manifest_status"] = "terminal"
+            status["outcome"] = manifest["outcome"]
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps({"ok": True, **status}, ensure_ascii=False))
+
+
+
+def _stop_guard_state_name(session_id: str) -> str:
+    token = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    return f".{token}.stop-guard"
+
+
+def _validate_stop_guard_state(payload: object, session_id: str) -> dict:
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema", "session_id", "last_digest", "last_detail_epoch",
+        "block_count", "reinjection_count", "detail_count", "heartbeat_count",
+    }:
+        raise ValueError("stop guard state is malformed")
+    if payload.get("schema") != STOP_GUARD_SCHEMA or payload.get("session_id") != session_id:
+        raise ValueError("stop guard state identity is invalid")
+    digest = payload.get("last_digest")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("stop guard state digest is invalid")
+    for key in (
+        "last_detail_epoch", "block_count", "reinjection_count",
+        "detail_count", "heartbeat_count",
+    ):
+        value = payload.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError("stop guard counters are invalid")
+    return dict(payload)
+
+
+def _reject_duplicate_stop_guard_keys(pairs: list[tuple[str, object]]) -> dict:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError("stop guard state has duplicate keys")
+        document[key] = value
+    return document
+
+
+def _read_stop_guard_state(
+    store: _ParallelGroupStore, session_id: str,
+) -> tuple[dict | None, tuple | None]:
+    name = _stop_guard_state_name(session_id)
+    try:
+        payload, identity = _read_parallel_regular_at(
+            store.sessions_fd, name, limit=STOP_GUARD_MAX_BYTES
+        )
+    except ValueError as exc:
+        try:
+            os.stat(name, dir_fd=store.sessions_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None, None
+        raise ValueError("stop guard state is unsafe") from exc
+    try:
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_stop_guard_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("stop guard state is malformed") from exc
+    return _validate_stop_guard_state(document, session_id), identity
+
+
+def _write_stop_guard_state(
+    store: _ParallelGroupStore,
+    session_id: str,
+    document: dict,
+    expected_identity: tuple | None,
+) -> None:
+    store.verify()
+    name = _stop_guard_state_name(session_id)
+    payload = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    temporary = _write_parallel_temp(store.sessions_fd, payload)
+    try:
+        if expected_identity is None:
+            try:
+                os.link(
+                    temporary, name,
+                    src_dir_fd=store.sessions_fd, dst_dir_fd=store.sessions_fd,
+                )
+            except FileExistsError as exc:
+                raise ValueError("stop guard state appeared during create") from exc
+            os.unlink(temporary, dir_fd=store.sessions_fd)
+            temporary = ""
+        else:
+            current = os.stat(name, dir_fd=store.sessions_fd, follow_symlinks=False)
+            if _parallel_file_identity(current) != expected_identity:
+                raise ValueError("stop guard state changed before publish")
+            os.replace(
+                temporary, name,
+                src_dir_fd=store.sessions_fd, dst_dir_fd=store.sessions_fd,
+            )
+            temporary = ""
+        os.fsync(store.sessions_fd)
+        store.verify()
+        current, _identity = _read_stop_guard_state(store, session_id)
+        if current != document:
+            raise ValueError("stop guard state publish verification failed")
+    finally:
+        if temporary:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(temporary, dir_fd=store.sessions_fd)
+
+
+class _LegacyStopObservationRepository:
+    """Bind the A5 port to the descriptor-held legacy sidecar CAS."""
+
+    def __init__(self, cwd: Path):
+        self.cwd = cwd
+        self.store = None
+
+    @contextlib.contextmanager
+    def transaction(self):
+        with _ParallelGroupStore(self.cwd, create=False) as store:
+            self.store = store
+            try:
+                yield
+            finally:
+                self.store = None
+
+    def load(self, session_id: str):
+        if self.store is None:
+            raise ValueError("stop guard transaction is inactive")
+        return _read_stop_guard_state(self.store, session_id)
+
+    def save(self, session_id: str, document: dict, expected_identity) -> None:
+        if self.store is None:
+            raise ValueError("stop guard transaction is inactive")
+        _write_stop_guard_state(self.store, session_id, document, expected_identity)
+
+
+@bounded_by_guard_timeout
+def cmd_stop_guard_observe(args):
+    """Adapt one closed block observation to the A5 use case."""
+    try:
+        result = observe_stop_guard(
+            _LegacyStopObservationRepository(
+                guard_application.project_root_of(args, Path.cwd, Path)
+            ),
+            StopObservationRequest(
+                session_id=args.session_id,
+                digest=args.digest,
+                now_epoch=args.now_epoch,
+                ttl_seconds=args.ttl_seconds,
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    print(
+        json.dumps(
+            {"ok": True, "mode": result.mode, **result.document},
+            ensure_ascii=False,
+        )
+    )
+
+
+def cmd_get(args):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print(json.dumps({"ok": False, "error": "state.json not found"}))
+        sys.exit(1)
+    try:
+        _snapshot, data = _load_authoritative_state(
+            sf,
+            legacy_compatibility=True,
+        )
+        _validate_specialist_public_state(data)
+    except UnsupportedSchemaVersionError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    if args.field:
+        print(json.dumps(data.get(args.field)))
+    else:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def _activity_state_file(cwd: Path) -> Path:
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    return sf
+
+
+def _read_legacy_json_file(path: Path) -> dict:
+    return read_session_json(path)
+
+
+def _parse_captured_json(text: str):
+    return json.loads(text)
+
+
+_PRESENTED_LEASE_UNSET = object()
+
+
+def _canonical_compatibility_operation(
+    session_id: str,
+    command_type: str,
+    arguments: dict,
+    *,
+    caller_operation_id: str | None = None,
+):
+    document = {
+        "arguments": arguments,
+        "schema": "mission-command-intent/1",
+        "type": command_type,
+    }
+    source = json.dumps(
+        document,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    operation_digest = hashlib.sha256(
+        session_id.encode("utf-8") + b"\x00" + source
+    ).hexdigest()
+    return (
+        caller_operation_id or command_type + ":" + operation_digest,
+        _decode_strict_json_object(source),
+    )
+
+
+def _compatibility_operation_arguments(
+    arguments: dict,
+    *,
+    target_digest: str,
+    require_caller: bool,
+) -> tuple[str | None, dict]:
+    """Return the caller retry key and its canonical command arguments.
+
+    V5 requires a caller-provided ID that remains identical across a crash
+    retry.  Retained v4 does not persist operation records; its target-bound
+    fallback only supplies a deterministic compatibility request shape.
+    """
+
+    caller_operation_id = os.environ.get("MISSION_OPERATION_ID")
+    if caller_operation_id is not None:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", caller_operation_id) is None:
+            raise ValueError("MISSION_OPERATION_ID is not a Token128")
+        return caller_operation_id, arguments
+    if require_caller:
+        raise ValueError("MISSION_OPERATION_ID is required for a v5 mutation")
+    return None, {**arguments, "target_digest": target_digest}
+
+
+def _legacy_lifecycle_repository(
+    cwd: Path,
+    sf: Path,
+    *,
+    stamp: bool,
+    strict_read: bool = False,
+    lease_reason: str | None = None,
+    allow_partial_lease_terminal_write: bool = False,
+    pre_admit_lease: bool = False,
+    session_id: str | None = None,
+    operation_id: str | None = None,
+    operation_command=None,
+    operation_command_type: str | None = None,
+    lease_owner_session_id: str | None = None,
+    presented_lease_id=_PRESENTED_LEASE_UNSET,
+) -> LegacyV4Repository:
+    admitted_lease = [_LEASE_DECISION_UNSET]
+    admitted_identity = [None]
+    backup_snapshot = [None]
+    backup_was_present = [False]
+    backup_published = [False]
+
+    def rollback_guarded_backup() -> None:
+        if not backup_published[0]:
+            return
+        bak = sf.with_suffix(sf.suffix + ".bak")
+        if backup_was_present[0]:
+            atomic_write_bytes(bak, backup_snapshot[0])
+        else:
+            bak.unlink(missing_ok=True)
+        backup_published[0] = False
+
+    def guarded_backup(_path=None) -> None:
+        if not pre_admit_lease:
+            backup_state(sf)
+            return
+        if admitted_identity[0] is None or _state_file_identity(sf) != admitted_identity[0]:
+            raise ValueError("state changed before backup")
+        bak = sf.with_suffix(sf.suffix + ".bak")
+        backup_was_present[0] = bak.exists()
+        backup_snapshot[0] = bak.read_bytes() if backup_was_present[0] else None
+        try:
+            backup_state(sf)
+            backup_published[0] = True
+            if _state_file_identity(sf) != admitted_identity[0]:
+                raise ValueError("state changed during backup")
+        except BaseException:
+            rollback_guarded_backup()
+            raise
+
+    def read_state() -> dict:
+        loaded_identity = _state_file_identity(sf) if pre_admit_lease else None
+        if strict_read:
+            data = _load_state_json(sf)
+        else:
+            data = read_session_json(sf)
+        if pre_admit_lease:
+            if _state_file_identity(sf) != loaded_identity:
+                raise ValueError("state changed while being read")
+            with _lease_write_reason(lease_reason):
+                admitted_lease[0] = _enforce_session_lease_for_write(sf, data)
+            if _state_file_identity(sf) != loaded_identity:
+                raise ValueError("state changed during lease admission")
+            admitted_identity[0] = loaded_identity
+        return data
+
+    def write_state(data: dict, *, administrative: bool = False, before_publish=None) -> None:
+        proposed = stamp_metadata(data, cwd) if stamp else data
+        with _lease_write_reason(lease_reason):
+            lease_field_count = sum(
+                proposed.get(key) not in (None, "") for key in LEASE_STATE_FIELDS
+            )
+            partial_lease = 0 < lease_field_count < len(LEASE_STATE_FIELDS)
+            lease_decision = (
+                None
+                if allow_partial_lease_terminal_write and partial_lease
+                else _LEASE_DECISION_UNSET
+            )
+            if pre_admit_lease:
+                if admitted_lease[0] is _LEASE_DECISION_UNSET:
+                    raise ValueError("lease admission is missing")
+                try:
+                    atomic_write_json(
+                        sf,
+                        proposed,
+                        administrative=administrative,
+                        lease_decision=admitted_lease[0],
+                        expected_identity=admitted_identity[0],
+                        before_publish=before_publish,
+                    )
+                    backup_published[0] = False
+                except BaseException:
+                    rollback_guarded_backup()
+                    raise
+            elif lease_decision is None:
+                atomic_write_json(
+                    sf,
+                    proposed,
+                    administrative=administrative,
+                    lease_decision=None,
+                    before_publish=before_publish,
+                )
+            elif administrative:
+                atomic_write_json(sf, proposed, administrative=True, before_publish=before_publish)
+            else:
+                atomic_write_json(sf, proposed, before_publish=before_publish)
+
+    selected_session_id = session_id or sf.stem
+
+    def aggregate_coordinator(authority_format: str) -> RecoverableAggregateIndex:
+        return RecoverableAggregateIndex(
+            state_dir(cwd),
+            session_id=selected_session_id,
+            authority_format=authority_format,
+            clock=lambda: parse_iso_datetime(iso_now()) or datetime.now(timezone.utc),
+        )
+
+    def legacy_factory(format_guard):
+        coordinator = aggregate_coordinator("legacy-v4")
+        return DeferredBackupRepository(
+            lock=lambda: StateLock(lock_file(cwd)),
+            read_state=read_state,
+            write_state=write_state,
+            backup_state=guarded_backup,
+            effect_publisher=_publish_evidence_effects,
+            effect_context=cwd,
+            aggregate_recover=coordinator.recover,
+            aggregate_prepare=coordinator.prepare,
+            aggregate_finalize=coordinator.finalize,
+            format_guard=format_guard,
+        )
+
+    def v5_factory(format_guard):
+        coordinator = aggregate_coordinator("v5")
+        return V5CompatibilityRepository(
+            repository=LocalFencedRepository(
+                state_dir(cwd),
+                clock=_lease_now,
+                lease_ttl_seconds=_lease_ttl_seconds(),
+            ),
+            session_id=selected_session_id,
+            lease_owner_session_id=(
+                lease_owner_session_id or resolve_session_id()
+            ),
+            presented_lease_id=(
+                (
+                    os.environ.get("MISSION_LEASE_ID")
+                    or _PROCESS_LEASE_IDS.get(str(sf.resolve()))
+                )
+                if presented_lease_id is _PRESENTED_LEASE_UNSET
+                else presented_lease_id
+            ),
+            metadata=repository_metadata(stamp, stamp_metadata, cwd),
+            effect_publisher=_publish_evidence_effects,
+            effect_context=cwd,
+            aggregate_recover=coordinator.recover,
+            aggregate_prepare=coordinator.prepare,
+            aggregate_finalize=coordinator.finalize,
+            lease_committed=lambda pending, state: _record_committed_v5_lease(
+                sf, state, pending
+            ),
+            format_guard=format_guard,
+            operation_id=operation_id,
+            operation_command=operation_command,
+            operation_command_type=operation_command_type,
+        )
+
+    return _select_repository_for_cli(
+        selected_session_id,
+        sf,
+        legacy_factory,
+        v5_factory,
+    )
+
+
+
+def _artifact_cli_fail(message: str, exit_code: int):
+    print(message, file=sys.stderr)
+    sys.exit(exit_code)
+
+
+_EVIDENCE_CLI_SERVICES = EvidenceCliServices(
+    resolve_state_file,
+    _resolve_evidence_output_path,
+    _legacy_lifecycle_repository,
+    _progress_archive_path,
+    _compatibility_operation_arguments,
+    _canonical_compatibility_operation,
+    iso_now,
+    _artifact_cli_fail,
+)
+
+
+_ACCEPTANCE_CONTRACT_CLI_SERVICES = AcceptanceContractCliServices(
+    resolve_state_file,
+    _legacy_lifecycle_repository,
+    iso_now,
+    _artifact_cli_fail,
+    _compatibility_operation_arguments,
+    _canonical_compatibility_operation,
+    load_verifier_policy,
+    partial(state_capacity_status, load_snapshot=_load_authoritative_state),
+    commit_errors=(CapacityWriteError,),
+    load_snapshot=_load_authoritative_state,
+    read_evidence=_read_stable_payload_beneath,
+)
+
+
+_VERIFICATION_RECEIPT_CLI_SERVICES = VerificationReceiptCliServices(
+    resolve_state_file,
+    _legacy_lifecycle_repository,
+    load_verifier_policy,
+    _compatibility_operation_arguments,
+    _canonical_compatibility_operation,
+    iso_now,
+)
+
+
+_ARTIFACT_CLI_SERVICES = ArtifactCliServices(
+    resolve_state_file,
+    _artifact_path,
+    _state_relative_path,
+    _resolve_evidence_output_path,
+    _legacy_lifecycle_repository,
+    _render_artifact_markdown,
+    _compatibility_operation_arguments,
+    _canonical_compatibility_operation,
+    _read_artifact_input,
+    unknown_artifact_section_message,
+    iso_now,
+    _artifact_cli_fail,
+)
+
+
+def cmd_activity_start(args):
+    cwd = Path.cwd()
+    sf = _activity_state_file(cwd)
+    at = args.at or iso_now()
+    try:
+        result = run_activity_start(
+            _legacy_lifecycle_repository(cwd, sf, stamp=True),
+            ActivityStartRequest(
+                kind=args.kind,
+                reason=args.reason,
+                at=at,
+                detail=args.detail,
+                resume=args.resume,
+            ),
+        )
+    except ActivityTimingError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps({"ok": True, "changed": result.changed, "activity_current": result.activity_current}, ensure_ascii=False))
+
+
+def cmd_activity_end(args):
+    cwd = Path.cwd()
+    sf = _activity_state_file(cwd)
+    at = args.at or iso_now()
+    try:
+        result = run_activity_end(
+            _legacy_lifecycle_repository(cwd, sf, stamp=True),
+            ActivityEndRequest(at=at),
+        )
+    except ActivityTimingError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps({"ok": True, "changed": result.changed, "activity_current": result.activity_current}, ensure_ascii=False))
+
+
+def _validated_budget_minutes(raw) -> float | None:
+    """#238 (S6): init --budget-minutes の検証。None は「予算宣言なし」。
+
+    有限かつ正の数のみ受理する。不正値は exit 2 (state を作らない)。
+    """
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        print(
+            f"ERROR: --budget-minutes は正の有限な分数で指定してください。受領値: '{raw}'",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return value
+
+
+# #238 (S6): budget pressure の閾値。80% で warn (optional spawn 抑制の advisory)、
+# 100% で spawn 系 next_action を consider-halt へ override する。
+BUDGET_PRESSURE_WARN_PCT = 80.0
+BUDGET_SPAWN_ACTIONS = {"run-planner", "run-executor", "run-reviewers"}
+
+
+def _budget_pressure(data: dict, now_iso: str) -> dict | None:
+    """時間予算に対する消費率を導出する (read-only・ゲート意味論に影響しない)。
+
+    budget_minutes 未宣言・timestamp 不正のときは None (シグナルなし)。
+    """
+    budget = data.get("budget_minutes")
+    if not isinstance(budget, (int, float)) or isinstance(budget, bool):
+        return None
+    if not math.isfinite(budget) or budget <= 0:
+        return None
+    started = _parse_iso_datetime(data.get("started_at"))
+    now = _parse_iso_datetime(now_iso)
+    if not started or not now:
+        return None
+    # naive/aware 混在の TypeError を防ぐ (_mission_started_at と同じ正規化)。
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if now < started:
+        return None
+    elapsed_minutes = (now - started).total_seconds() / 60.0
+    pressure_pct = round(elapsed_minutes / budget * 100.0, 1)
+    if pressure_pct >= 100.0:
+        level = "exceeded"
+    elif pressure_pct >= BUDGET_PRESSURE_WARN_PCT:
+        level = "warn"
+    else:
+        level = "ok"
+    return {
+        "budget_minutes": budget,
+        "elapsed_minutes": round(elapsed_minutes, 1),
+        "pressure_pct": pressure_pct,
+        "level": level,
+    }
+
+
+def _prepare_advance_handoff(cwd: Path, data: dict) -> dict:
+    plan = data["canonical_plan"]
+    expected_binding = _trusted_canonical_plan_binding(data, plan)
+    try:
+        _raw_plan, step_ids = canonical_plan_identity(
+            cwd, plan, expected=expected_binding, reader=_read_strict_review_file
+        )
+    except (OSError, PlanningLifecycleError) as error:
+        raise LifecycleFailure(
+            "canonical plan gate failed: " + str(error),
+            reason="canonical-plan-gate",
+        ) from error
+    return {
+        "schema": "mission-executor-handoff/1",
+        "handoff_id": "handoff_" + secrets.token_hex(16),
+        "plan_path": plan["path"],
+        "plan_digest": plan["digest"],
+        "plan_generation": plan["generation"],
+        "plan_source": plan["source"],
+        "source_id": plan["source_id"],
+        "selection_source": plan["selection_source"],
+        "iteration": data["iteration"],
+        "step_ids": step_ids,
+        "status": "prepared",
+    }
+
+
+def cmd_advance(args):
+    """Adapt CLI syntax and presentation to the A1 advance use case."""
+    cwd = Path.cwd()
+    sf = _activity_state_file(cwd)
+    phase = _normalize_set_phase_value(args.phase)
+    at = args.at or iso_now()
+    try:
+        result = run_advance(
+            _legacy_lifecycle_repository(cwd, sf, stamp=True),
+            AdvanceRequest(
+                phase=phase,
+                activity=args.activity,
+                at=at,
+                detail=args.detail,
+                artifact_applicability=getattr(args, "artifact_applicability", None),
+                artifact_path=getattr(args, "artifact_path", None),
+                producer_run_id=getattr(args, "producer_run_id", None),
+            ),
+            AdvanceServices(
+                reject_active_provider_mutation=_reject_active_provider_mutation,
+                prepare_handoff=lambda data: _prepare_advance_handoff(cwd, data),
+                capture_artifact=lambda path, run_id: capture_artifact_identity(
+                    cwd, path, run_id, canonical=True
+                ),
+                transition_phase=_transition_phase,
+            ),
+        )
+    except LifecycleFailure as error:
+        if error.guided:
+            context = _guidance_context_for_state(
+                error.state,
+                phase=error.state.get("phase") if isinstance(error.state, dict) else phase,
+                iteration=error.state.get("iteration") if isinstance(error.state, dict) else None,
+            )
+            _raise_guided_failure(
+                error.message,
+                command="advance",
+                reason=error.reason,
+                context=context,
+                outcome_kind=error.outcome_kind,
+            )
+        print(f"ERROR: {error.message}", file=sys.stderr)
+        sys.exit(2)
+    except (ActivityTimingError, ArtifactContractError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    print(
+        json.dumps(
+            {"ok": True, "phase": result.phase, "activity_current": result.activity_current},
+            ensure_ascii=False,
+        )
+    )
+
+
+def _trusted_canonical_plan_binding(data: dict, plan: dict) -> dict:
+    """Resolve plan lineage from state-owned producer evidence, never CLI input."""
+    source = plan.get("source")
+    source_id = plan.get("source_id")
+    if source == "provider":
+        imports = data.get("provider_plan_imports") or {}
+        record = imports.get(source_id) if isinstance(imports, dict) else None
+        if not isinstance(record, dict):
+            raise PlanningLifecycleError("canonical-plan-provider-import-missing")
+        if record.get("candidate_path") != plan.get("path") or record.get("candidate_digest") != plan.get("digest"):
+            raise PlanningLifecycleError("canonical-plan-provider-candidate-mismatch")
+        invocation = invocation_by_id(data, str(source_id))
+        if invocation.get("iteration") != data.get("iteration") or invocation.get("phase") != "planning":
+            raise PlanningLifecycleError("canonical-plan-provider-invocation-mismatch")
+        expected = {"generation": record.get("generation"), "source": source, "source_id": source_id,
+                    "selection_source": invocation.get("selection_source") or "automatic", "iteration": data.get("iteration")}
+        if plan.get("source_digest") != record.get("raw_result_digest"):
+            raise PlanningLifecycleError("canonical-plan-provider-source-digest-mismatch")
+    else:
+        records = data.get("planning_source_records") or {}
+        record = records.get(f"{source}:{source_id}") if isinstance(records, dict) else None
+        if not isinstance(record, dict):
+            raise PlanningLifecycleError("canonical-plan-source-record-missing")
+        expected = {key: record.get(key) for key in ("generation", "source", "source_id", "selection_source", "iteration")}
+    return expected
+
+
+def _require_current_primary_planning_binding(data: dict, provider_id: str | None = None) -> dict:
+    binding = data.get("planning_provider_binding")
+    selected = data.get("specialists_selected") or []
+    if not isinstance(binding, dict):
+        _provider_gate("planning-primary-binding-missing")
+    matches = [item for item in selected if isinstance(item, dict)
+               and item.get("planning_mode") == "primary"
+               and item.get("provider_id") == binding.get("provider_id")
+               and item.get("selection_id") == binding.get("selection_id")
+               and item.get("planning_contract_digest") == binding.get("planning_contract_digest")]
+    if len(matches) != 1 or (provider_id is not None and matches[0].get("provider_id") != provider_id):
+        _provider_gate("planning-primary-binding-mismatch")
+    return matches[0]
+
+
+def _expected_context_mode(data: dict, iteration: int) -> str:
+    """#352: mirror the #241 bounded-context condition without changing it."""
+    return (
+        "bounded"
+        if iteration >= 2 and data.get("critic_has_new_scope") is False
+        else "full"
+    )
+
+
+def _context_manifest_generated(data: dict, iteration: int) -> bool:
+    """Return whether the recorded manifest is complete and still verifiable."""
+    if type(iteration) is not int or iteration < 1:
+        return False
+    manifests = data.get("context_manifests")
+    record = manifests.get(str(iteration)) if isinstance(manifests, dict) else None
+    if not isinstance(record, dict):
+        return False
+    raw_path = record.get("path")
+    digest = record.get("digest")
+    generated_at = record.get("generated_at")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return False
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        return False
+    parsed_generated_at = (
+        parse_iso_datetime(generated_at) if isinstance(generated_at, str) else None
+    )
+    if (
+        parsed_generated_at is None
+        or "T" not in generated_at
+        or parsed_generated_at.tzinfo is None
+        or parsed_generated_at.utcoffset() is None
+    ):
+        return False
+
+    try:
+        manifest_path = Path(raw_path)
+        if not manifest_path.is_absolute():
+            project_root = data.get("project_root")
+            if not isinstance(project_root, str) or not project_root:
+                return False
+            manifest_path = Path(project_root) / manifest_path
+        raw = manifest_path.read_bytes()
+        payload = json.loads(raw)
+    except (OSError, UnicodeError, ValueError, TypeError, RuntimeError):
+        return False
+    if hashlib.sha256(raw).hexdigest() != digest.removeprefix("sha256:"):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    payload_iteration = payload.get("iteration")
+    return (
+        payload.get("schema") == "mission-context-manifest/1"
+        and type(payload_iteration) is int
+        and payload_iteration >= 1
+        and payload_iteration == iteration
+    )
+
+
+def _derive_next_action(
+    data: dict,
+    authoritative: Optional[AuthoritativeSnapshot] = None,
+) -> dict:
+    """Preserve the legacy callable name as a thin application facade."""
+    snapshot = authoritative or authoritative_snapshot_from_document(data)
+    return run_derive_next_action(
+        NextActionRequest(document=data, authoritative=snapshot),
+        NextActionServices(
+            pregate_warning=_pregate_verdict_warning,
+            goal_dispatch_fields=_goal_dispatch_route_fields,
+            goal_dispatch_guidance=_goal_dispatch_guidance,
+            expected_context_mode=_expected_context_mode,
+            valid_composite=_is_valid_composite,
+        ),
+    )
+
+
+def cmd_next(args):
+    """ADR-002 Stage 3: 次の 1 手を JSON で返す (read-only・state 不在でも exit 0)."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print(json.dumps({
+            "next_action": "init",
+            "summary": "mission state がありません。init でミッションを登録してループを開始する",
+            "command_hint": 'mission-state.py init "<ミッション記述>" --complexity <Simple|Standard|Complex|Critical>',
+        }, ensure_ascii=False))
+        return
+    try:
+        snapshot, data = _load_authoritative_state(
+            sf, legacy_compatibility=True
+        )
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(2)
+    out = _derive_next_action(data, authoritative=snapshot)
+    out = run_budget_next(out, data, iso_now(), _budget_pressure, BUDGET_SPAWN_ACTIONS,
+                          partial(_ACCEPTANCE_CONTRACT_CLI_SERVICES.capacity_status, sf))
+    out.setdefault("details", {})
+    out.update({
+        "phase": snapshot.phase,
+        "iteration": snapshot.iteration,
+        "session_id": snapshot.session_id,
+        "loop_active": snapshot.loop_active,
+        "passes": snapshot.passes,
+        "stagnation_count": data.get("stagnation_count", 0) or 0,
+    })
+    print(json.dumps(out, ensure_ascii=False))
+
+
+def _stale_halt_seconds() -> int:
+    raw = os.environ.get("MISSION_STALE_HALT_SECONDS")
+    if raw:
+        try:
+            parsed = int(raw)
+            if parsed >= 0:
+                stale_halt_sec = parsed
+            else:
+                stale_halt_sec = 10800
+        except ValueError:
+            stale_halt_sec = 10800
+    else:
+        stale_halt_sec = 10800
+    if stale_halt_sec < 300:
+        stale_halt_sec = 10800
+    return stale_halt_sec
+
+
+def _stop_verdict_pending(sessions_dir: Path, project_root: Path) -> tuple[str, str]:
+    entries = []
+    digest_documents = []
+    seen_groups = set()
+    for candidate in sorted(sessions_dir.glob("*.json")):
+        if candidate.name.endswith(".group.json"):
+            continue
+        pending, document = _load_authoritative_state(candidate)
+        if not pending.loop_active or pending.passes or pending.halt_reason:
+            continue
+        if pending.project_root:
+            try:
+                if Path(pending.project_root).resolve() != project_root.resolve():
+                    continue
+            except (OSError, RuntimeError):
+                continue
+        resolved_session_id = pending.session_id or candidate.stem
+        digest_documents.append({
+            "session_id": resolved_session_id,
+            "issue_ref": pending.issue_ref or "",
+            "logical_group_id": pending.logical_group_id or "",
+            "phase": pending.phase,
+            "owner_session_id": pending.owner_session_id or "",
+            "lease_id": pending.lease_id or "",
+            "fencing_epoch": pending.fencing_epoch or 0,
+            "lease_expires_at": pending.lease_expires_at or "",
+        })
+        if pending.logical_group_id:
+            if pending.logical_group_id in seen_groups:
+                continue
+            seen_groups.add(pending.logical_group_id)
+            entries.append("group:%s(incomplete)" % pending.logical_group_id)
+        else:
+            label = resolved_session_id
+            if pending.issue_ref:
+                label += "(#%s)" % pending.issue_ref
+            entries.append(label)
+    shown = entries[:5]
+    if len(entries) > 5:
+        shown.append("...")
+    digest_input = "".join(
+        json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        for item in digest_documents
+    )
+    digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest() if digest_input else ""
+    return ", ".join(shown), digest
+
+
+def _guard_pid_alive(pid: Optional[int]) -> Optional[bool]:
+    if pid is None or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _guard_resolved_root(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        return str(Path(value).resolve())
+    except (OSError, RuntimeError):
+        return value
+
+
+def _guard_session_fact(sf: Path) -> GuardSessionFact:
+    try:
+        snapshot, _document = _load_authoritative_state(sf)
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except Exception as exc:
+        return GuardSessionFact(
+            state_file=str(sf),
+            session_id=sf.stem,
+            project_root=None,
+            loop_active=False,
+            passes=False,
+            halt_reason="",
+            halt_category="",
+            lease_owner_session_id=None,
+            lease_expires_at=None,
+            pid=None,
+            pid_alive=None,
+            heartbeat_at=None,
+            last_progress_at=None,
+            last_activity_at=None,
+            updated_at=None,
+            awaiting_user=False,
+            iteration=0,
+            phase="unknown",
+            score_history_count=0,
+            last_score=None,
+            threshold=4.0,
+            mission="",
+            issue_ref=None,
+            read_error=str(exc),
+        )
+    lease = snapshot.lease
+    return GuardSessionFact(
+        state_file=str(sf),
+        session_id=snapshot.session_id or sf.stem,
+        project_root=_guard_resolved_root(snapshot.project_root),
+        loop_active=snapshot.loop_active,
+        passes=snapshot.passes,
+        halt_reason=snapshot.halt_reason,
+        halt_category=snapshot.halt_category,
+        lease_owner_session_id=(lease.owner_session_id if lease else None),
+        lease_expires_at=(lease.lease_expires_at if lease else None),
+        pid=snapshot.pid,
+        pid_alive=_guard_pid_alive(snapshot.pid),
+        heartbeat_at=snapshot.heartbeat_at,
+        last_progress_at=snapshot.last_progress_at,
+        last_activity_at=snapshot.last_activity_at,
+        updated_at=snapshot.updated_at,
+        awaiting_user=snapshot.awaiting_user,
+        iteration=snapshot.iteration,
+        phase=snapshot.phase,
+        score_history_count=len(snapshot.score_history),
+        last_score=snapshot.last_score,
+        threshold=snapshot.threshold,
+        mission=snapshot.mission,
+        issue_ref=snapshot.issue_ref,
+        read_error=None,
+    )
+
+
+def _guard_observed_epoch(observed_at: str) -> int:
+    raw = os.environ.get("MISSION_STOP_GUARD_NOW_EPOCH")
+    if raw:
+        try:
+            value = int(raw)
+            if value >= 0:
+                return value
+        except ValueError:
+            pass
+    parsed = parse_iso_datetime(observed_at)
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    return int(time.time())
+
+
+def _guard_pending(
+    sessions_dir: Path, project_root: Path
+) -> tuple[str, str]:
+    try:
+        return _stop_verdict_pending(sessions_dir, project_root)
+    except Exception:
+        # Candidate read failures are represented in GuardSessionFact and become a
+        # typed fail-closed decision.  Do not let the display aggregate bypass it.
+        return "", ""
+
+
+def _guard_root_request(hook_input: object) -> GuardRequest:
+    if not isinstance(hook_input, dict):
+        raise ValueError("guard-hook-input-invalid")
+    override = os.environ.get("MISSION_HOOK_CWD")
+    input_cwd = hook_input.get("cwd")
+    if override:
+        project_root = Path(override).resolve()
+    elif isinstance(input_cwd, str) and input_cwd and Path(input_cwd).is_dir():
+        project_root = Path(input_cwd).resolve()
+    else:
+        project_root = Path.cwd().resolve()
+    hook_pid = None
+    raw_pid = os.environ.get("MISSION_HOOK_AGENT_PID") or os.environ.get(
+        "MISSION_HOOK_CLAUDE_PID"
+    )
+    if raw_pid:
+        try:
+            parsed_pid = int(raw_pid)
+            hook_pid = parsed_pid if parsed_pid > 0 else None
+        except ValueError:
+            hook_pid = None
+    elif not override and not any(
+        os.environ.get(name)
+        for name in (
+            "MISSION_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"
+        )
+    ):
+        candidate_pid = find_agent_pid()
+        if not _last_pid_was_fallback():
+            hook_pid = candidate_pid
+    sessions_dir = project_root / ".mission-state" / "sessions"
+    candidates = tuple(
+        _guard_session_fact(path)
+        for path in sorted(sessions_dir.glob("*.json"))
+    ) if sessions_dir.is_dir() else ()
+    pending_breakdown, pending_digest = _guard_pending(
+        sessions_dir, project_root
+    ) if sessions_dir.is_dir() else ("", "")
+    observed_at = iso_now()
+    return GuardRequest(
+        project_root=str(project_root),
+        stop_hook_active=hook_input.get("stop_hook_active") is True,
+        mission_session_id=os.environ.get("MISSION_SESSION_ID"),
+        claude_session_id=os.environ.get("CLAUDE_CODE_SESSION_ID"),
+        codex_thread_id=os.environ.get("CODEX_THREAD_ID"),
+        hook_pid=hook_pid,
+        candidates=candidates,
+        observed_at=observed_at,
+        observed_epoch=_guard_observed_epoch(observed_at),
+        stale_halt_seconds_raw=os.environ.get("MISSION_STALE_HALT_SECONDS"),
+        planning_warn_iterations_raw=os.environ.get(
+            "MISSION_PLANNING_WARN_ITERATIONS"
+        ),
+        observe_ttl_seconds_raw=os.environ.get(
+            "MISSION_STOP_GUARD_HEARTBEAT_SECONDS"
+        ),
+        pending_breakdown=pending_breakdown,
+        pending_digest=pending_digest,
+        processed_orphan_state_files=(),
+    )
+
+
+def _guard_single_request(args, sf: Path) -> GuardRequest:
+    project_root = (
+        Path(args.cwd).resolve() if args.cwd else sf.parents[2].resolve()
+    )
+    candidate = _guard_session_fact(sf)
+    if candidate.read_error is not None:
+        raise ValueError(candidate.read_error)
+    pending_breakdown, pending_digest = _guard_pending(sf.parent, project_root)
+    hook_session_id = args.hook_session_id or None
+    mission_session_id = hook_session_id
+    hook_pid = args.hook_pid
+    if args.hook_session_id_from_pid:
+        mission_session_id = None
+    observed_at = iso_now()
+    return GuardRequest(
+        project_root=str(project_root),
+        stop_hook_active=False,
+        mission_session_id=mission_session_id,
+        claude_session_id=None,
+        codex_thread_id=None,
+        hook_pid=hook_pid if args.hook_session_id_from_pid else None,
+        candidates=(candidate,),
+        observed_at=observed_at,
+        observed_epoch=_guard_observed_epoch(observed_at),
+        stale_halt_seconds_raw=os.environ.get("MISSION_STALE_HALT_SECONDS"),
+        planning_warn_iterations_raw=args.planning_warn_iterations,
+        observe_ttl_seconds_raw=os.environ.get(
+            "MISSION_STOP_GUARD_HEARTBEAT_SECONDS"
+        ),
+        pending_breakdown=pending_breakdown,
+        pending_digest=pending_digest,
+        processed_orphan_state_files=(),
+    )
+
+
+def _guard_command_payload(command) -> dict:
+    if isinstance(command, NoCommand):
+        return {"kind": command.kind.value}
+    if isinstance(command, MarkHaltCommand):
+        return {
+            "kind": command.kind.value,
+            "cwd": command.cwd,
+            "session_id": command.session_id,
+            "reason": command.reason,
+            "category": command.category.value,
+            "origin": command.origin.value,
+        }
+    if isinstance(command, CleanupStaleExecuteCommand):
+        return {
+            "kind": command.kind.value,
+            "root": command.root,
+            "expected_state_file": command.expected_state_file,
+            "execute": command.execute,
+        }
+    if isinstance(command, StopGuardObserveCommand):
+        return {
+            "kind": command.kind.value,
+            "session_id": command.session_id,
+            "digest": command.digest,
+            "now_epoch": command.now_epoch,
+            "ttl_seconds": command.ttl_seconds,
+            "attempt": command.attempt,
+            "max_attempts": command.max_attempts,
+        }
+    raise ValueError("guard-command-unknown")
+
+
+def _guard_decision_payload(decision) -> dict:
+    freshness = decision.evidence.freshness
+    freshness_payload = None if freshness is None else {
+        "timestamp_field": freshness.timestamp_field,
+        "timestamp_value": freshness.timestamp_value,
+        "observed_at": freshness.observed_at,
+        "age_sec": freshness.age_sec,
+        "warn_after_sec": freshness.warn_after_sec,
+        "halt_after_sec": freshness.halt_after_sec,
+    }
+    lease = decision.evidence.lease
+    orphan = decision.evidence.orphan
+    reply_payload = {
+        "emit": decision.reply.emit,
+        "decision": decision.reply.decision,
+        "reason": decision.reply.reason,
+        "outcome_kind": decision.reply.outcome_kind,
+    }
+    shell_text = (
+        json.dumps(
+            {
+                "decision": decision.reply.decision,
+                "reason": decision.reply.reason,
+                "outcome_kind": decision.reply.outcome_kind,
+            },
+            ensure_ascii=False,
+        ) + "\n"
+        if decision.reply.emit else ""
+    )
+    payload = {
+        "schema": "mission-stop-verdict/1",
+        "decision": decision.host_decision,
+        "reason": decision.reason_code,
+        "outcome_kind": decision.outcome_kind,
+        "display_reason": decision.display_reason,
+        "planning_warning": decision.planning_warning,
+        "session_id": decision.session_id,
+        "pending_digest": decision.pending_digest,
+        "lease_present": lease.status.value != "absent",
+        "lease_unexpired": lease.status.value == "unexpired",
+        "awaiting_user": decision.evidence.awaiting_user,
+        "orphan_pid": (
+            orphan.pid if decision.finding.value == "orphan" else None
+        ),
+        "decision_id": decision.decision_id,
+        "selection": {
+            "state_file": decision.selection.state_file,
+            "session_id": decision.selection.session_id,
+            "reason": decision.selection.reason.value,
+            "considered_state_files": list(
+                decision.selection.considered_state_files
+            ),
+        },
+        "finding": decision.finding.value,
+        "evidence": {
+            "freshness": freshness_payload,
+            "awaiting_user": decision.evidence.awaiting_user,
+            "lease": {
+                "status": lease.status.value,
+                "expires_at": lease.expires_at,
+                "observed_at": lease.observed_at,
+            },
+            "orphan": {
+                "pid": orphan.pid,
+                "pid_alive": orphan.pid_alive,
+                "check_applicable": orphan.check_applicable,
+            },
+            "planning_warn_iterations": (
+                decision.evidence.planning_warn_iterations
+            ),
+            "pending_digest": decision.evidence.pending_digest,
+        },
+        "command": _guard_command_payload(decision.command),
+        "continuation": {
+            "project_root": decision.continuation.project_root,
+            "hook_session_id": decision.continuation.hook_session_id,
+            "hook_session_id_source": (
+                decision.continuation.hook_session_id_source
+            ),
+            "hook_pid": decision.continuation.hook_pid,
+            "processed_orphan_state_files": list(
+                decision.continuation.processed_orphan_state_files
+            ),
+        },
+        "reply": reply_payload,
+        "shell_text": shell_text,
+    }
+    # `guard_deadline` (the string the hook carries into later calls; #615 forbids
+    # computing it in the shell) and the budget clamp are both filled in here.
+    return finish_guard_verdict(payload)
+
+
+def _guard_apply_mark_halt(decision):
+    """Halt the session the decision names, in this process.
+
+    The undecorated body is called on purpose (`__wrapped__`): the guard's
+    budget belongs to `cmd_stop_verdict`, and a nested bound would report
+    exhaustion as `SystemExit(2)` -- a failed receipt rather than the terminal
+    `guard-budget-exhausted` the alarm exists to produce (#779 D2-c).
+    """
+    return guard_application.apply_command(
+        "mark-halt",
+        decision,
+        cmd_mark_halt.__wrapped__,
+        redirect_stdout=contextlib.redirect_stdout,
+        buffer_factory=io.StringIO,
+    )
+
+
+def _guard_apply_cleanup_stale(decision):
+    return guard_application.apply_command(
+        "cleanup-stale",
+        decision,
+        cmd_cleanup_stale.__wrapped__,
+        redirect_stdout=contextlib.redirect_stdout,
+        buffer_factory=io.StringIO,
+    )
+
+
+def _guard_apply_stop_guard_observe(decision):
+    return guard_application.apply_command(
+        "stop-guard-observe",
+        decision,
+        cmd_stop_guard_observe.__wrapped__,
+        redirect_stdout=contextlib.redirect_stdout,
+        buffer_factory=io.StringIO,
+    )
+
+
+# The closed command set, in one place.  It is a table rather than a chain of
+# branches so that the set can be checked for exactly the kinds the guard emits
+# -- the property the hook's `case` labels used to carry (#779).
+# A backstop only.  Cycles are caught by repetition (`resolve_with_applications`
+# refuses the same command on the same subject twice), so this bounds the walk
+# for a cycle that repetition cannot see.  It must be far above any real walk:
+# at 16 it rejected sixteen distinct orphans -- progress, on exactly the busy
+# host the guard exists to protect.
+_GUARD_APPLICATION_LIMIT = 4096
+
+_GUARD_COMMAND_APPLIERS = {
+    "none": guard_application.no_application,
+    "mark-halt": _guard_apply_mark_halt,
+    "cleanup-stale": _guard_apply_cleanup_stale,
+    "stop-guard-observe": _guard_apply_stop_guard_observe,
+}
+
+
+def _validate_guard_command_dispatch():
+    """Fail unless the table is exactly the kinds the guard can emit."""
+    return guard_application.validate_guard_command_dispatch(_GUARD_COMMAND_APPLIERS)
+
+
+@bounded_by_guard_timeout
+def cmd_stop_verdict(args):
+    """Resolve one state or one hook root into the typed Stop decision.
+
+    The decorator applies the guard's own limit (#742 D2), which covers hosts that
+    have neither `timeout` nor `perl`. On a platform without `SIGALRM` that inner
+    limit does not apply, and the shell adapter's external limit -- or, failing that,
+    the host's own hook timeout -- is what remains.
+    """
+    if args.hook_input is not None:
+        try:
+            if args.hook_input != "-":
+                raise ValueError("guard-hook-input-must-be-stdin")
+            hook_input = json.loads(sys.stdin.read())
+            decision = decide_stop_guard(_guard_root_request(hook_input))
+            decision = guard_application.resolve_with_applications(
+                decision,
+                appliers=_GUARD_COMMAND_APPLIERS,
+                request_for_orphan=_guard_root_request,
+                hook_input=hook_input,
+                limit=_GUARD_APPLICATION_LIMIT,
+            )
+            print(json.dumps(_guard_decision_payload(decision), ensure_ascii=False))
+            return
+        except Exception as exc:
+            print(json.dumps({
+                "schema": "mission-stop-verdict/1",
+                "decision": "block",
+                "reason": "guard-decision-unavailable",
+                "error": str(exc),
+            }, ensure_ascii=False), file=sys.stderr)
+            raise SystemExit(2) from exc
+
+    sf = Path(args.state_file)
+    if not sf.is_absolute():
+        sf = (Path.cwd() / sf).resolve()
+    try:
+        decision = decide_stop_guard(_guard_single_request(args, sf))
+        print(json.dumps(_guard_decision_payload(decision), ensure_ascii=False))
+    except Exception as exc:
+        print(json.dumps({
+            "schema": "mission-stop-verdict/1",
+            "decision": "block",
+            "reason": "authoritative-state-unreadable",
+            "error": str(exc),
+        }, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def cmd_freshness(args):
+    """Read-only freshness verdict for stop-hook gating."""
+    sf = Path(args.state_file)
+    if not sf.is_absolute():
+        sf = (Path.cwd() / sf).resolve()
+    try:
+        root = sf.parents[2]
+    except IndexError as exc:
+        print(json.dumps({"ok": False, "error": "state file path is unsafe"}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(2) from exc
+    try:
+        snapshot, _data = _load_authoritative_state(sf)
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(2) from exc
+    details = {"timestamp_field": None, "age_sec": None}
+    for field, value in (
+        ("heartbeat_at", snapshot.heartbeat_at),
+        ("last_progress_at", snapshot.last_progress_at),
+        ("last_activity_at", snapshot.last_activity_at),
+        ("updated_at", snapshot.updated_at),
+    ):
+        if not value:
+            continue
+        details = _state_age_details({field: value})
+        break
+    age_sec = details["age_sec"]
+    if age_sec is None:
+        verdict = "fresh"
+    else:
+        age_sec = int(age_sec)
+        halt_after_sec = _stale_halt_seconds()
+        if age_sec > halt_after_sec:
+            verdict = "stale"
+        elif age_sec > 3600:
+            verdict = "warn"
+        else:
+            verdict = "fresh"
+    print(json.dumps({
+        "ok": True,
+        "timestamp_field": details["timestamp_field"],
+        "age_sec": age_sec,
+        "verdict": verdict,
+    }, ensure_ascii=False))
+
+
+def _codex_hook_config_paths(explicit_path: str | None = None) -> list[Path]:
+    """Return candidate Codex user hook config paths in deterministic order."""
+    if explicit_path:
+        return [Path(explicit_path).expanduser()]
+    paths: list[Path] = []
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        paths.append(Path(codex_home).expanduser() / "hooks.json")
+    paths.append(Path.home() / ".codex" / "hooks.json")
+    out: list[Path] = []
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def _hook_config_status(paths: list[Path]) -> dict:
+    checked = []
+    for path in paths:
+        item = {"path": str(path), "exists": path.exists(), "configured": False}
+        if not path.exists():
+            checked.append(item)
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            json.loads(text)
+        except json.JSONDecodeError as e:
+            item["error"] = f"invalid json: {e}"
+            checked.append(item)
+            continue
+        except OSError as e:
+            item["error"] = str(e)
+            checked.append(item)
+            continue
+        item["configured"] = "mission-stop-guard.sh" in text
+        checked.append(item)
+    return {
+        "configured": any(item.get("configured") for item in checked),
+        "checked": checked,
+    }
+
+
+def _version_tuple(value: str) -> tuple:
+    """'1.2.0' -> (1, 2, 0). 非数値チャンクは 0 として比較する (壊れたディレクトリ名を無害化)."""
+    parts = []
+    for chunk in str(value).split("."):
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _plugin_cache_roots() -> dict[str, Path]:
+    """#186: plugin cache のバージョンディレクトリ親を返す (テスト用に env で override 可能)。
+
+    MISSION_CLAUDE_HOME / CODEX_HOME (既存の codex hook 探索と同じ変数) を尊重する。
+    """
+    claude_home = os.environ.get("MISSION_CLAUDE_HOME")
+    claude_root = Path(claude_home).expanduser() if claude_home else Path.home() / ".claude"
+    codex_home = os.environ.get("CODEX_HOME")
+    codex_root = Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
+    return {
+        "claude-code": claude_root / "plugins" / "cache" / "mission-marketplace" / "mission",
+        "codex": codex_root / "plugins" / "cache" / "mission-marketplace" / "mission",
+    }
+
+
+def _detect_version_skew() -> dict | None:
+    """#186: インストール済み plugin cache が現在の MISSION_CLI_VERSION より古ければ警告データを返す。
+
+    cache ディレクトリが存在しない、または全て現行以上のバージョンなら None (無警告)。
+    実行中の mission-state.py が symlink/直接 checkout 経由 (plugin cache を介さない) の場合、
+    このチェックは古い cache が「使われている」ことまでは検知できない — cache の存在自体を
+    陳腐化の兆候として警告するに留まる (#186 スコープ: 検出であり自動修復ではない)。
+    """
+    current = _version_tuple(MISSION_CLI_VERSION)
+    stale: dict[str, list[str]] = {}
+    for label, cache_dir in _plugin_cache_roots().items():
+        if not cache_dir.is_dir():
+            continue
+        try:
+            older = sorted(
+                p.name for p in cache_dir.iterdir()
+                if p.is_dir() and _version_tuple(p.name) < current
+            )
+        except OSError:
+            continue
+        if older:
+            stale[label] = older
+    if not stale:
+        return None
+    return {"cli_version": MISSION_CLI_VERSION, "stale_caches": stale}
+
+
+def _codex_next_fallback_available(state_active: bool, next_action: str) -> bool:
+    return state_active and next_action not in {"init", "report-blocker", "report-complete", "report-terminal"}
+
+
+def cmd_codex_preflight(args):
+    """Codex /mission startup health check.
+
+    This intentionally does not auto-install hooks. Codex hook trust is a user-level
+    security boundary, so the command reports state/guard readiness and leaves setup
+    as an explicit opt-in action.
+    """
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    state_present = sf.exists()
+    state_active = False
+    state_snapshot = {}
+    next_action = "init"
+    next_summary = "mission state がありません。init を先に実行してください。"
+    if state_present:
+        try:
+            snapshot, data = _load_authoritative_state(sf, legacy_compatibility=True)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except Exception:
+            snapshot = None
+            data = {}
+        state_snapshot = {
+            "session_id": data.get("session_id"),
+            "agent": data.get("agent"),
+            "loop_active": data.get("loop_active"),
+            "passes": data.get("passes"),
+            "halt_reason": data.get("halt_reason") or "",
+            "phase": data.get("phase"),
+            "iteration": data.get("iteration"),
+        }
+        state_active = (
+            data.get("loop_active") is True
+            and data.get("passes") is not True
+            and not (data.get("halt_reason") or "")
+        )
+        if snapshot is not None:
+            derived = _derive_next_action(data, authoritative=snapshot)
+            next_action = derived.get("next_action") or "unknown"
+            next_summary = derived.get("summary") or ""
+        else:
+            next_action = "unknown"
+            next_summary = "mission state を解決できませんでした。state ファイルを確認してください。"
+
+    hook_status = _hook_config_status(_codex_hook_config_paths(getattr(args, "hook_config", None)))
+    warnings: list[str] = []
+    required_actions: list[str] = []
+    if not state_present:
+        required_actions.append(
+            "Run `mission-state.py init ... --complexity <level>` and then "
+            "`mission-state.py codex-preflight --json --strict` before any task setup, "
+            "including worktree creation or implementation work, and before any final report."
+        )
+    elif not state_active:
+        required_actions.append("Resolve the inactive, passed, or halted mission state before continuing.")
+    if not hook_status["configured"]:
+        warnings.append(
+            "Codex Stop hook is not configured or was not found. Continue only with the state-driven fallback: call `mission-state.py next` at every phase boundary and before any final report."
+        )
+        if getattr(args, "require_stop_hook", False):
+            required_actions.append("Configure and trust `mission-stop-guard.sh` in Codex hooks, or rerun without --require-stop-hook for skills-only fallback.")
+
+    # #226 (A-4): MISSION_REQUIRE_SCORING_EVIDENCE=0 is a deprecated escape hatch that
+    # bypasses the scoring-evidence gate (findings recomputation) via the legacy --items
+    # push-score path. It must never be active for real work; --strict preflight rejects it
+    # and reports the run as not ok.
+    scoring_evidence_escape_hatch = os.environ.get("MISSION_REQUIRE_SCORING_EVIDENCE") == "0"
+    if scoring_evidence_escape_hatch:
+        required_actions.append(
+            "Unset MISSION_REQUIRE_SCORING_EVIDENCE=0: this deprecated escape hatch bypasses "
+            "the scoring-evidence gate and will be removed in the next minor release. "
+            "Use `push-score --scoring-json` (aggregate-reviews output) instead."
+        )
+
+    version_skew = _detect_version_skew()  # #186
+    if version_skew:
+        warnings.append(
+            "Installed plugin cache(s) are older than the running CLI version "
+            f"({version_skew['cli_version']}): {version_skew['stale_caches']}. "
+            "Old caches run stale SKILL.md instructions and gate logic; update the plugin "
+            "install or clear the stale cache directory."
+        )
+
+    fallback_available = _codex_next_fallback_available(state_active, next_action)
+    result = {
+        "ok": state_active and (hook_status["configured"] or (fallback_available and not getattr(args, "require_stop_hook", False))) and not (scoring_evidence_escape_hatch and getattr(args, "strict", False)),
+        "state_guard": {
+            "present": state_present,
+            "active": state_active,
+            "state_file": str(sf),
+            **state_snapshot,
+        },
+        "codex_stop_hook": hook_status,
+        "mechanical_guard": "stop-hook" if hook_status["configured"] else ("state-next-fallback" if fallback_available else "none"),
+        "next_action": next_action,
+        "next_summary": next_summary,
+        "warnings": warnings,
+        "required_actions": required_actions,
+        "version_skew": version_skew,  # #186: None (no skew) or {"cli_version": ..., "stale_caches": {...}}
+        # #187: Codex は Skill 並列不可・reviewer JSON の同一コンテキスト自演になりがちで、
+        # aggregate-reviews が初回失敗すると --force に逃げやすい。scoring パイプラインの
+        # 正規手順を preflight 時点で明示し、`next` の command_hint と合わせて force を回避する。
+        "scoring_pipeline": (
+            "Standard scoring path: for each reviewer, run "
+            "`review-import --iteration <N> --stdin` and retain the returned "
+            "review_evidence_ref.path; then run "
+            "`review-finalize --iteration <N> --input-ref <review_evidence_ref.path>` "
+            "with one --input-ref per reviewer; then run `mark-passes`. "
+            "If reviewer JSON cannot be produced in this Codex context, use mission-scorer as a "
+            "prose-to-JSON fallback converter, then feed its output through review-import and "
+            "review-finalize the same way. Never fall back to `mark-passes --force` just because review import "
+            "failed once; `mission-state.py next` will report a retry hint when the latest score "
+            "entry is missing findings evidence."
+        ),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print("ok=" + str(result["ok"]).lower())
+        print("mechanical_guard=" + result["mechanical_guard"])
+        print("next_action=" + result["next_action"])
+        for warning in warnings:
+            print("WARNING: " + warning, file=sys.stderr)
+        for action in required_actions:
+            print("ACTION: " + action, file=sys.stderr)
+    if required_actions:
+        sys.exit(2 if getattr(args, "strict", False) or getattr(args, "require_stop_hook", False) else 0)
+
+
+def _permission_preflight(cwd: Path) -> dict:
+    """Return the Phase 0 write-probe result without interacting with stdout."""
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        return {
+            "ok": False,
+            "halt_recorded": False,
+            "halt_category": "blocked-external",
+            "terminal_outcome": "blocked_external",
+            "error": "state-not-found",
+            "probes": [],
+        }
+    try:
+        _snapshot, data = _load_authoritative_state(sf)
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except (OSError, ValueError, FencedCommitError):
+        # Preserve the established v1-v4 schema diagnostic instead of
+        # collapsing malformed version fields into a permission failure.
+        try:
+            legacy_candidate = _read_legacy_json_file(sf)
+            _validate_schema_version(legacy_candidate)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except UnsupportedSchemaVersionError:
+            raise
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+        reason = (
+            "Phase 0 permission preflight failed before task execution: "
+            "state write unavailable"
+        )
+        return {
+            "ok": False,
+            "halt_recorded": False,
+            "halt_category": "blocked-external",
+            "terminal_outcome": "blocked_external",
+            "halt_reason": reason,
+            "probes": [
+                {"target": "state", "ok": False, "error": "write-unavailable"}
+            ],
+        }
+    assumptions_path = data.get("assumptions_path")
+    if not assumptions_path:
+        reason = (
+            "Phase 0 permission preflight failed before task execution: "
+            "assumptions path missing"
+        )
+        observed, terminal_outcome = _record_permission_probe_observation(
+            cwd,
+            sf,
+            (
+                PermissionProbe("state", "allowed", None),
+                PermissionProbe("assumptions", "unknown", "assumptions-path-missing"),
+            ),
+        )
+        return {
+            "ok": False,
+            "halt_recorded": observed,
+            "halt_category": "blocked-external",
+            "terminal_outcome": terminal_outcome if observed else "blocked_external",
+            "halt_reason": reason,
+            "error": "assumptions-path-missing",
+            "probes": [],
+        }
+
+    try:
+        assumptions_file = _validated_assumptions_probe_path(
+            cwd, str(assumptions_path)
+        )
+    except (OSError, ValueError):
+        reason = (
+            "Phase 0 permission preflight failed before task execution: "
+            "assumptions evidence path is invalid"
+        )
+        observed, terminal_outcome = _record_permission_probe_observation(
+            cwd,
+            sf,
+            (
+                PermissionProbe("state", "allowed", None),
+                PermissionProbe("assumptions", "unknown", "invalid-evidence-path"),
+            ),
+        )
+        return {
+            "ok": False,
+            "halt_recorded": observed,
+            "halt_category": "blocked-external",
+            "terminal_outcome": terminal_outcome if observed else "blocked_external",
+            "halt_reason": reason,
+            "probes": [
+                {
+                    "target": "assumptions",
+                    "ok": False,
+                    "error": "invalid-evidence-path",
+                }
+            ],
+        }
+
+    probes = []
+    checks = (
+        ("state", lambda: _probe_directory_write(sf.parent)),
+        ("assumptions", lambda: _probe_file_write(assumptions_file)),
+    )
+    for target, probe in checks:
+        try:
+            probe()
+        except OSError:
+            probes.append(
+                {"target": target, "ok": False, "error": "write-unavailable"}
+            )
+            reason = (
+                "Phase 0 permission preflight failed before task execution: "
+                f"{target} write unavailable"
+            )
+            observations = tuple(
+                PermissionProbe(item["target"], "allowed", None)
+                for item in probes[:-1]
+            ) + (PermissionProbe(target, "denied", "write-unavailable"),)
+            halt_recorded, terminal_outcome = _record_permission_probe_observation(
+                cwd, sf, observations
+            )
+            return {
+                "ok": False,
+                "halt_recorded": halt_recorded,
+                "halt_category": "blocked-external",
+                "terminal_outcome": terminal_outcome if halt_recorded else "blocked_external",
+                "halt_reason": reason,
+                "probes": probes,
+            }
+        probes.append({"target": target, "ok": True})
+
+    _halt_recorded, _terminal_outcome = _record_permission_probe_observation(
+        cwd,
+        sf,
+        tuple(
+            PermissionProbe(item["target"], "allowed", None)
+            for item in probes
+        ),
+    )
+    return {
+        "ok": True,
+        "halt_recorded": False,
+        "probes": probes,
+    }
+
+
+def _exit_internal_invariant(code: str, detail: str) -> None:
+    print("ERROR: internal-invariant: %s: %s" % (code, detail), file=sys.stderr)
+    raise SystemExit(2)
+
+
+def _record_permission_probe_observation(
+    cwd: Path,
+    sf: Path,
+    probes: tuple[PermissionProbe, ...],
+) -> tuple[bool, str | None]:
+    """Persist only the fixed A5 consequence of a closed permission result."""
+    try:
+        result = record_permission_observation(
+            _legacy_lifecycle_repository(
+                cwd,
+                sf,
+                stamp=False,
+                strict_read=True,
+                lease_reason="permission-preflight",
+                pre_admit_lease=True,
+            ),
+            PermissionObservationRequest(probes=probes, observed_at=iso_now()),
+            transition_phase=_transition_phase,
+        )
+        if result.claim_source == "undecodable":
+            # 批2-a-3 (#632): 劣化 doc への gate-only 降格は正常な terminal
+            # （冪等 halt）と区別できないと障害調査で追えない。state には
+            # 書かず stderr にだけ残す（保存 document の互換性を壊さない）。
+            print(
+                "WARNING: permission halt fell back to the synthetic view "
+                "because the session document could not be decoded",
+                file=sys.stderr,
+            )
+        return result.halt_recorded, result.terminal_outcome
+    except (CanonicalStateEncodingError, FreshReviewError, CapacityWriteError):
+        raise
+    except UnsupportedSchemaVersionError:
+        raise
+    except FencedCommitError as error:
+        # lease 競合等の運用系は従来どおり False（halt 未記録）へ縮退するが、
+        # kernel invariant 違反は吸収しない（fail-open 防止・批2-a-2 #631）
+        if error.code in {"transition-divergence", "transition-unsealed"}:
+            raise
+        return False, None
+    except (OSError, ValueError):
+        return False, None
+
+
+def cmd_permission_preflight(args):
+    """Verify that Phase 0 can persist state and assumptions evidence."""
+    try:
+        result = _permission_preflight(Path.cwd())
+    except PermissionHaltRejected as error:
+        _exit_internal_invariant(error.code, str(error))
+    except FencedCommitError as error:
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        _exit_internal_invariant(error.code, error.detail)
+    print(json.dumps(result, indent=2 if getattr(args, "json", False) else None))
+    if not result["ok"]:
+        sys.exit(2)
+
+
+# Issue #2: set で変更禁止のフィールド (mission_id 整合性維持のため)
+# 分類の正典は kernel (mission_kernel.commands の閉集合)。#617 批1-a で移管。
+FROZEN_FIELDS = GENERIC_SET_FROZEN_FIELDS
+
+
+_REVIEW_LINEAGE_SET_FIELDS = frozenset({"review_generation", "review_group_id"})
+
+
+def _set_mutates_review_lineage(kvs) -> bool:
+    return any(
+        item.partition("=")[0] in _REVIEW_LINEAGE_SET_FIELDS
+        for item in kvs
+        if isinstance(item, str)
+    )
+
+
+@contextlib.contextmanager
+def _review_lineage_transaction(cwd: Path, *, required: bool):
+    if required:
+        with StateLock(state_dir(cwd) / ".init.lock"):
+            yield
+        return
+    yield
+
+
+def cmd_set(args):
+    """Adapt generic property syntax to the A1 v4-compatible use case."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    try:
+        with _review_lineage_transaction(
+            cwd,
+            required=_set_mutates_review_lineage(args.kvs),
+        ):
+            _set_fields_with_repository(args, cwd, sf)
+    except TimeoutError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _set_fields_with_repository(args, cwd: Path, sf: Path):
+    try:
+        result = run_set_fields(
+            _legacy_lifecycle_repository(cwd, sf, stamp=True, strict_read=True),
+            SetFieldsRequest(kvs=tuple(args.kvs), at=iso_now()),
+            SetFieldsServices(
+                frozen_fields=frozenset(FROZEN_FIELDS),
+                reject_active_provider_mutation=_reject_active_provider_mutation,
+                normalize_phase=_normalize_set_phase_value,
+                transition_phase=_transition_phase,
+                ensure_phase_timing=_ensure_phase_timing,
+                derive_review_tier=derive_review_tier,
+                derive_review_tier_decision=derive_review_tier_decision,
+                reviewer_count_by_tier=dict(TIER_REVIEWER_COUNT),
+                goal_dispatch_fields=_goal_dispatch_route_fields,
+                goal_dispatch_guidance=_goal_dispatch_guidance,
+            ),
+        )
+    except UnsupportedSchemaVersionError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    except LifecycleFailure as error:
+        if error.guided:
+            _raise_guided_failure(
+                error.message,
+                command="set",
+                reason=error.reason,
+                context=_guidance_context_for_state(error.state),
+                outcome_kind=error.outcome_kind,
+            )
+        print(f"ERROR: {error.message}", file=sys.stderr)
+        sys.exit(2 if error.reason != "key-value-format" else 1)
+    except (ActivityTimingError, ArtifactContractError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    except FencedCommitError as error:
+        # 運用系 (lease 競合等) は既存の CLI 診断経路へ委ねる。構造化するのは
+        # kernel invariant 違反のみ (批2-a-2 #631)
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        print(
+            f"ERROR: internal-invariant: {error.code}: {error.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    for warning in result.warnings:
+        print(warning, file=sys.stderr)
+    if result.aggregate_error is not None:
+        print(
+            f"WARNING: aggregate index update failed: {result.aggregate_error}",
+            file=sys.stderr,
+        )
+    print(
+        json.dumps(
+            result.routed_verdict or {"ok": True},
+            ensure_ascii=False,
+            indent=2 if result.routed_verdict else None,
+        )
+    )
+
+
+# H2 (2026-06-10): スコア項目キーの正規形とエイリアス。実ログで表記揺れが混在し
+# stats 横断集計・min_item 検証が壊れたため push-score 時に正規化する。
+CANONICAL_SCORE_KEYS = {"mission_achievement", "accuracy", "completeness", "usability"}
+REVIEW_SCORE_KEYS = ("mission_achievement", "accuracy", "completeness", "usability")
+REVIEW_SEVERITIES = {"High", "Medium", "Low"}
+# #353: provisional observation thresholds. Calibrate from reviewer_output_stats
+# distributions before treating these values as stable guidance; this is WARN-only.
+REVIEW_PROSE_BYTES_WARN = 20_000
+REVIEW_PROSE_RATIO_WARN = 0.7
+REVIEW_TEMPLATE_HEADING_RE = re.compile(
+    r"^\s*#{2,3}\s+(?:"
+    r"レビュー結果(?:\s*\(担当観点:.*\))?|"
+    r"採点|強み\s*\(Good\)|改善点\s*\(Issues\)|"
+    r"重大ブロッカー\s*\(あれば\)|担当観点に対する総評"
+    r")\s*$"
+)
+REVIEW_JSON_FENCE_RE = re.compile(
+    r"^```json[ \t]*\r?\n(?P<body>.*?)\r?\n```[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
+SCORE_KEY_ALIASES = {
+    "usefulness": "usability",
+    "practicality": "usability",
+}
+
+# `reviewer_consensus` used to be treated as an item.  It is now represented
+# only by the independent review_agreement field.  New writers reject both the
+# raw legacy name and its alias for every complexity; old state remains
+# display-only and is classified separately by audit.
+LEGACY_SCORE_ITEM_KEYS = {"reviewer_consensus", "reviewer_agreement"}
+
+
+def normalize_score_items(items: dict):
+    """エイリアスを正規キーへ変換する。返り値: (normalized, unknown, collisions).
+
+    衝突規則 (B-H1, 2026-06-10): エイリアスの変換先が既に埋まっている場合は
+    明示された正規キーの値が勝ち、エイリアス側は破棄して collisions に記録する
+    (dict 順序依存のサイレント上書きを排除)。エイリアス同士の衝突は先勝ち。
+    """
+    normalized = {}
+    unknown = []
+    collisions = []
+    # pass 1: 正規キー・未知キーを確定 (正規キーの明示指定が常に勝つ)
+    for k, v in items.items():
+        if k in CANONICAL_SCORE_KEYS or k not in SCORE_KEY_ALIASES:
+            if k not in CANONICAL_SCORE_KEYS:
+                unknown.append(k)
+            normalized[k] = v
+    # pass 2: エイリアスを変換 (衝突したら破棄して記録)
+    for k, v in items.items():
+        if k in SCORE_KEY_ALIASES:
+            ck = SCORE_KEY_ALIASES[k]
+            if ck in normalized:
+                collisions.append((k, ck))
+            else:
+                normalized[ck] = v
+    return normalized, unknown, collisions
+
+
+def _scoring_archive_path(cwd: Path, iteration: int, data: dict, suffix: str = ".md") -> Path:
+    archive_dir = state_dir(cwd) / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    # H1 (2026-06-10): mission_id を含めて連続ランの上書き消失を防止
+    gid = (data.get("mission_id") or "unknown")[:8]
+    return archive_dir / f"iter-{iteration}-{gid}-scoring{suffix}"
+
+
+def _scoring_metadata_header(data: dict, entry: dict, iteration: int) -> str:
+    # #3 (2026-06-13): scoring md 単独で起動元を追えるようメタヘッダを前置 (HTML コメント=grep 可能)
+    return (
+        f"<!-- mission-meta: session_id={data.get('session_id')} "
+        f"agent={data.get('agent') or 'unknown'} mission_id={data.get('mission_id')} "
+        f"iteration={iteration} timestamp={entry['timestamp']} -->\n"
+    )
+
+
+def _archive_scoring_output(cwd: Path, scoring_output: str, iteration: int,
+                            data: dict, entry: dict) -> str | None:
+    """Scorer の md 出力を archive/iter-N-<mission8>-scoring.md に保存し起動元メタを前置する。
+
+    返り値は保存先パス。ファイルが見つからなければ WARN を出して None を返す (後方互換)。
+    """
+    src = Path(scoring_output)
+    if not (src.exists() and src.is_file()):
+        print(f"WARNING: --scoring-output のファイルが見つかりません: {src}", file=sys.stderr)
+        return None
+    dst = _scoring_archive_path(cwd, iteration, data)
+    meta = _scoring_metadata_header(data, entry, iteration)
+    dst.write_text(meta + src.read_text(encoding="utf-8"), encoding="utf-8")
+    return str(dst)
+
+
+def _validate_score_args(args) -> dict:
+    """push-score の --items パース + エイリアス正規化 + 範囲検証。正規化済 items を返す (不正なら exit)。"""
+    try:
+        items = json.loads(args.items)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: --items が不正な JSON です: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(items, dict):
+        print("ERROR: --items は JSON オブジェクト (key->score) で指定してください。", file=sys.stderr)
+        sys.exit(1)
+    if LEGACY_SCORE_ITEM_KEYS & set(items):
+        print(
+            "ERROR: reviewer_consensus / reviewer_agreement は新規 score items では使用できません。"
+            " 合意度は review_agreement の独立フィールドで記録し、items は4軸だけにしてください。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    # H2: エイリアス正規化 + 未知キー WARN (reject はしない: 後方互換)
+    items, unknown_keys, collisions = normalize_score_items(items)
+    if collisions:
+        for alias, ck in collisions:
+            print(
+                f"WARNING: エイリアス '{alias}' が既存キー '{ck}' と衝突したため破棄しました (明示値が優先)。",
+                file=sys.stderr,
+            )
+    if unknown_keys:
+        print(
+            f"WARNING: 非正規のスコア項目キー {unknown_keys} を検出しました。"
+            f" 正規キー: {sorted(CANONICAL_SCORE_KEYS)} (エイリアス: {SCORE_KEY_ALIASES})",
+            file=sys.stderr,
+        )
+    # 改善3a: composite / min_item の有限値・範囲バリデーション。
+    for label, val in (("composite", args.composite), ("min_item", args.min_item)):
+        if not _finite_score(val):
+            print(f"ERROR: --{label} {val} は bool ではない有限の {SCORE_MIN}〜{SCORE_MAX} 数値で指定してください。", file=sys.stderr)
+            sys.exit(1)
+    return items
+
+
+def _numeric_item_values(items: dict) -> list:
+    return [float(v) for v in items.values() if _finite_score(v)]
+
+
+def _reject_normalized_scale(items: dict) -> None:
+    """ADR-002 Stage 1: 0-1 正規化スケール混入の reject.
+
+    実ログ (xai-cli cx-019efece, 2026-06-25) で composite 0.96 (= 4.8/5) が 0-5 範囲内として
+    素通りした回帰。全 items が 1.0 以下なら 5 点スケールの採点ではないと判断して exit 2。
+    正当に 1 項目だけ 1.0 以下になるケース (max > 1.0) は通す。
+    """
+    numeric = _numeric_item_values(items)
+    if numeric and max(numeric) <= 1.0:
+        print(
+            "ERROR: すべての items スコアが 1.0 以下です。0-1 正規化スケールで採点した疑いがあります。"
+            f" 5 点満点 ({SCORE_MIN}-{SCORE_MAX}) で採点し直してください。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _load_scoring_json(path_str: str):
+    """ADR-002 Stage 1: --scoring-json の strict 読み込み。
+
+    返り値: (items, notes, open_high, payload)。従来 --items 経路と異なり、
+    未知キー・範囲外の item 値は WARN でなく reject する (exit 2)。
+    """
+    src = Path(path_str)
+    if not (src.exists() and src.is_file()):
+        print(f"ERROR: --scoring-json のファイルが見つかりません: {src}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        payload = json.loads(src.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        print(f"ERROR: --scoring-json が不正な JSON です: {e}", file=sys.stderr)
+        sys.exit(2)
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), dict) or not payload["items"]:
+        print("ERROR: --scoring-json は {\"items\": {key->score}} を含む JSON オブジェクトで指定してください。", file=sys.stderr)
+        sys.exit(2)
+    items, unknown_keys, collisions = normalize_score_items(payload["items"])
+    for alias, ck in collisions:
+        print(
+            f"WARNING: エイリアス '{alias}' が既存キー '{ck}' と衝突したため破棄しました (明示値が優先)。",
+            file=sys.stderr,
+        )
+    if unknown_keys:
+        print(
+            f"ERROR: --scoring-json に非正規のスコア項目キー {unknown_keys} があります。"
+            f" 正規キー: {sorted(CANONICAL_SCORE_KEYS)} (エイリアス: {SCORE_KEY_ALIASES})",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if set(items) != CANONICAL_SCORE_KEYS:
+        print(
+            "ERROR: --scoring-json の items は4つの正規採点軸だけで指定してください。"
+            f" 正規キー: {sorted(CANONICAL_SCORE_KEYS)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    for k, v in items.items():
+        if not _finite_score(v):
+            print(f"ERROR: --scoring-json の item '{k}'={v} は bool ではない有限の {SCORE_MIN}〜{SCORE_MAX} 数値で指定してください。", file=sys.stderr)
+            sys.exit(2)
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        print("ERROR: --scoring-json の notes は文字列で指定してください。", file=sys.stderr)
+        sys.exit(2)
+    # open_high はキー欠如 (None) と明示 0 を区別する: 明示値は CLI --open-high より優先される
+    open_high = payload.get("open_high")
+    if open_high is not None and not _nonnegative_int(open_high):
+        print("ERROR: --scoring-json の open_high は bool ではない 0 以上の整数で指定してください。", file=sys.stderr)
+        sys.exit(2)
+    findings_evidence_path = payload.get("findings_evidence_path")
+    if findings_evidence_path is not None and not isinstance(findings_evidence_path, str):
+        print("ERROR: --scoring-json の findings_evidence_path は文字列で指定してください。", file=sys.stderr)
+        sys.exit(2)
+    review_agreement = payload.get("review_agreement")
+    if review_agreement is not None and not _finite_score(review_agreement):
+        print("ERROR: --scoring-json の review_agreement は bool ではない有限の 0〜5 数値または null で指定してください。", file=sys.stderr)
+        sys.exit(2)
+    agreement_detail = payload.get("agreement_detail")
+    if agreement_detail is not None and not isinstance(agreement_detail, dict):
+        print("ERROR: --scoring-json の agreement_detail はオブジェクトで指定してください。", file=sys.stderr)
+        sys.exit(2)
+    return items, notes, open_high, payload
+
+
+def _archive_scoring_json(
+    cwd: Path, iteration: int, data: dict, entry: dict, payload: dict,
+) -> _PublishedFile:
+    """Archive scoring output under an immutable content-addressed name."""
+    meta = {
+        "session_id": data.get("session_id"),
+        "agent": data.get("agent") or "unknown",
+        "mission_id": data.get("mission_id"),
+        "iteration": iteration,
+        "timestamp": entry["timestamp"],
+        "computed_composite": entry["composite"],
+        "computed_min_item": entry["min_item"],
+    }
+    # This is the immutable object that binds what the scorer supplied to what
+    # the state machine subsequently accepts.  Do not put the self-reference
+    # (scoring_evidence_ref) in it: the digest names this exact byte sequence.
+    out = {
+        "schema": "mission-scoring-artifact/1",
+        "_meta": meta,
+        "binding": {
+            "session_id": data.get("session_id"),
+            "mission_id": data.get("mission_id"),
+            "iteration": iteration,
+            "items": entry["items"],
+            "composite": entry["composite"],
+            "min_item": entry["min_item"],
+            "revision_scope": entry.get("revision_scope"),
+            "review_generation": (entry.get("review_evidence_ref") or {}).get("generation"),
+            "review_evidence_ref": entry.get("review_evidence_ref"),
+        },
+        "payload": payload,
+    }
+    # Keep the original top-level shape for historical archive consumers.  The
+    # binding above, not these convenience fields, is authoritative.
+    out.update(payload)
+    content = (json.dumps(out, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
+    mission8 = str(data.get("mission_id") or "unknown")[:8]
+    name = f"iter-{iteration}-{mission8}-scoring-{digest[:16]}.json"
+    return _publish_review_archive_transaction(cwd, name, content)
+
+
+_SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class ApprovalVerifier(Protocol):
+    def __call__(self, request: dict) -> dict:
+        ...
+
+
+_APPROVAL_VERIFIERS: dict[str, ApprovalVerifier] = {}
+_APPROVAL_VERIFIER_ENTRY_POINT_GROUP = "mission.approval_verifiers"
+_APPROVAL_VERIFIER_REGISTRY_SCHEMA = "mission-approval-verifier-registry/2"
+_APPROVAL_VERIFIER_REGISTRY_LIMIT = 64 * 1024
+_APPROVAL_VERIFIER_TIMEOUT_SEC = 5
+_APPROVAL_VERIFIER_TERMINATE_GRACE_SEC = 0.2
+_EXECUTION_ISOLATOR_ENTRY_POINT_GROUP = "mission.execution_isolators"
+_EXECUTION_ISOLATOR_REGISTRY_SCHEMA = "mission-execution-isolator-registry/1"
+_EXECUTION_ISOLATOR_REQUIRED = frozenset({"filesystem-namespace", "readonly-mount", "env-reset", "network-policy"})
+
+
+def register_approval_verifier(name: str, verifier: ApprovalVerifier) -> None:
+    """Register a host-provided verifier. The portable CLI ships with none."""
+    if not _APPROVAL_VERIFIER_NAME_RE.fullmatch(name) or not callable(verifier):
+        raise ValueError("invalid approval verifier registration")
+    _APPROVAL_VERIFIERS[name] = verifier
+
+
+def _reject_duplicate_registry_key(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("approval verifier registry has duplicate keys")
+        value[key] = item
+    return value
+
+
+def _read_approval_verifier_registry(path: Path) -> dict:
+    """Read a bounded registry without following a file replacement or link."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("approval verifier registry cannot be read safely on this host")
+    try:
+        fd = os.open(os.fspath(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > _APPROVAL_VERIFIER_REGISTRY_LIMIT:
+                raise ValueError("approval verifier registry must be a bounded regular file")
+            raw = os.read(fd, info.st_size + 1)
+            if len(raw) != info.st_size or os.fstat(fd).st_size != info.st_size:
+                raise ValueError("approval verifier registry changed while being read")
+        finally:
+            os.close(fd)
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_registry_key)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("approval verifier registry is invalid") from exc
+    if not isinstance(value, dict) or set(value) != {"schema", "verifiers"} or value.get("schema") != _APPROVAL_VERIFIER_REGISTRY_SCHEMA:
+        raise ValueError("approval verifier registry is invalid")
+    verifiers = value.get("verifiers")
+    if not isinstance(verifiers, list) or len(verifiers) > 64:
+        raise ValueError("approval verifier registry is invalid")
+    result = {}
+    for item in verifiers:
+        if not isinstance(item, dict) or set(item) != {"id", "entry_point", "distribution", "version", "source_digest"}:
+            raise ValueError("approval verifier registry is invalid")
+        identifier, entry_point = item.get("id"), item.get("entry_point")
+        distribution, version, source_digest = item.get("distribution"), item.get("version"), item.get("source_digest")
+        if (not isinstance(identifier, str) or not _APPROVAL_VERIFIER_NAME_RE.fullmatch(identifier)
+                or not isinstance(entry_point, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", entry_point)
+                or not isinstance(distribution, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", distribution)
+                or not isinstance(version, str) or not version or len(version) > 128
+                or not isinstance(source_digest, str) or not _SHA256_REF_RE.fullmatch(source_digest)
+                or identifier in result):
+            raise ValueError("approval verifier registry is invalid")
+        result[identifier] = {"entry_point": entry_point, "distribution": distribution, "version": version, "source_digest": source_digest}
+    return result
+
+
+def _configured_execution_isolator(cwd: Path, isolator_name: str):
+    """Resolve one host-only strict backend and pin its code and policy."""
+    if not isinstance(isolator_name, str) or not _APPROVAL_VERIFIER_NAME_RE.fullmatch(isolator_name):
+        raise ValueError("execution isolator is invalid")
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    location = (Path(xdg) if xdg else Path.home() / ".config") / "mission" / "execution-isolators.json"
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("execution isolator registry cannot be read safely on this host")
+    try:
+        fd = os.open(os.fspath(location), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > _APPROVAL_VERIFIER_REGISTRY_LIMIT:
+                raise ValueError("execution isolator registry is invalid")
+            raw = os.read(fd, info.st_size + 1)
+            if len(raw) != info.st_size or os.fstat(fd).st_size != info.st_size:
+                raise ValueError("execution isolator registry changed while being read")
+        finally:
+            os.close(fd)
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_registry_key)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("execution isolator registry is invalid") from exc
+    if not isinstance(value, dict) or set(value) != {"schema", "isolators"} or value.get("schema") != _EXECUTION_ISOLATOR_REGISTRY_SCHEMA:
+        raise ValueError("execution isolator registry is invalid")
+    configured = None
+    for item in value.get("isolators", []):
+        expected = {"id", "entry_point", "distribution", "version", "source_digest", "policy_digest", "enforced_capabilities"}
+        if not isinstance(item, dict) or set(item) != expected:
+            raise ValueError("execution isolator registry is invalid")
+        if item.get("id") == isolator_name:
+            if configured is not None:
+                raise ValueError("execution isolator registry has duplicate ids")
+            configured = item
+    if configured is None:
+        return None
+    if (not isinstance(configured.get("entry_point"), str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", configured["entry_point"])
+            or not isinstance(configured.get("distribution"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", configured["distribution"])
+            or not isinstance(configured.get("version"), str) or not configured["version"]
+            or not isinstance(configured.get("source_digest"), str) or not _SHA256_REF_RE.fullmatch(configured["source_digest"])
+            or not isinstance(configured.get("policy_digest"), str) or not _SHA256_REF_RE.fullmatch(configured["policy_digest"])
+            or not isinstance(configured.get("enforced_capabilities"), list)
+            or not _EXECUTION_ISOLATOR_REQUIRED.issubset(set(configured["enforced_capabilities"]))):
+        raise ValueError("execution isolator registry is invalid")
+    discovered = importlib.metadata.entry_points()
+    candidates = (discovered.select(group=_EXECUTION_ISOLATOR_ENTRY_POINT_GROUP)
+                  if hasattr(discovered, "select") else discovered.get(_EXECUTION_ISOLATOR_ENTRY_POINT_GROUP, ()))
+    matches = [entry for entry in candidates if entry.name == configured["entry_point"]]
+    if len(matches) != 1:
+        raise ValueError("execution isolator entry point is not installed")
+    entry = matches[0]; distribution = getattr(entry, "dist", None)
+    if (distribution is None or str(distribution.metadata.get("Name") or "").lower() != configured["distribution"].lower()
+            or str(distribution.version) != configured["version"]):
+        raise ValueError("execution isolator distribution identity mismatch")
+    module_name = getattr(entry, "module", "")
+    module_spec = importlib.util.find_spec(module_name) if isinstance(module_name, str) else None
+    origin = getattr(module_spec, "origin", None)
+    if not isinstance(origin, str) or not origin:
+        raise ValueError("execution isolator source is invalid")
+    source = Path(origin).read_bytes()
+    if "sha256:" + hashlib.sha256(source).hexdigest() != configured["source_digest"]:
+        raise ValueError("execution isolator source digest mismatch")
+    value = getattr(entry, "value", None)
+    if not isinstance(value, str) or not value:
+        raise ValueError("execution isolator entry point is invalid")
+    attestation = {
+        "schema": "execution-isolator/1", "backend_id": configured["id"], "version": configured["version"],
+        "host_support": True, "policy_digest": configured["policy_digest"],
+        "enforced_capabilities": sorted(configured["enforced_capabilities"]),
+    }
+    return {**configured, "module": module_name, "entry_point_value": value, "attestation": attestation}
+
+
+def _run_strict_provider_backend(descriptor: dict, packet: bytes) -> dict:
+    """Run only the host-pinned backend; no subprocess fallback exists."""
+    entry_points = importlib.metadata.entry_points()
+    candidates = (entry_points.select(group=_EXECUTION_ISOLATOR_ENTRY_POINT_GROUP)
+                  if hasattr(entry_points, "select") else entry_points.get(_EXECUTION_ISOLATOR_ENTRY_POINT_GROUP, ()))
+    matches = [entry for entry in candidates if entry.name == descriptor["entry_point"]]
+    if len(matches) != 1 or getattr(matches[0], "value", None) != descriptor["entry_point_value"]:
+        raise ProviderPreflightError("isolator-drift")
+    backend = matches[0].load()
+    result = dispatch_prepared_packet(
+        {"isolation": "strict", "isolator": descriptor["attestation"], "ambient_scopes": []},
+        descriptor["attestation"]["policy_digest"], packet,
+        lambda _: (_ for _ in ()).throw(ProviderPreflightError("isolator-unavailable")),
+        lambda _: (descriptor["attestation"], backend),
+    )
+    if not isinstance(result, dict) or type(result.get("returncode")) is not int:
+        raise ProviderPreflightError("isolator-result-invalid")
+    try:
+        result["receipt"] = validate_closed_provider_receipt(
+            result.get("receipt"), required_kind="provider"
+        )
+    except PlanningFailure:
+        raise ProviderPreflightError("strict-receipt-invalid")
+    return result
+
+
+def _configured_approval_entry_point(cwd: Path, verifier_name: str):
+    """Return a pinned, non-executable verifier descriptor for a child to load."""
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    locations = [(Path(xdg) if xdg else Path.home() / ".config") / "mission" / "approval-verifiers.json"]
+    configured = {}
+    for location in locations:
+        try:
+            exists = location.exists()
+        except OSError as exc:
+            raise ValueError("approval verifier registry is invalid") from exc
+        if not exists:
+            continue
+        for identifier, entry_point in _read_approval_verifier_registry(location).items():
+            if identifier in configured:
+                raise ValueError("approval verifier registry has duplicate verifier ids")
+            configured[identifier] = entry_point
+    configured_item = configured.get(verifier_name)
+    if configured_item is None:
+        return None
+    discovered = importlib.metadata.entry_points()
+    candidates = discovered.select(group=_APPROVAL_VERIFIER_ENTRY_POINT_GROUP) if hasattr(discovered, "select") else discovered.get(_APPROVAL_VERIFIER_ENTRY_POINT_GROUP, ())
+    matches = [item for item in candidates if item.name == configured_item["entry_point"]]
+    if len(matches) != 1:
+        raise ValueError("approval verifier entry point is not installed")
+    entry_point = matches[0]
+    try:
+        attached_distribution = getattr(entry_point, "dist", None)
+        distribution = attached_distribution
+        if distribution is None:
+            distribution = importlib.metadata.distribution(
+                configured_item["distribution"]
+            )
+        observed_distribution = RegisteredEntryPointDistributionObservation(
+            entry_point_name=entry_point.name,
+            entry_point_value=entry_point.value,
+            has_attached_distribution=attached_distribution is not None,
+            distribution_name=distribution.metadata["Name"],
+            distribution_version=distribution.version,
+            owned_entry_points=tuple(
+                map(
+                    lambda item: (item.group, item.name, item.value),
+                    distribution.entry_points,
+                )
+            ),
+        )
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+        importlib.metadata.PackageNotFoundError,
+    ) as exc:
+        raise ValueError("approval verifier distribution identity mismatch") from exc
+    validate_registered_approval_entry_point_distribution(
+        observed_distribution,
+        configured_item,
+        group=_APPROVAL_VERIFIER_ENTRY_POINT_GROUP,
+    )
+    from mission_application.approval_verifier import valid_module_name
+    module_name = getattr(entry_point, "module", "")
+    if not valid_module_name(module_name):
+        raise ValueError("approval verifier entry point is invalid")
+    module_spec = importlib.util.find_spec(module_name)
+    origin = getattr(module_spec, "origin", None)
+    if not isinstance(origin, str) or not origin or origin in {"built-in", "frozen"}:
+        raise ValueError("approval verifier source is invalid")
+    try:
+        source = Path(origin).read_bytes()
+    except OSError as exc:
+        raise ValueError("approval verifier source is invalid") from exc
+    if "sha256:" + hashlib.sha256(source).hexdigest() != configured_item["source_digest"]:
+        raise ValueError("approval verifier source digest mismatch")
+    # Never call EntryPoint.load() in the state-mutating parent.  Loading is
+    # arbitrary provider code and belongs to the bounded child below.
+    entry_point_value = getattr(entry_point, "value", None)
+    if not isinstance(entry_point_value, str) or not entry_point_value:
+        raise ValueError("approval verifier entry point is invalid")
+    # Keep this immutable lookup result as a parent-side pin.  The child must
+    # rediscover the same entry point before it calls load(), so metadata churn
+    # cannot retarget a same-name provider during the handoff.
+    return {**configured_item, "module": module_name, "entry_point_value": entry_point_value}
+
+
+def _run_approval_verifier(verifier, request: dict, *, cwd: Path | None = None) -> dict:
+    from mission_application.approval_verifier import run_approval
+    return run_approval(verifier, request, timeout=_APPROVAL_VERIFIER_TIMEOUT_SEC,
+                        grace=_APPROVAL_VERIFIER_TERMINATE_GRACE_SEC, cwd=cwd)
+
+
+def verify_force_approval(request: dict, verifier_name: object, *, cwd: Path | None = None,
+                          budgeted: bool = False, state: dict | None = None) -> dict:
+    from mission_application.approval_verifier import verify_approval_request
+    return verify_approval_request(request, verifier_name, verifiers=_APPROVAL_VERIFIERS,
+                                   resolve=_configured_approval_entry_point, execute=_run_approval_verifier,
+                                   cwd=cwd, budgeted=budgeted, state=state)
+
+
+def _force_envelope_replayed(cwd: Path, envelope: dict) -> bool:
+    """Reject a request or receipt already consumed by any local session."""
+    request_digest = envelope["request"]["request_digest"]
+    receipt = envelope["receipt_ref"]
+    sessions = state_dir(cwd) / "sessions"
+    for candidate in sessions.glob("*.json"):
+        try:
+            other = read_session_json(candidate)
+            recorded = other.get("force_approval") if isinstance(other, dict) else None
+            if not isinstance(recorded, dict):
+                continue
+            validated = validate_recorded_envelope(recorded)
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            # A malformed record must never become a bypass; it is not a
+            # reusable approved envelope, and audit will flag it separately.
+            continue
+        if (validated["request"]["request_digest"] == request_digest
+                or validated["receipt_ref"] == receipt):
+            return True
+    return False
+
+
+def _is_new_provenance_state(data: dict) -> bool:
+    """Legacy terminal records are display-only; new writers do not consult this."""
+    version = _validate_schema_version(data)
+    return version is not None and version >= 4
+
+
+def _revision_scope_from_args(args) -> dict:
+    base, head = getattr(args, "base_sha", None), getattr(args, "head_sha", None)
+    if base is None and head is None:
+        return {"kind": "not-applicable", "reason_code": "non-git"}
+    if not (isinstance(base, str) and isinstance(head, str)
+            and re.fullmatch(r"[0-9a-f]{40}", base) and re.fullmatch(r"[0-9a-f]{40}", head)):
+        raise ValueError("git revision_scope requires exact 40-character --base-sha and --head-sha")
+    return {"kind": "git", "base_sha": base, "head_sha": head}
+
+
+_NOT_APPLICABLE_SCOPE_ERROR = {
+    True: "not-applicable revision_scope is invalid",
+    # **算出せよとは書かない。** 下の検査は `rev-parse HEAD == head_sha` なので、
+    # 実行時に `git rev-parse HEAD` で埋めると常に成立して空回りする。渡すのは
+    # レビュー時に固定した SHA で、その一致検査が「レビュー後に head が動いた」を捕まえる。
+    False: (
+        "git project では --base-sha と --head-sha が必須です。"
+        "レビュー時に固定した base / head の 40 桁 SHA を渡してください。"
+        "実行時に算出した値を渡すと、reviewed head の一致検査が空回りします"
+    ),
+}
+
+
+def _validate_revision_scope(cwd: Path, scope: object) -> None:
+    """Bind git scope to this checked-out project, never to a SHA-shaped claim."""
+    if not isinstance(scope, dict):
+        raise ValueError("revision_scope is invalid")
+    git = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+                         capture_output=True, text=True)
+    is_git = git.returncode == 0
+    if scope.get("kind") == "not-applicable":
+        # 失敗の理由で文言を分ける。旧文言は「non-git でのみ許される」とだけ言い、
+        # 読んだ人を「この project を non-git 扱いにする方法」探しへ誘導していた。
+        # 形が壊れている場合とフラグが足りない場合では直し方が違う。
+        #
+        # 分岐を足さず定数の索引で選ぶ。adapter は argparse 配線と機械的変換だけを
+        # 持つ契約で (ADR-006)、判断を書き足すと thin-adapter ratchet が止める。
+        malformed = scope != {"kind": "not-applicable", "reason_code": "non-git"}
+        if malformed or is_git:
+            raise ValueError(_NOT_APPLICABLE_SCOPE_ERROR[malformed])
+        return
+    if scope.get("kind") != "git":
+        raise ValueError("revision_scope is invalid")
+    if not is_git:
+        raise ValueError("git revision_scope requires a git project")
+    base, head = scope.get("base_sha"), scope.get("head_sha")
+    if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+               for value in (base, head)):
+        raise ValueError("git revision_scope must use exact SHAs")
+    def checked(*command: str) -> str:
+        result = subprocess.run(["git", "-C", str(cwd), *command], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ValueError("git revision_scope names an unknown commit")
+        return result.stdout.strip()
+    checked("cat-file", "-e", f"{base}^{{commit}}")
+    checked("cat-file", "-e", f"{head}^{{commit}}")
+    checked("merge-base", "--is-ancestor", base, head)
+    if checked("rev-parse", "HEAD") != head:
+        raise ValueError("git revision_scope head is not the current reviewed HEAD")
+
+
+_REVIEW_LINEAGE_REF_FIELDS = ("review_group_id", "review_generation", "base_sha", "head_sha")
+
+
+def _current_review_lineage(cwd: Path, data: dict, revision_scope: dict) -> dict | None:
+    """Return the active review generation binding, or preserve pre-rollout state."""
+    group = data.get("review_group_id")
+    if group is None:
+        return None
+    generation = data.get("review_generation")
+    base, head = data.get("base_sha"), data.get("head_sha")
+    if (not isinstance(group, str) or not group or "\x00" in group
+            or not isinstance(generation, int) or isinstance(generation, bool) or generation < 1
+            or revision_scope.get("kind") != "git"
+            or (base, head) != (revision_scope.get("base_sha"), revision_scope.get("head_sha"))):
+        raise ValueError("review lineage state must bind a valid group, generation, and git revision")
+
+    members = []
+    try:
+        for state_path in _iter_state_files(cwd):
+            state = read_session_json(state_path)
+            if state.get("review_group_id") != group:
+                continue
+            member_generation = state.get("review_generation")
+            if (not isinstance(member_generation, int) or isinstance(member_generation, bool)
+                    or member_generation < 1):
+                raise ValueError("review lineage group has an invalid generation")
+            members.append(state)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("review lineage state is unreadable") from exc
+    if not members:
+        raise ValueError("review lineage group is missing")
+    newest_generation = max(member["review_generation"] for member in members)
+    newest = [member for member in members if member["review_generation"] == newest_generation]
+    if len(newest) != 1:
+        raise ValueError("review lineage group has no single active generation")
+    current = newest[0]
+    if (generation != newest_generation or current.get("session_id") != data.get("session_id")
+            or current.get("passes") is not False or current.get("loop_active") is not True
+            or current.get("terminal_outcome") is not None):
+        raise ValueError("review lineage is not the current active generation")
+    return {
+        "review_group_id": group,
+        "review_generation": generation,
+        "base_sha": base,
+        "head_sha": head,
+    }
+
+
+def _validate_review_lineage_ref(cwd: Path, data: dict, ref: dict, revision_scope: dict) -> None:
+    """Bind an aggregate to the session's active review generation when present."""
+    provided = [field in ref for field in _REVIEW_LINEAGE_REF_FIELDS]
+    if any(provided) and not all(provided):
+        raise ValueError("review lineage reference is incomplete")
+    expected = _current_review_lineage(cwd, data, revision_scope)
+    if expected is None:
+        if any(provided):
+            raise ValueError("review lineage reference is not allowed for a legacy session")
+        return
+    if not all(provided) or {field: ref[field] for field in _REVIEW_LINEAGE_REF_FIELDS} != expected:
+        raise ValueError("review lineage reference does not bind the current generation")
+
+
+def _validate_provenance(provenance: object, *, require: bool) -> dict | None:
+    if provenance is None:
+        if require:
+            raise ValueError("structured score provenance is required")
+        return None
+    if not isinstance(provenance, dict):
+        raise ValueError("score provenance must be an object")
+    source = provenance.get("score_source")
+    ref = provenance.get("review_evidence_ref")
+    scope = provenance.get("revision_scope")
+    if source not in {"scoring-json", "manual-import"}:
+        raise ValueError("score provenance has invalid score_source")
+    if source == "scoring-json":
+        if not isinstance(ref, dict) or ref.get("kind") != "review-aggregate" or not isinstance(ref.get("path"), str) or not _SHA256_REF_RE.fullmatch(str(ref.get("digest") or "")) or not isinstance(ref.get("generation"), str) or not isinstance(ref.get("revision_scope"), dict):
+            raise ValueError("score provenance has invalid review_evidence_ref")
+        lineage_fields = [field in ref for field in _REVIEW_LINEAGE_REF_FIELDS]
+        if any(lineage_fields) and (
+                not all(lineage_fields)
+                or not isinstance(ref.get("review_group_id"), str)
+                or not ref["review_group_id"]
+                or "\x00" in ref["review_group_id"]
+                or not isinstance(ref.get("review_generation"), int)
+                or isinstance(ref["review_generation"], bool)
+                or ref["review_generation"] < 1
+                or not all(isinstance(ref.get(field), str) and re.fullmatch(r"[0-9a-f]{40}", ref[field])
+                           for field in ("base_sha", "head_sha"))):
+            raise ValueError("score provenance has invalid review lineage reference")
+        if not isinstance(scope, dict) or scope != ref["revision_scope"]:
+            raise ValueError("score provenance revision_scope mismatch")
+    else:
+        # Manual imports intentionally do not reuse reviewer aggregates.  The
+        # typed capture is the only supported host-file route.
+        manual = provenance.get("manual_evidence_ref")
+        if ref is not None:
+            raise ValueError("manual-import must not contain review_evidence_ref")
+        if (not isinstance(manual, dict) or manual.get("kind") != "manual-score"
+                or not isinstance(manual.get("path"), str)
+                or not _SHA256_REF_RE.fullmatch(str(manual.get("digest") or ""))
+                or not isinstance(manual.get("generation"), str)
+                or not isinstance(manual.get("revision_scope"), dict)):
+            raise ValueError("score provenance has invalid manual_evidence_ref")
+        if not isinstance(scope, dict) or scope != manual["revision_scope"]:
+            raise ValueError("manual-import revision_scope mismatch")
+    if not isinstance(provenance.get("scoring_evidence_ref"), dict) and require:
+        # push-score adds this after archiving; raw aggregate output has none.
+        pass
+    return provenance
+
+
+def _manual_score_binding(data: dict, entry: dict, payload: dict) -> dict:
+    """The complete claim a manually supplied score is permitted to carry."""
+    return {
+        "session_id": data.get("session_id"), "mission_id": data.get("mission_id"),
+        "iteration": entry.get("iteration"), "items": entry.get("items"),
+        "composite": entry.get("composite"), "min_item": entry.get("min_item"),
+        "review_agreement": entry.get("review_agreement"),
+        "open_high": entry.get("open_high"), "revision_scope": payload.get("revision_scope"),
+        "source_evidence_ref": payload.get("source_evidence_ref"),
+    }
+
+
+def _validate_manual_score_payload(payload: object, data: dict, entry: dict) -> None:
+    if not isinstance(payload, dict) or payload.get("schema") != "mission-manual-score/1":
+        raise ValueError("manual score evidence has invalid schema")
+    if "review_evidence_ref" in payload or payload.get("manual_evidence_ref") is not None:
+        raise ValueError("manual score evidence must not use review aggregate references")
+    required = {"schema", "session_id", "mission_id", "iteration", "items", "composite", "min_item",
+                "review_agreement", "open_high", "revision_scope", "source_evidence_ref", "imported_at", "input_digest"}
+    if set(payload) != required:
+        raise ValueError("manual score evidence has invalid fields")
+    if not isinstance(payload.get("imported_at"), str) or not payload["imported_at"].strip():
+        raise ValueError("manual score evidence imported_at is invalid")
+    items = payload.get("items")
+    if not isinstance(items, dict) or set(items) != CANONICAL_SCORE_KEYS:
+        raise ValueError("manual score items are invalid")
+    for axis in REVIEW_SCORE_KEYS:
+        if not _finite_score(items[axis]):
+            raise ValueError(f"manual score item {axis} must be a finite in-range number")
+    for label in ("composite", "min_item", "review_agreement"):
+        if not _finite_score(payload.get(label)):
+            raise ValueError(f"manual score {label} must be a finite in-range number")
+    if not _nonnegative_int(payload.get("open_high")):
+        raise ValueError("manual score open_high must be a non-negative integer")
+    source = payload.get("source_evidence_ref")
+    if (not isinstance(source, dict) or set(source) != {"kind", "ref", "digest"}
+            or source.get("kind") != "manual-source-evidence"
+            or not _SHA256_REF_RE.fullmatch(str(source.get("ref") or ""))
+            or source.get("ref") != source.get("digest")):
+        raise ValueError("manual score evidence source reference is invalid")
+    claimed_digest = payload.get("input_digest")
+    unsigned = {key: value for key, value in payload.items() if key != "input_digest"}
+    if claimed_digest != provenance_digest(unsigned):
+        raise ValueError("manual score evidence input digest mismatch")
+    if _manual_score_binding(data, entry, payload) != {
+        key: payload.get(key) for key in _manual_score_binding(data, entry, payload)
+    }:
+        raise ValueError("manual score evidence binding mismatch")
+
+
+def _read_bounded_review_evidence(cwd: Path, path_text: object) -> bytes:
+    """Read a state-local evidence file through one descriptor chain, without TOCTOU."""
+    try:
+        return read_score_provenance_evidence(cwd, path_text)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("score provenance evidence", "review evidence")) from exc
+
+
+def _read_bounded_manual_input(path_text: object) -> bytes:
+    """Safely capture one host-provided manual-score JSON file before archiving."""
+    if not isinstance(path_text, str) or not path_text or "\x00" in path_text:
+        raise ValueError("manual score input path is invalid")
+    try:
+        fd = os.open(path_text, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            initial = os.fstat(fd)
+            if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1 or initial.st_size > 4 * 1024 * 1024:
+                raise ValueError("manual score input must be a bounded regular non-symlink file")
+            content = os.read(fd, initial.st_size)
+            final = os.fstat(fd)
+            current = os.stat(path_text, follow_symlinks=False)
+            identity = lambda metadata: (
+                metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink,
+                metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
+            )
+            if (
+                len(content) != initial.st_size
+                or os.read(fd, 1)
+                or identity(final) != identity(initial)
+                or identity(current) != identity(initial)
+            ):
+                raise ValueError("manual score input changed while being read")
+            return content
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise ValueError("manual score input path is invalid") from exc
+
+
+def cmd_manual_score_capture(args):
+    """Capture a typed manual score into the only manual-import evidence route."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(2)
+    try:
+        content = _read_bounded_manual_input(args.input)
+        payload = json.loads(
+            content.decode("utf-8"), object_pairs_hook=_reject_duplicate_review_keys
+        )
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError, _DuplicateReviewJsonKey) as exc:
+        print(f"ERROR: manual score input: {exc}", file=sys.stderr)
+        sys.exit(2)
+    session_id = sf.stem
+    try:
+        target_bytes = sf.read_bytes()
+        inspected = inspect_repository_bytes(target_bytes, expected_session_id=session_id)
+        target_digest = "sha256:" + hashlib.sha256(target_bytes).hexdigest()
+        caller_operation_id, operation_arguments = _compatibility_operation_arguments(
+            {"out": args.out, "input_digest": "sha256:" + hashlib.sha256(content).hexdigest()},
+            target_digest=target_digest,
+            require_caller=inspected.format is RepositoryFormat.V5,
+        )
+        operation_id, operation_command = _canonical_compatibility_operation(
+            session_id, "manual-score-capture", operation_arguments,
+            caller_operation_id=caller_operation_id,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    repository = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, session_id=session_id,
+        operation_id=operation_id, operation_command=operation_command,
+        operation_command_type="manual-score-capture",
+    )
+    with repository.transaction(), _PublishedFilesTransaction() as published_files:
+        data = repository.load()
+        replayed = getattr(repository, "operation_replayed", False)
+        if replayed:
+            replay_digest = hashlib.sha256(content).hexdigest()
+            replay_mission8 = str(data.get("mission_id") or "unknown")[:8]
+            replay_iteration = payload.get("iteration")
+            replay_archive_name = f"iter-{replay_iteration}-{replay_mission8}-manual-{replay_digest[:16]}.json"
+            replay_archive = state_dir(cwd) / "archive" / replay_archive_name
+            replay_ref = legacy_manual_score_ref(typed_manual_score_ref({
+                "kind": "manual-score",
+                "path": str(replay_archive.relative_to(cwd)),
+                "digest": "sha256:" + replay_digest,
+                "generation": replay_digest[:16],
+                "revision_scope": payload["revision_scope"],
+            }))
+            print(json.dumps({"ok": True, "scoring_json": args.out, "manual_evidence_ref": replay_ref}, ensure_ascii=False))
+            return
+        _enforce_session_lease_for_write(sf, data)
+        entry = {
+            "iteration": payload.get("iteration"), "items": payload.get("items"),
+            "composite": payload.get("composite"), "min_item": payload.get("min_item"),
+            "review_agreement": payload.get("review_agreement"),
+            "open_high": payload.get("open_high"),
+        }
+        try:
+            _validate_manual_score_payload(payload, data, entry)
+            _validate_revision_scope(cwd, payload["revision_scope"])
+            if (not isinstance(entry["iteration"], int) or isinstance(entry["iteration"], bool)
+                    or entry["iteration"] < 1 or entry["iteration"] != data.get("iteration")
+                    or set(entry["items"] or {}) != CANONICAL_SCORE_KEYS):
+                raise ValueError("manual score iteration or items are invalid")
+            values = [float(entry["items"][axis]) for axis in REVIEW_SCORE_KEYS]
+            if entry["composite"] != round(sum(values) / len(values), 2) or entry["min_item"] != round(min(values), 2):
+                raise ValueError("manual score composite or min_item is not derived from four axes")
+        except (TypeError, ValueError) as exc:
+            print(f"ERROR: manual score input: {exc}", file=sys.stderr)
+            sys.exit(2)
+        digest = hashlib.sha256(content).hexdigest()
+        mission8 = str(data.get("mission_id") or "unknown")[:8]
+        archive_name = f"iter-{entry['iteration']}-{mission8}-manual-{digest[:16]}.json"
+        try:
+            archive_publish = published_files.add(
+                _publish_review_archive_transaction(cwd, archive_name, content)
+            )
+        except ValueError as exc:
+            print(f"ERROR: immutable manual score archive rejected: {exc}", file=sys.stderr)
+            sys.exit(2)
+        archive = archive_publish.path
+        ref = legacy_manual_score_ref(typed_manual_score_ref({
+            "kind": "manual-score", "path": str(archive.relative_to(cwd)),
+            "digest": "sha256:" + digest, "generation": digest[:16],
+            "revision_scope": payload["revision_scope"],
+        }))
+        scoring = {
+            "items": entry["items"], "open_high": entry["open_high"],
+            "review_agreement": entry["review_agreement"],
+            "score_provenance": {"score_source": "manual-import", "manual_evidence_ref": ref,
+                                  "revision_scope": payload["revision_scope"]},
+        }
+        out = Path(args.out)
+        scoring_content = json.dumps(scoring, indent=2, ensure_ascii=False).encode("utf-8")
+        try:
+            output_publish = published_files.add(
+                _publish_output_transaction(
+                    out,
+                    scoring_content,
+                    forbidden_targets=((archive_publish.directory_identity, archive.name),),
+                )
+            )
+        except ValueError as exc:
+            print(f"ERROR: manual scoring output rejected: {exc}", file=sys.stderr)
+            sys.exit(2)
+        data["updated_at"] = iso_now()
+        _verify_published_file(archive_publish)
+        _verify_published_file(output_publish)
+        repository.save(data)
+    print(json.dumps({"ok": True, "scoring_json": str(out), "manual_evidence_ref": ref}, ensure_ascii=False))
+
+
+def _revalidate_score_provenance(
+    cwd: Path, entry: dict, data: dict, *, require_scoring_artifact: bool = True
+) -> Optional[dict]:
+    """Re-check immutable evidence at the pass boundary; never trust a saved digest alone."""
+    # A live pass is always a new decision.  Historical schema versions are
+    # display compatibility only and must never relax its evidence boundary.
+    provenance = _validate_provenance(entry.get("score_provenance"), require=True)
+    if provenance is None:
+        return None
+    is_manual = provenance["score_source"] == "manual-import"
+    ref = provenance["manual_evidence_ref"] if is_manual else provenance["review_evidence_ref"]
+    _validate_revision_scope(cwd, provenance["revision_scope"])
+    if not is_manual:
+        _validate_review_lineage_ref(cwd, data, ref, provenance["revision_scope"])
+    content = _read_bounded_review_evidence(cwd, ref["path"])
+    digest = hashlib.sha256(content).hexdigest()
+    if "sha256:" + digest != ref["digest"]:
+        raise ValueError("review evidence digest mismatch")
+    if ref["generation"] != digest[:16]:
+        raise ValueError("review evidence generation mismatch")
+    try:
+        parsed = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("review evidence must be valid UTF-8 JSON") from exc
+    if is_manual:
+        _validate_manual_score_payload(parsed, data, entry)
+        score_ref = provenance.get("scoring_evidence_ref")
+        if require_scoring_artifact:
+            if not isinstance(score_ref, dict) or score_ref.get("kind") != "scoring-artifact" or not _SHA256_REF_RE.fullmatch(str(score_ref.get("digest") or "")):
+                raise ValueError("scoring evidence reference is invalid")
+            score_bytes = _read_bounded_review_evidence(cwd, score_ref.get("path"))
+            if "sha256:" + hashlib.sha256(score_bytes).hexdigest() != score_ref["digest"]:
+                raise ValueError("scoring evidence digest mismatch")
+        return None
+    if not isinstance(parsed, dict) or parsed.get("schema") != "mission-review-aggregate/1":
+        raise ValueError("review evidence has invalid schema")
+    try:
+        archive_iteration = parsed.get("iteration")
+        expected_iteration = entry.get("iteration")
+        if (isinstance(archive_iteration, bool) or not isinstance(archive_iteration, int)
+                or archive_iteration < 1 or archive_iteration != expected_iteration):
+            raise ValueError("review evidence iteration mismatch")
+        derived = reduce_review_aggregate(parsed.get("inputs"), expected_iteration=expected_iteration)
+    except ValueError as exc:
+        raise ValueError(f"review evidence inputs are invalid: {exc}") from exc
+    claim = parsed.get("score_claim")
+    expected_claim = {
+        "iteration": entry.get("iteration"), "items": entry.get("items"),
+        "composite": entry.get("composite"), "min_item": entry.get("min_item"),
+        "open_high": entry.get("open_high"), "review_agreement": entry.get("review_agreement"),
+        "agreement_detail": entry.get("agreement_detail"),
+    }
+    derived_claim = {"iteration": expected_iteration, **derived}
+    if claim != derived_claim:
+        raise ValueError("review evidence score claim is absent or not derived from inputs")
+    if expected_claim != derived_claim:
+        raise ValueError("review evidence score claim mismatch")
+    score_ref = provenance.get("scoring_evidence_ref")
+    if require_scoring_artifact:
+        if not isinstance(score_ref, dict) or score_ref.get("kind") != "scoring-artifact" or not _SHA256_REF_RE.fullmatch(str(score_ref.get("digest") or "")):
+            raise ValueError("scoring evidence reference is invalid")
+        score_bytes = _read_bounded_review_evidence(cwd, score_ref.get("path"))
+        if "sha256:" + hashlib.sha256(score_bytes).hexdigest() != score_ref["digest"]:
+            raise ValueError("scoring evidence digest mismatch")
+        try:
+            artifact = json.loads(score_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("scoring evidence must be valid UTF-8 JSON") from exc
+        binding = artifact.get("binding") if isinstance(artifact, dict) else None
+        expected = {
+            "session_id": data.get("session_id"), "mission_id": data.get("mission_id"),
+            "iteration": entry.get("iteration"), "items": entry.get("items"),
+            "composite": entry.get("composite"), "min_item": entry.get("min_item"),
+            "revision_scope": provenance["revision_scope"], "review_generation": ref["generation"],
+            "review_evidence_ref": ref,
+        }
+        if artifact.get("schema") != "mission-scoring-artifact/1" or binding != expected:
+            raise ValueError("scoring evidence binding mismatch")
+    # #690: hand back the archive this call just proved.  Deriving the findings
+    # here instead would run the projection from mark-passes too, letting an
+    # observation-only feature add rejection conditions to the pass gate.
+    return parsed
+
+
+def _resolve_recorded_path(cwd: Path, path_text: str) -> Path:
+    path = Path(path_text).expanduser()
+    if path.is_absolute():
+        return path
+    return cwd / path
+
+
+def _count_high_findings_in_evidence(cwd: Path, path_text: str) -> int:
+    path = _resolve_recorded_path(cwd, path_text)
+    if not (path.exists() and path.is_file()):
+        print(f"ERROR: findings evidence file is missing: {path_text}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        print(f"ERROR: findings evidence JSON is invalid: {path_text}: {e}", file=sys.stderr)
+        sys.exit(2)
+    inputs = payload.get("inputs")
+    if not isinstance(inputs, list):
+        print("ERROR: findings evidence is missing inputs list", file=sys.stderr)
+        sys.exit(2)
+    high = 0
+    for review in inputs:
+        if not isinstance(review, dict):
+            print("ERROR: findings evidence contains invalid review entry", file=sys.stderr)
+            sys.exit(2)
+        findings = review.get("findings") or []
+        if not isinstance(findings, list):
+            print("ERROR: findings evidence contains invalid findings list", file=sys.stderr)
+            sys.exit(2)
+        high += sum(1 for finding in findings if isinstance(finding, dict) and finding.get("severity") == "High")
+    return high
+
+
+def _count_medium_findings_in_evidence(cwd: Path, path_text: str) -> int | None:
+    """Return the Medium finding count of one findings evidence file.
+
+    #568: observation only.  Unlike the High counter this never exits: a
+    missing or malformed evidence file must not change the pass gate, so the
+    caller records ``None`` instead of a fabricated count.
+    """
+    try:
+        path = _resolve_recorded_path(cwd, path_text)
+    except (SystemExit, ValueError, OSError):
+        return None
+    if not (path.exists() and path.is_file()):
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return None
+    inputs = payload.get("inputs")
+    if not isinstance(inputs, list):
+        return None
+    medium = 0
+    for review in inputs:
+        if not isinstance(review, dict):
+            return None
+        findings = review.get("findings") or []
+        if not isinstance(findings, list):
+            return None
+        medium += sum(
+            1
+            for finding in findings
+            if isinstance(finding, dict) and finding.get("severity") == "Medium"
+        )
+    return medium
+
+
+# #568: SKILL.md「終了判定」の early-stop 継続条件。composite の band は
+# [EARLY_STOP_BAND_LOW, EARLY_STOP_BAND_HIGH]、Medium は
+# EARLY_STOP_MEDIUM_MIN 件以上を継続候補とする。
+EARLY_STOP_BAND_LOW = 4.0
+EARLY_STOP_BAND_HIGH = 4.3
+EARLY_STOP_MEDIUM_MIN = 3
+
+
+def _early_stop_evaluation(
+    cwd: Path, data: dict, latest: dict | None, at: str, rationale: str | None
+) -> dict | None:
+    """Record why the loop stopped at this iteration (#568, observation only).
+
+    The pass gate does not consider any of these values.  They exist so that a
+    later audit can tell an intentional early stop from an unnoticed one.
+    """
+    if not isinstance(latest, dict):
+        return None
+    composite = latest.get("composite")
+    if isinstance(composite, bool) or not isinstance(composite, (int, float)):
+        composite = None
+    else:
+        composite = float(composite)
+    composite_in_band = (
+        composite is not None
+        and EARLY_STOP_BAND_LOW <= composite <= EARLY_STOP_BAND_HIGH
+    )
+
+    evidence_path = latest.get("findings_evidence_path")
+    medium_count = (
+        _count_medium_findings_in_evidence(cwd, evidence_path)
+        if isinstance(evidence_path, str) and evidence_path
+        else None
+    )
+
+    iteration = data.get("iteration")
+    if isinstance(iteration, bool) or not isinstance(iteration, int):
+        iteration = None
+    max_iter = data.get("max_iter")
+    if isinstance(max_iter, bool) or not isinstance(max_iter, int):
+        max_iter = None
+    # max_iter=None は「上限なし (stagnation 停止モード)」であり、継続余地は残る。
+    iteration_lt_max = max_iter is None or (iteration is not None and iteration < max_iter)
+
+    rationale = (rationale or "").strip() or None
+    return {
+        "composite": composite,
+        "composite_in_band": composite_in_band,
+        "medium_count": medium_count,
+        "medium_count_source": "findings-evidence" if medium_count is not None else "unavailable",
+        "iteration": iteration,
+        "max_iter": max_iter,
+        "iteration_lt_max": iteration_lt_max,
+        "continuation_conditions_met": bool(
+            composite_in_band
+            and medium_count is not None
+            and medium_count >= EARLY_STOP_MEDIUM_MIN
+            and iteration_lt_max
+        ),
+        # 「1 iter で確実に解消可能か」は機械判定できない。宣言がある場合だけ
+        # 「解消可能ではないと判断して停止した」ことを記録する。
+        "resolvable_in_one_iter": False if rationale else None,
+        "rationale": rationale,
+        "decision": "stop",
+        "recorded_at": at,
+    }
+
+
+def _validate_findings_evidence_gate(cwd: Path, latest: dict) -> None:
+    source = latest.get("score_source")
+    if source != "scoring-json":
+        print(
+            "WARNING: legacy score entry has no machine findings evidence; using stored open_high only.",
+            file=sys.stderr,
+        )
+        return
+    path_text = latest.get("findings_evidence_path")
+    if not path_text:
+        print(
+            "ERROR: score_source=scoring-json なのに High findings evidence の findings_evidence_path がありません。"
+            " aggregate-reviews の出力を push-score --scoring-json に渡してください。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    evidence_high = _count_high_findings_in_evidence(cwd, path_text)
+    open_high = latest.get("open_high")
+    if open_high != evidence_high:
+        print(
+            f"ERROR: findings evidence の High 件数 ({evidence_high}) と score entry の open_high ({open_high}) が一致しません。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _max_agreement_delta(latest: dict) -> tuple[str | None, float | None]:
+    detail = latest.get("agreement_detail")
+    if not isinstance(detail, dict) or not detail:
+        return None, None
+    max_axis = None
+    max_delta = None
+    for axis, value in detail.items():
+        if not isinstance(value, dict):
+            continue
+        delta = value.get("delta")
+        if not isinstance(delta, (int, float)) or math.isnan(float(delta)):
+            continue
+        delta = float(delta)
+        if max_delta is None or delta > max_delta:
+            max_axis = str(axis)
+            max_delta = delta
+    return max_axis, max_delta
+
+
+def _validate_review_agreement_gate(latest: dict) -> None:
+    axis, delta = _max_agreement_delta(latest)
+    if delta is None:
+        return
+    if delta > 1.5:
+        print(
+            f"ERROR: 低合意: 争点軸 {axis} の agreement が低いため合格にできません "
+            f"(max-min={delta:.2f})。追加レビューでは縮まらないため、"
+            "Critic を起動し次イテレーションへ進んでください。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if delta > 1.0:
+        print(
+            f"WARNING: reviewer agreement is low on {axis} (max-min={delta:.2f}); consider one additional review.",
+            file=sys.stderr,
+        )
+
+
+def _review_error(path: Path, message: str) -> None:
+    print(f"ERROR: {path}: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _review_prose_bytes(text: str) -> int:
+    """Count non-template prose lines outside the structured review JSON."""
+    prose_lines = [
+        line for line in text.splitlines()
+        if line.strip() and not REVIEW_TEMPLATE_HEADING_RE.fullmatch(line)
+    ]
+    return len("\n".join(prose_lines).encode("utf-8"))
+
+
+MAX_REVIEW_INPUT_BYTES = 4 * 1024 * 1024
+COMMAND_OUTCOME_KINDS = frozenset({"ok", "expected-gate", "invalid-input", "external", "internal-error"})
+COMMAND_OUTCOME_LIMIT = 128
+_OUTCOME_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
+
+
+class CommandOutcomeInputError(ValueError):
+    """Opaque command lineage input failed validation."""
+
+
+class CommandOutcomeExit(SystemExit):
+    """A legacy-compatible exit carrying the centralized outcome taxonomy."""
+
+    def __init__(self, code: int, outcome_kind: str, *, guidance: list[str] | None = None):
+        super().__init__(code)
+        self.outcome_kind = outcome_kind
+        self.guidance = guidance or None
+
+
+def _provider_gate(reason_code: str) -> None:
+    print(f"ERROR: provider-ineligible: {reason_code}", file=sys.stderr)
+    error = CommandOutcomeExit(2, "expected-gate")
+    error.provider_reason_code = reason_code
+    raise error
+
+
+def _guidance_context_for_state(data: dict | None = None, **extra) -> dict:
+    context: dict = {}
+    if isinstance(data, dict):
+        for key in (
+            "phase",
+            "iteration",
+            "reviewer_count",
+            "session_id",
+            "planning_strategy",
+            "planning_provider_required",
+        ):
+            if key in data:
+                context[key] = data.get(key)
+        review_refs = data.get("review_evidence_refs")
+        if isinstance(review_refs, list):
+            for ref in reversed(review_refs):
+                if isinstance(ref, dict) and isinstance(ref.get("path"), str):
+                    context.setdefault("latest_review_input_path", ref["path"])
+                    context.setdefault("latest_review_input_ref", ref["path"])
+                    break
+        canonical_plan = data.get("canonical_plan")
+        if isinstance(canonical_plan, dict) and isinstance(canonical_plan.get("path"), str):
+            context.setdefault("canonical_plan_path", canonical_plan["path"])
+    context.update({k: v for k, v in extra.items() if v is not None})
+    return context
+
+
+def _raise_guided_failure(
+    message: str,
+    *,
+    command: str,
+    reason: str,
+    context: dict | None = None,
+    outcome_kind: str = "invalid-input",
+    exit_code: int = 2,
+) -> None:
+    guidance = build_guidance(command, reason, context or {})
+    print(f"ERROR: {message}", file=sys.stderr)
+    for line in guidance:
+        print(line, file=sys.stderr)
+    raise CommandOutcomeExit(exit_code, outcome_kind, guidance=guidance)
+
+
+def _command_outcome(args: argparse.Namespace, command: str, outcome_kind: str) -> dict:
+    """Build bounded, locator-free command lineage for state and JSON consumers."""
+    if outcome_kind not in COMMAND_OUTCOME_KINDS:
+        raise CommandOutcomeInputError("command outcome kind is invalid")
+    provided_event = getattr(args, "event_id", None)
+    if provided_event is not None and not _valid_command_outcome_identifier(provided_event):
+        raise CommandOutcomeInputError("command event_id is invalid")
+    event_id = provided_event or secrets.token_hex(16)
+    provided_root = getattr(args, "root_event_id", None)
+    if provided_root is not None and not _valid_command_outcome_identifier(provided_root):
+        raise CommandOutcomeInputError("command root_event_id is invalid")
+    root_event_id = provided_root or event_id
+    attempt = getattr(args, "attempt", 1)
+    if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
+        raise CommandOutcomeInputError("command attempt is invalid")
+    outcome = {
+        "event_id": event_id,
+        "root_event_id": root_event_id,
+        "attempt": attempt,
+        "command": command,
+        "outcome_kind": outcome_kind,
+    }
+    retry_of = getattr(args, "retry_of", None)
+    if retry_of is not None and not _valid_command_outcome_identifier(retry_of):
+        raise CommandOutcomeInputError("command retry_of is invalid")
+    if retry_of is not None:
+        outcome["retry_of"] = retry_of
+    return outcome
+
+
+def _append_command_outcome(data: dict, outcome: dict) -> None:
+    """Keep command classification bounded; business writes call this under their lock."""
+    append_command_outcome_state(data, outcome)
+
+
+def _add_command_lineage_arguments(parser: argparse.ArgumentParser) -> None:
+    """Expose retry lineage without accepting prompts, paths, or other raw input."""
+    parser.add_argument("--event-id", default=None, help="opaque command event identifier")
+    parser.add_argument("--root-event-id", default=None, help="opaque root event identifier")
+    parser.add_argument("--attempt", type=int, default=1, help="positive retry attempt number")
+    parser.add_argument("--retry-of", default=None, help="opaque prior event identifier")
+
+
+def _record_command_outcome_only(cwd: Path, outcome: dict) -> None:
+    """Persist a bounded failure classification without touching state bytes.
+
+    This is a materialized telemetry view, not the lifecycle journal reserved
+    for later work.  Its schema is deliberately small and contains only the
+    opaque command lineage produced above.
+    """
+    session_token = hashlib.sha256(resolve_session_id().encode("utf-8")).hexdigest()[:16]
+    try:
+        append_command_outcome_sidecar(state_dir(cwd), session_token, outcome)
+    except OutcomeStoreError:
+        # The command remains rejected.  Do not recover by accepting a corrupt
+        # sidecar or following a hostile path; readers surface this telemetry.
+        return
+
+
+def _emit_json_command_failure(args: argparse.Namespace, outcome: dict, guidance: list[str] | None = None) -> None:
+    args.command_outcome_emitted = True
+    if getattr(args, "json", False):
+        payload = {"ok": False, "outcome_kind": outcome["outcome_kind"], "outcome": outcome}
+        if guidance:
+            payload["guidance"] = guidance
+            for line in guidance:
+                print(line, file=sys.stderr)
+        print(json.dumps(payload, ensure_ascii=False))
+
+
+def _nested_command_failure_kind(stdout: str, error: SystemExit) -> str:
+    kind = getattr(error, "outcome_kind", None)
+    if kind in COMMAND_OUTCOME_KINDS:
+        return kind
+    try:
+        payload = json.loads(stdout)
+        kind = payload.get("outcome_kind") if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        kind = None
+    return kind if kind in COMMAND_OUTCOME_KINDS else "invalid-input"
+
+
+def _emit_finalize_failure(
+    args: argparse.Namespace, stdout: str, error: SystemExit, *, site: str = "aggregate"
+) -> None:
+    kind = _nested_command_failure_kind(stdout, error)
+    failure = _command_outcome(args, "review-finalize", kind)
+    guidance = getattr(error, "guidance", None) or None
+    guidance_printed_at_site = guidance is not None
+    state_data = {}
+    state_file = resolve_state_file(Path.cwd())
+    if state_file.exists():
+        try:
+            state_data = read_session_json(state_file)
+        except (OSError, json.JSONDecodeError):
+            state_data = {}
+    context = _guidance_context_for_state(
+        state_data,
+        iteration=args.iteration,
+        review_evidence_refs=[
+            {"path": ref} for ref in (getattr(args, "input_refs", []) or [])
+            if isinstance(ref, str)
+        ],
+    )
+    if guidance is None:
+        if site == "resubmit":
+            guidance = build_guidance("review-finalize", "resubmit-reason-missing", context)
+        elif not (getattr(args, "input", None) or getattr(args, "input_refs", None)):
+            guidance = build_guidance("review-finalize", "missing-input-ref", context)
+    if guidance:
+        failure["guidance"] = True
+        if not guidance_printed_at_site:
+            for line in guidance:
+                print(line, file=sys.stderr)
+    _record_command_outcome_only(Path.cwd(), failure)
+    args.command_outcome_emitted = True
+    payload = {
+        "ok": False,
+        "outcome_kind": kind,
+        "outcome": failure,
+    }
+    if guidance:
+        payload["guidance"] = guidance
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def _stat_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    """Return the stable identity fields used for hostile review input reads."""
+    return (
+        metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_nlink,
+        metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns,
+    )
+
+
+def _read_strict_review_file(source: Path) -> bytes:
+    """Compatibility wrapper over the shared stable snapshot reader."""
+    try:
+        return _read_stable_bytes(source, limit=MAX_REVIEW_INPUT_BYTES)
+    except StrictReadError as exc:
+        if exc.code == "identity-changed":
+            raise ValueError("review input changed while being read") from exc
+        if exc.code == "record-too-large":
+            raise ValueError("review input must be a bounded regular non-linked file") from exc
+        if exc.code == "not-regular-single-link":
+            try:
+                unavailable = not source.exists() or source.is_symlink()
+            except OSError:
+                unavailable = True
+            if unavailable:
+                raise ValueError("review input is unavailable") from exc
+            raise ValueError("review input must be a bounded regular non-linked file") from exc
+        raise ValueError("review input is unavailable") from exc
+
+
+def _same_inode(first: os.stat_result, second: os.stat_result) -> bool:
+    return (
+        first.st_dev == second.st_dev
+        and first.st_ino == second.st_ino
+        and first.st_mode == second.st_mode
+        and first.st_nlink == second.st_nlink
+    )
+
+
+def _stat_like_from_identity(identity: tuple[int, int, int, int, int, int, int]) -> SimpleNamespace:
+    return SimpleNamespace(
+        st_dev=identity[0],
+        st_ino=identity[1],
+        st_mode=identity[2],
+        st_nlink=identity[3],
+        st_size=identity[4],
+        st_mtime_ns=identity[5],
+        st_ctime_ns=identity[6],
+    )
+
+
+class _PublishStatLike(Protocol):
+    st_dev: int
+    st_ino: int
+    st_mode: int
+    st_nlink: int
+    st_size: int
+    st_mtime_ns: int
+    st_ctime_ns: int
+
+
+def _publish_directory_detail(
+    expected: tuple[int, int, int],
+    opened: os.stat_result,
+    named: os.stat_result,
+    *,
+    reason: str,
+) -> str:
+    parts = [f"reason={reason}"]
+    expected_dev, expected_ino, expected_mode = expected
+    parts.extend((
+        f"expected_dev={expected_dev}",
+        f"expected_ino={expected_ino}",
+        f"expected_mode={oct(expected_mode)}",
+        f"opened_dev={opened.st_dev}",
+        f"opened_ino={opened.st_ino}",
+        f"opened_mode={oct(opened.st_mode)}",
+        f"named_dev={named.st_dev}",
+        f"named_ino={named.st_ino}",
+        f"named_mode={oct(named.st_mode)}",
+    ))
+    return " ".join(parts)
+
+
+def _publish_identity_detail(
+    expected: _PublishStatLike,
+    observed: _PublishStatLike,
+    *,
+    reason: str,
+    expected_size: int | None = None,
+) -> str:
+    parts = [
+        f"reason={reason}",
+        f"expected_dev={expected.st_dev}",
+        f"expected_ino={expected.st_ino}",
+        f"expected_mode={oct(expected.st_mode)}",
+        f"expected_nlink={expected.st_nlink}",
+        f"observed_dev={observed.st_dev}",
+        f"observed_ino={observed.st_ino}",
+        f"observed_mode={oct(observed.st_mode)}",
+        f"observed_nlink={observed.st_nlink}",
+    ]
+    if expected_size is not None:
+        parts.append(f"expected_size={expected_size}")
+        parts.append(f"observed_size={observed.st_size}")
+    return " ".join(parts)
+
+
+def _publish_first_mismatch_reason(
+    expected: _PublishStatLike,
+    observed: _PublishStatLike,
+    fields: tuple[str, ...],
+    *,
+    default: str,
+) -> str:
+    for name in fields:
+        if getattr(expected, name) != getattr(observed, name):
+            return name[3:]
+    return default
+
+
+def _verify_review_archive_directory(directory_fd: int, archive_path: Path) -> None:
+    try:
+        opened = os.fstat(directory_fd)
+        named = archive_path.lstat()
+    except OSError as exc:
+        raise ValueError("review archive directory changed") from exc
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or not stat.S_ISDIR(named.st_mode)
+        or opened.st_dev != named.st_dev
+        or opened.st_ino != named.st_ino
+        or opened.st_mode != named.st_mode
+    ):
+        raise ValueError("review archive directory changed")
+
+
+def _open_review_archive_directory(cwd: Path) -> tuple[int, Path]:
+    root = state_dir(cwd)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        root_fd = os.open(os.fspath(root), flags)
+    except OSError as exc:
+        raise ValueError("review state directory is unsafe") from exc
+    archive_fd: int | None = None
+    try:
+        try:
+            archive_fd = os.open("archive", flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            try:
+                os.mkdir("archive", 0o700, dir_fd=root_fd)
+                archive_fd = os.open("archive", flags, dir_fd=root_fd)
+            except OSError as exc:
+                raise ValueError("review archive directory is unsafe") from exc
+        opened = os.fstat(archive_fd)
+        named = os.stat("archive", dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(opened.st_mode) or not _same_inode(opened, named):
+            os.close(archive_fd)
+            raise ValueError("review archive directory changed")
+        result = archive_fd
+        archive_fd = None
+        return result, root / "archive"
+    except OSError as exc:
+        raise ValueError("review archive directory is unsafe") from exc
+    finally:
+        if archive_fd is not None:
+            os.close(archive_fd)
+        os.close(root_fd)
+
+
+def _read_review_archive_at(
+    directory_fd: int, name: str,
+) -> tuple[bytes, tuple[int, int, int, int, int, int, int]] | None:
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("review archive evidence is unsafe") from exc
+    try:
+        initial = os.fstat(fd)
+        if (
+            not stat.S_ISREG(initial.st_mode)
+            or initial.st_nlink != 1
+            or initial.st_size > MAX_REVIEW_INPUT_BYTES
+        ):
+            raise ValueError("review archive evidence is unsafe")
+        named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if _stat_identity(initial) != _stat_identity(named):
+            raise ValueError("review archive evidence changed")
+        chunks: list[bytes] = []
+        remaining = initial.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 64 * 1024))
+            if not chunk:
+                raise ValueError("review archive evidence changed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise ValueError("review archive evidence changed")
+        after = os.fstat(fd)
+        named_after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if _stat_identity(initial) != _stat_identity(after) or _stat_identity(after) != _stat_identity(named_after):
+            raise ValueError("review archive evidence changed")
+        return b"".join(chunks), _stat_identity(after)
+    except OSError as exc:
+        raise ValueError("review archive evidence is unsafe") from exc
+    finally:
+        os.close(fd)
+
+
+class _PublishedFile(NamedTuple):
+    path: Path
+    created: bool
+    directory_fd: int
+    directory_identity: tuple[int, int, int]
+    object_identity: tuple[int, int, int, int, int, int, int]
+    previous_content: bytes | None = None
+
+
+class PublishedRollbackRecoveryError(ValueError):
+    """A rollback failed but left a content-verifiable recovery file."""
+
+    def __init__(self, recovery_ref: dict):
+        basename = recovery_ref.get("basename") if isinstance(recovery_ref, dict) else None
+        digest = recovery_ref.get("digest") if isinstance(recovery_ref, dict) else None
+        size = recovery_ref.get("size") if isinstance(recovery_ref, dict) else None
+        if (
+            not isinstance(recovery_ref, dict)
+            or set(recovery_ref) != {"basename", "digest", "size"}
+            or not isinstance(basename, str)
+            or re.fullmatch(r"[A-Za-z0-9._-]{1,200}", basename) is None
+            or not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+        ):
+            raise ValueError("published file recovery reference is invalid")
+        super().__init__("published file rollback requires recovery")
+        self.recovery_ref = dict(recovery_ref)
+
+
+class _PublishAttempt:
+    """Tracks syscall outcome without confusing FileExists with our publish."""
+
+    def __init__(self) -> None:
+        self.attempted = False
+        self.conflict = False
+        self.completed = False
+
+    def owns_named_target(
+        self, directory_fd: int, name: str, temporary_stat: os.stat_result,
+    ) -> bool:
+        if self.completed:
+            return True
+        if not self.attempted or self.conflict:
+            return False
+        try:
+            named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError:
+            return False
+        return (
+            named.st_dev == temporary_stat.st_dev
+            and named.st_ino == temporary_stat.st_ino
+            and named.st_mode == temporary_stat.st_mode
+            and named.st_size == temporary_stat.st_size
+        )
+
+
+@contextlib.contextmanager
+def _defer_publish_signals():
+    """Close the syscall/ownership gap where pthread signal masks exist."""
+    mask = getattr(signal, "pthread_sigmask", None)
+    previous_mask = None
+    if mask is not None:
+        try:
+            previous_mask = mask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+        except (OSError, ValueError):
+            previous_mask = None
+    try:
+        yield
+    finally:
+        if previous_mask is not None:
+            mask(signal.SIG_SETMASK, previous_mask)
+
+
+def _directory_identity(value: os.stat_result) -> tuple[int, int, int]:
+    return value.st_dev, value.st_ino, value.st_mode
+
+
+def _same_publish_target(first: Path, second: Path) -> bool:
+    if first.name != second.name:
+        return False
+    try:
+        first_parent = first.parent.resolve(strict=True).stat()
+        second_parent = second.parent.resolve(strict=True).stat()
+    except OSError:
+        return False
+    return _directory_identity(first_parent) == _directory_identity(second_parent)
+
+
+def _verify_published_file(published: _PublishedFile) -> None:
+    try:
+        opened_parent = os.fstat(published.directory_fd)
+        named_parent = published.path.parent.lstat()
+        if (
+            not stat.S_ISDIR(opened_parent.st_mode)
+            or _directory_identity(opened_parent) != published.directory_identity
+            or _directory_identity(named_parent) != published.directory_identity
+        ):
+            raise ValueError("published file directory changed")
+        named = os.stat(
+            published.path.name,
+            dir_fd=published.directory_fd,
+            follow_symlinks=False,
+        )
+        if _stat_identity(named) != published.object_identity:
+            raise ValueError("published file changed")
+    except OSError as exc:
+        raise ValueError("published file changed") from exc
+
+
+def _write_temp_at(directory_fd: int, name: str, content: bytes) -> tuple[str, os.stat_result]:
+    temporary = ""
+    fd: int | None = None
+    try:
+        for _attempt in range(32):
+            temporary = f".{name}.{secrets.token_hex(8)}.tmp"
+            try:
+                fd = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=directory_fd,
+                )
+                break
+            except FileExistsError:
+                continue
+        if fd is None:
+            raise ValueError("publish temporary file is unavailable")
+        initial = os.fstat(fd)
+        if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1 or stat.S_IMODE(initial.st_mode) != 0o600:
+            raise ValueError("publish temporary file is unsafe")
+        offset = 0
+        while offset < len(content):
+            written = os.write(fd, content[offset:])
+            if written <= 0:
+                raise ValueError("publish write failed")
+            offset += written
+        os.fsync(fd)
+        current = os.fstat(fd)
+        named = os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False)
+        if current.st_size != len(content) or not _same_inode(initial, current) or not _same_inode(current, named):
+            raise ValueError("publish temporary file changed")
+        result = temporary, current
+        temporary = ""
+        return result
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if temporary:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+
+
+def _verify_restore_content_at(
+    directory_fd: int,
+    name: str,
+    expected_stat: os.stat_result,
+    expected_content: bytes,
+    *,
+    allow_rename_ctime: bool,
+) -> None:
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=directory_fd)
+    except OSError as exc:
+        raise ValueError("published file restore changed") from exc
+    try:
+        initial = os.fstat(fd)
+        named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        initial_identity = _stat_identity(initial)
+        expected_identity = _stat_identity(expected_stat)
+        identity_matches = (
+            initial_identity[:6] == expected_identity[:6]
+            if allow_rename_ctime
+            else initial_identity == expected_identity
+        )
+        if (
+            not stat.S_ISREG(initial.st_mode)
+            or initial.st_nlink != 1
+            or not identity_matches
+            or initial_identity != _stat_identity(named)
+            or initial.st_size != len(expected_content)
+        ):
+            raise ValueError("published file restore changed")
+        chunks: list[bytes] = []
+        remaining = len(expected_content)
+        while remaining:
+            chunk = os.read(fd, min(remaining, 64 * 1024))
+            if not chunk:
+                raise ValueError("published file restore changed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1):
+            raise ValueError("published file restore changed")
+        content = b"".join(chunks)
+        after = os.fstat(fd)
+        named_after = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            _stat_identity(initial) != _stat_identity(after)
+            or _stat_identity(after) != _stat_identity(named_after)
+            or content != expected_content
+            or hashlib.sha256(content).digest() != hashlib.sha256(expected_content).digest()
+        ):
+            raise ValueError("published file restore changed")
+    except OSError as exc:
+        raise ValueError("published file restore changed") from exc
+    finally:
+        os.close(fd)
+
+
+def _discard_rejected_restore(
+    directory_fd: int, name: str, expected_stat: os.stat_result,
+) -> None:
+    try:
+        named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if _stat_identity(named)[:5] == _stat_identity(expected_stat)[:5]:
+            os.unlink(name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+    except OSError:
+        pass
+
+
+def _restore_current_after_rejected_restore(
+    published: _PublishedFile,
+    quarantine: str,
+    rejected_stat: os.stat_result,
+) -> bool:
+    rejected = ""
+    try:
+        named = os.stat(
+            published.path.name,
+            dir_fd=published.directory_fd,
+            follow_symlinks=False,
+        )
+        if _stat_identity(named)[:5] != _stat_identity(rejected_stat)[:5]:
+            return False
+        for _attempt in range(32):
+            candidate = f".{published.path.name}.{secrets.token_hex(8)}.restore-rejected"
+            try:
+                os.stat(candidate, dir_fd=published.directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                rejected = candidate
+                break
+        if not rejected:
+            return False
+        os.rename(
+            published.path.name,
+            rejected,
+            src_dir_fd=published.directory_fd,
+            dst_dir_fd=published.directory_fd,
+        )
+        moved = os.stat(rejected, dir_fd=published.directory_fd, follow_symlinks=False)
+        if _stat_identity(moved)[:5] != _stat_identity(rejected_stat)[:5]:
+            os.rename(
+                rejected,
+                published.path.name,
+                src_dir_fd=published.directory_fd,
+                dst_dir_fd=published.directory_fd,
+            )
+            rejected = ""
+            return False
+        os.rename(
+            quarantine,
+            published.path.name,
+            src_dir_fd=published.directory_fd,
+            dst_dir_fd=published.directory_fd,
+        )
+        restored = os.stat(
+            published.path.name,
+            dir_fd=published.directory_fd,
+            follow_symlinks=False,
+        )
+        if _stat_identity(restored)[:6] != published.object_identity[:6]:
+            return False
+        os.unlink(rejected, dir_fd=published.directory_fd)
+        rejected = ""
+        os.fsync(published.directory_fd)
+        return True
+    except OSError:
+        return False
+
+
+def _publish_recovery_residue(
+    published: _PublishedFile,
+    temporary: str,
+    temporary_stat: os.stat_result,
+) -> dict:
+    assert published.previous_content is not None
+    digest = hashlib.sha256(published.previous_content).hexdigest()
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", published.path.name)[:64] or "output"
+    recovery_name = ""
+    for attempt in range(32):
+        candidate = (
+            f".{safe_stem}.recovery-{digest[:16]}-"
+            f"{temporary_stat.st_dev:x}-{temporary_stat.st_ino:x}-{attempt}.json"
+        )
+        try:
+            os.link(
+                temporary,
+                candidate,
+                src_dir_fd=published.directory_fd,
+                dst_dir_fd=published.directory_fd,
+                follow_symlinks=False,
+            )
+            recovery_name = candidate
+            break
+        except FileExistsError:
+            continue
+    if not recovery_name:
+        raise ValueError("published file recovery name is unavailable")
+    os.unlink(temporary, dir_fd=published.directory_fd)
+    os.fsync(published.directory_fd)
+    _verify_restore_content_at(
+        published.directory_fd,
+        recovery_name,
+        temporary_stat,
+        published.previous_content,
+        allow_rename_ctime=True,
+    )
+    return {
+        "basename": recovery_name,
+        "digest": f"sha256:{digest}",
+        "size": len(published.previous_content),
+    }
+
+
+def _rollback_published_file(published: _PublishedFile) -> None:
+    quarantine = ""
+    previous_temporary = ""
+    previous_temporary_stat: os.stat_result | None = None
+    try:
+        _verify_published_file(published)
+        if not published.created and published.previous_content is None:
+            os.fsync(published.directory_fd)
+            return
+        if not published.created and published.previous_content is not None:
+            previous_temporary, previous_temporary_stat = _write_temp_at(
+                published.directory_fd,
+                f"{published.path.name}.restore",
+                published.previous_content,
+            )
+            os.fsync(published.directory_fd)
+            _verify_published_file(published)
+            try:
+                _verify_restore_content_at(
+                    published.directory_fd,
+                    previous_temporary,
+                    previous_temporary_stat,
+                    published.previous_content,
+                    allow_rename_ctime=False,
+                )
+            except ValueError:
+                _discard_rejected_restore(
+                    published.directory_fd, previous_temporary, previous_temporary_stat,
+                )
+                previous_temporary = ""
+                raise
+        for _attempt in range(32):
+            candidate = f".{published.path.name}.{secrets.token_hex(8)}.rollback"
+            try:
+                os.stat(candidate, dir_fd=published.directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                quarantine = candidate
+                break
+        if not quarantine:
+            raise ValueError("published file rollback quarantine is unavailable")
+        os.rename(
+            published.path.name,
+            quarantine,
+            src_dir_fd=published.directory_fd,
+            dst_dir_fd=published.directory_fd,
+        )
+        quarantined = os.stat(quarantine, dir_fd=published.directory_fd, follow_symlinks=False)
+        # rename may update ctime on some filesystems; dev/inode/mode/link/size/mtime
+        # remain the identity of the exact object that this transaction published.
+        if _stat_identity(quarantined)[:6] != published.object_identity[:6]:
+            try:
+                os.stat(published.path.name, dir_fd=published.directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                os.rename(
+                    quarantine,
+                    published.path.name,
+                    src_dir_fd=published.directory_fd,
+                    dst_dir_fd=published.directory_fd,
+                )
+                quarantine = ""
+            raise ValueError("published file changed before rollback")
+        if not published.created and published.previous_content is not None:
+            assert previous_temporary_stat is not None
+            os.replace(
+                previous_temporary,
+                published.path.name,
+                src_dir_fd=published.directory_fd,
+                dst_dir_fd=published.directory_fd,
+            )
+            previous_temporary = ""
+            try:
+                _verify_restore_content_at(
+                    published.directory_fd,
+                    published.path.name,
+                    previous_temporary_stat,
+                    published.previous_content,
+                    allow_rename_ctime=True,
+                )
+            except ValueError:
+                if _restore_current_after_rejected_restore(
+                    published, quarantine, previous_temporary_stat,
+                ):
+                    quarantine = ""
+                raise
+            os.fsync(published.directory_fd)
+        os.unlink(quarantine, dir_fd=published.directory_fd)
+        quarantine = ""
+        os.fsync(published.directory_fd)
+    except Exception as exc:
+        if previous_temporary and previous_temporary_stat is not None:
+            recovery_ref = _publish_recovery_residue(
+                published, previous_temporary, previous_temporary_stat,
+            )
+            previous_temporary = ""
+            raise PublishedRollbackRecoveryError(recovery_ref) from exc
+        if isinstance(exc, OSError):
+            raise ValueError("published file rollback failed") from exc
+        raise
+    finally:
+        # A fully written .restore.*.tmp is intentionally recoverable after a
+        # failed rollback; deleting the only previous-content copy loses data.
+        os.close(published.directory_fd)
+
+
+def _close_published_file(published: _PublishedFile) -> None:
+    os.close(published.directory_fd)
+
+
+def _finish_published_file(published: _PublishedFile) -> _PublishedFile:
+    """Last fallible boundary before ownership transfers to the caller."""
+    _verify_published_file(published)
+    return published
+
+
+def _rollback_unreturned_publish(
+    *,
+    path: Path,
+    directory_fd: int,
+    directory_identity: tuple[int, int, int],
+    temporary: str,
+    temporary_stat: os.stat_result,
+    created: bool,
+    previous_content: bytes | None,
+    published_by_this_call: bool,
+) -> bool:
+    """Rollback our temp inode when publish succeeded but no handle was returned."""
+    if temporary:
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+    if not published_by_this_call:
+        return False
+    try:
+        named = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError:
+        return False
+    if (
+        named.st_dev != temporary_stat.st_dev
+        or named.st_ino != temporary_stat.st_ino
+        or named.st_mode != temporary_stat.st_mode
+    ):
+        return False
+    published = _PublishedFile(
+        path,
+        created,
+        directory_fd,
+        directory_identity,
+        _stat_identity(named),
+        previous_content,
+    )
+    try:
+        _rollback_published_file(published)
+    except PublishedRollbackRecoveryError:
+        raise
+    except ValueError as rollback_error:
+        print(f"ERROR: unreturned publish rollback rejected: {rollback_error}", file=sys.stderr)
+    return True
+
+
+class _PublishedFilesTransaction:
+    def __init__(self) -> None:
+        self._published: list[_PublishedFile] = []
+
+    def __enter__(self) -> _PublishedFilesTransaction:
+        return self
+
+    def add(self, published: _PublishedFile) -> _PublishedFile:
+        self._published.append(published)
+        return published
+
+    def __exit__(self, exc_type, _exc, _traceback) -> bool:
+        if exc_type is None:
+            for published in self._published:
+                _close_published_file(published)
+            return False
+        for published in reversed(self._published):
+            try:
+                _rollback_published_file(published)
+            except PublishedRollbackRecoveryError:
+                raise
+            except ValueError as rollback_error:
+                print(f"ERROR: published file rollback rejected: {rollback_error}", file=sys.stderr)
+        return False
+
+
+def _open_publish_directory(path: Path) -> tuple[int, tuple[int, int, int]]:
+    path.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    directory_fd: int | None = None
+    try:
+        directory_fd = os.open(os.fspath(path), flags)
+        opened = os.fstat(directory_fd)
+        named = path.lstat()
+        identity = _directory_identity(opened)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise ValueError(
+                f"publish directory changed: {_publish_directory_detail(identity, opened, named, reason='not-a-dir')}",
+            )
+        if _directory_identity(named) != identity:
+            raise ValueError(
+                f"publish directory changed: {_publish_directory_detail(identity, opened, named, reason='pre-open')}",
+            )
+        result = directory_fd, identity
+        directory_fd = None
+        return result
+    except OSError as exc:
+        raise ValueError("publish directory is unsafe") from exc
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
+def _publish_output_transaction(
+    path: Path,
+    content: bytes,
+    *,
+    forbidden_targets: tuple[tuple[tuple[int, int, int], str], ...] = (),
+    # The type is spelled in the library that supplies it; naming it here
+    # would add an expression to a function the ratchet keeps thin.
+    directory_fd=None,
+) -> _PublishedFile:
+    if not path.name or path.name in {".", ".."}:
+        raise ValueError("output filename is invalid")
+    parent = open_publication_parent(path, directory_fd, _open_publish_directory)
+    directory_path = parent.directory_path
+    directory_fd = parent.directory_fd
+    directory_identity = parent.directory_identity
+    temporary = ""
+    temporary_stat: os.stat_result | None = None
+    created = False
+    previous_content: bytes | None = None
+    publish_attempt = _PublishAttempt()
+    keep_directory_fd = False
+    try:
+        if (directory_identity, path.name) in forbidden_targets:
+            raise ValueError("output target conflicts with an immutable archive")
+        previous_entry = _read_review_archive_at(directory_fd, path.name)
+        temporary, temporary_stat = _write_temp_at(directory_fd, path.name, content)
+        mismatch = publication_parent_mismatch(parent)
+        if mismatch is not None:
+            reason, opened_parent, named_parent = mismatch
+            raise ValueError(
+                f"publish directory changed: {_publish_directory_detail(directory_identity, opened_parent, named_parent, reason=reason)}",
+            )
+        named_temporary = os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False)
+        if _stat_identity(named_temporary) != _stat_identity(temporary_stat):
+            reason = _publish_first_mismatch_reason(
+                temporary_stat,
+                named_temporary,
+                ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns"),
+                default="identity",
+            )
+            raise ValueError(
+                f"output temporary file changed: {_publish_identity_detail(temporary_stat, named_temporary, reason=reason, expected_size=temporary_stat.st_size)}",
+            )
+        if previous_entry is None:
+            created = True
+            try:
+                publish_attempt.attempted = True
+                with _defer_publish_signals():
+                    try:
+                        os.link(
+                            temporary,
+                            path.name,
+                            src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd,
+                            follow_symlinks=False,
+                        )
+                    except FileExistsError:
+                        publish_attempt.conflict = True
+                        raise
+                    publish_attempt.completed = True
+            except FileExistsError as exc:
+                raise ValueError("output appeared during publish") from exc
+            os.unlink(temporary, dir_fd=directory_fd)
+            temporary = ""
+        else:
+            previous_content = previous_entry[0]
+            current = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+            if _stat_identity(current) != previous_entry[1]:
+                previous_identity = _stat_like_from_identity(previous_entry[1])
+                reason = _publish_first_mismatch_reason(
+                    previous_identity,
+                    current,
+                    ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns"),
+                    default="identity",
+                )
+                raise ValueError(
+                    f"output changed during publish: {_publish_identity_detail(previous_identity, current, reason=reason, expected_size=previous_identity.st_size)}",
+                )
+            publish_attempt.attempted = True
+            with _defer_publish_signals():
+                os.replace(
+                    temporary,
+                    path.name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                )
+                publish_attempt.completed = True
+            temporary = ""
+        published = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        if not _same_inode(temporary_stat, published) or published.st_size != len(content):
+            reason = _publish_first_mismatch_reason(
+                temporary_stat,
+                published,
+                ("st_dev", "st_ino", "st_mode", "st_nlink"),
+                default="size",
+            )
+            raise ValueError(
+                f"output publish changed: {_publish_identity_detail(temporary_stat, published, reason=reason, expected_size=len(content))}",
+            )
+        os.fsync(directory_fd)
+        result = _PublishedFile(
+            directory_path / path.name,
+            created,
+            directory_fd,
+            directory_identity,
+            _stat_identity(published),
+            previous_content,
+        )
+        result = _finish_published_file(result)
+        keep_directory_fd = True
+        return result
+    except BaseException as exc:
+        if temporary_stat is not None and _rollback_unreturned_publish(
+            path=directory_path / path.name,
+            directory_fd=directory_fd,
+            directory_identity=directory_identity,
+            temporary=temporary,
+            temporary_stat=temporary_stat,
+            created=created,
+            previous_content=previous_content,
+            published_by_this_call=publish_attempt.owns_named_target(
+                directory_fd, path.name, temporary_stat,
+            ),
+        ):
+            keep_directory_fd = True
+            temporary = ""
+        if isinstance(exc, OSError):
+            raise ValueError("output publish failed") from exc
+        raise
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        if not keep_directory_fd:
+            os.close(directory_fd)
+
+
+def _publish_review_archive_transaction(cwd: Path, name: str, content: bytes) -> _PublishedFile:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise ValueError("review archive filename is invalid")
+    directory_fd, archive_path = _open_review_archive_directory(cwd)
+    temporary = ""
+    temporary_stat: os.stat_result | None = None
+    publish_attempt = _PublishAttempt()
+    keep_directory_fd = False
+    try:
+        _verify_review_archive_directory(directory_fd, archive_path)
+        directory_identity = _directory_identity(os.fstat(directory_fd))
+        existing_entry = _read_review_archive_at(directory_fd, name)
+        if existing_entry is not None:
+            existing, existing_identity = existing_entry
+            if existing != content:
+                raise ValueError("immutable review archive collision")
+            _verify_review_archive_directory(directory_fd, archive_path)
+            confirmed_entry = _read_review_archive_at(directory_fd, name)
+            if confirmed_entry is None:
+                raise ValueError("review archive evidence changed")
+            confirmed, confirmed_identity = confirmed_entry
+            if (
+                confirmed != content
+                or confirmed_identity != existing_identity
+                or hashlib.sha256(confirmed).digest() != hashlib.sha256(content).digest()
+            ):
+                raise ValueError("review archive evidence changed")
+            _verify_review_archive_directory(directory_fd, archive_path)
+            result = _finish_published_file(_PublishedFile(
+                archive_path / name, False, directory_fd, directory_identity,
+                confirmed_identity,
+            ))
+            keep_directory_fd = True
+            return result
+        temporary, temporary_stat = _write_temp_at(directory_fd, name, content)
+        _verify_review_archive_directory(directory_fd, archive_path)
+        named_temporary = os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False)
+        if _stat_identity(named_temporary) != _stat_identity(temporary_stat):
+            raise ValueError("review archive temporary file changed")
+        try:
+            publish_attempt.attempted = True
+            with _defer_publish_signals():
+                try:
+                    os.link(
+                        temporary,
+                        name,
+                        src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError:
+                    publish_attempt.conflict = True
+                    raise
+                publish_attempt.completed = True
+        except FileExistsError:
+            os.unlink(temporary, dir_fd=directory_fd)
+            temporary = ""
+            concurrent_entry = _read_review_archive_at(directory_fd, name)
+            if concurrent_entry is None or concurrent_entry[0] != content:
+                raise ValueError("immutable review archive collision")
+            _verify_review_archive_directory(directory_fd, archive_path)
+            result = _finish_published_file(_PublishedFile(
+                archive_path / name, False, directory_fd, directory_identity,
+                concurrent_entry[1],
+            ))
+            keep_directory_fd = True
+            return result
+        os.unlink(temporary, dir_fd=directory_fd)
+        temporary = ""
+        published = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if not _same_inode(temporary_stat, published) or published.st_size != len(content):
+            raise ValueError("review archive publish changed")
+        _verify_review_archive_directory(directory_fd, archive_path)
+        os.fsync(directory_fd)
+        result = _finish_published_file(_PublishedFile(
+            archive_path / name, True, directory_fd, directory_identity,
+            _stat_identity(published),
+        ))
+        keep_directory_fd = True
+        return result
+    except BaseException as exc:
+        if temporary_stat is not None and _rollback_unreturned_publish(
+            path=archive_path / name,
+            directory_fd=directory_fd,
+            directory_identity=directory_identity,
+            temporary=temporary,
+            temporary_stat=temporary_stat,
+            created=True,
+            previous_content=None,
+            published_by_this_call=publish_attempt.owns_named_target(
+                directory_fd, name, temporary_stat,
+            ),
+        ):
+            keep_directory_fd = True
+            temporary = ""
+        if isinstance(exc, OSError):
+            raise ValueError("review archive publish failed") from exc
+        raise
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        if not keep_directory_fd:
+            os.close(directory_fd)
+
+
+def _publish_review_import_evidence(cwd: Path, name: str, content: bytes) -> Path:
+    published = _publish_review_archive_transaction(cwd, name, content)
+    try:
+        _verify_published_file(published)
+        return published.path
+    finally:
+        _close_published_file(published)
+
+
+class _DuplicateReviewJsonKey(ValueError):
+    pass
+
+
+def _reject_duplicate_review_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    try:
+        return _reject_duplicate_json_pairs(pairs)
+    except MissionStateDecodeError as exc:
+        duplicate = next(
+            (
+                key
+                for index, (key, _) in enumerate(pairs)
+                if key in {prior for prior, _ in pairs[:index]}
+            ),
+            "unknown",
+        )
+        raise _DuplicateReviewJsonKey(f"duplicate JSON key: {duplicate}") from exc
+
+
+def _parse_strict_review_bytes(content: bytes, expected_iteration: int) -> dict:
+    """Parse exactly one UTF-8 mission-review/1 document with no prose fallback."""
+    try:
+        payload = _thaw_strict_json_object(
+            _decode_strict_json_object(content, limit=MAX_REVIEW_INPUT_BYTES)
+        )
+    except MissionStateDecodeError as exc:
+        if exc.code == "record-too-large":
+            raise ValueError("review input exceeds 4 MiB") from exc
+        if exc.code == "invalid-utf8":
+            raise ValueError("review input is invalid UTF-8") from exc
+        raise ValueError("review input must be exactly one JSON document") from exc
+    _validate_review_payload(payload, expected_iteration)
+    return payload
+
+
+def cmd_schema(args):
+    """Print an input contract so callers need not discover it via rejections."""
+    print(render_contract_schema(args.contract))
+
+
+def _validate_review_payload(payload: object, expected_iteration: int) -> None:
+    """Validate the shared mission-review/1 contract without mutating state."""
+    if (
+        not isinstance(expected_iteration, int)
+        or isinstance(expected_iteration, bool)
+        or expected_iteration < 1
+    ):
+        raise ValueError("expected iteration must be a positive integer")
+    if not isinstance(payload, dict):
+        raise ValueError("review must be a JSON object")
+    if payload.get("schema") != "mission-review/1":
+        raise ValueError("schema must be mission-review/1")
+    payload_iteration = payload.get("iteration")
+    if (
+        not isinstance(payload_iteration, int)
+        or isinstance(payload_iteration, bool)
+        or payload_iteration < 1
+        or payload_iteration != expected_iteration
+    ):
+        raise ValueError(f"iteration must be {expected_iteration}")
+    perspective = payload.get("perspective")
+    if not valid_review_perspective(perspective):
+        raise ValueError("perspective must be a non-empty trimmed string")
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        raise ValueError("findings must be a list")
+    try:
+        validate_review_learning(payload)
+    except LearningContractError as exc:
+        raise ValueError(str(exc)) from exc
+    seen_ids = set()
+    for idx, finding in enumerate(findings, start=1):
+        if not isinstance(finding, dict):
+            raise ValueError(f"finding {idx} must be an object")
+        fid = finding.get("id")
+        if not isinstance(fid, str) or not fid.startswith(f"{perspective}-"):
+            raise ValueError(f"finding {idx} id must start with '{perspective}-'")
+        if fid in seen_ids:
+            raise ValueError(f"duplicate finding id: {fid}")
+        seen_ids.add(fid)
+        severity = finding.get("severity")
+        if severity not in REVIEW_SEVERITIES:
+            raise ValueError(f"finding {fid} severity must be one of {sorted(REVIEW_SEVERITIES)}")
+        axis = finding.get("axis")
+        if axis not in REVIEW_SCORE_KEYS:
+            raise ValueError(f"finding {fid} axis must be one of {list(REVIEW_SCORE_KEYS)}")
+        if severity in {"High", "Medium"} and not str(finding.get("evidence") or "").strip():
+            raise ValueError(f"finding {fid} evidence is required for {severity}")
+    if "scores" not in payload:
+        raise ValueError("scores field is required; use null only for findings-only reviewers")
+    scores = payload.get("scores")
+    if scores is None:
+        return
+    if not isinstance(scores, dict) or set(scores) != set(REVIEW_SCORE_KEYS):
+        raise ValueError(f"scores must contain exactly {list(REVIEW_SCORE_KEYS)}")
+    for key, value in scores.items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or math.isnan(float(value)) or not (SCORE_MIN <= float(value) <= SCORE_MAX):
+            raise ValueError(f"score {key} must be a {SCORE_MIN}-{SCORE_MAX} number")
+    values = [float(scores[key]) for key in REVIEW_SCORE_KEYS]
+    if max(values) <= 1.0:
+        raise ValueError("scores look like 0-1 normalized scale; use 0-5 scale")
+    if len(set(values)) == 1 and not str(payload.get("same_score_note") or "").strip():
+        raise ValueError("same_score_note is required when all four scores are equal")
+
+
+def _extract_review_payload(src: Path) -> tuple[dict, dict]:
+    """Extract one mission-review/1 payload and measure its external prose."""
+    try:
+        text = src.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        print(f"ERROR: reviewer input is invalid UTF-8: {src}: {error}", file=sys.stderr)
+        sys.exit(2)
+
+    stripped = text.strip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        candidates = []
+        for match in REVIEW_JSON_FENCE_RE.finditer(text):
+            json_text = match.group("body").strip()
+            try:
+                candidate = json.loads(json_text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) and candidate.get("schema") == "mission-review/1":
+                candidates.append((candidate, json_text, match.span()))
+        if len(candidates) != 1:
+            print(
+                f"ERROR: reviewer input must contain exactly one mission-review/1 JSON: {src}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        payload, json_text, (start, end) = candidates[0]
+        prose_text = text[:start] + text[end:]
+    else:
+        json_text = stripped
+        prose_text = ""
+
+    json_bytes = len(json_text.encode("utf-8"))
+    prose_bytes = _review_prose_bytes(prose_text)
+    denominator = json_bytes + prose_bytes
+    metric = {
+        "json_bytes": json_bytes,
+        "prose_bytes": prose_bytes,
+        "prose_ratio": round(prose_bytes / denominator, 6) if denominator else 0,
+    }
+    return payload, metric
+
+
+def _load_review_json(path_str: str, expected_iteration: int) -> tuple[dict, dict]:
+    src = Path(path_str)
+    if not (src.exists() and src.is_file()):
+        print(f"ERROR: reviewer input not found: {src}", file=sys.stderr)
+        sys.exit(2)
+    payload, metric = _extract_review_payload(src)
+    try:
+        _validate_review_payload(payload, expected_iteration)
+    except ValueError as exc:
+        _review_error(src, str(exc))
+    return payload, metric
+
+
+def _review_import_ref_is_valid(reference: object, expected_iteration: int) -> bool:
+    return (
+        isinstance(expected_iteration, int)
+        and not isinstance(expected_iteration, bool)
+        and expected_iteration >= 1
+        and isinstance(reference, dict)
+        and reference.get("kind") == "review-input"
+        and isinstance(reference.get("path"), str)
+        and isinstance(reference.get("digest"), str)
+        and _SHA256_REF_RE.fullmatch(reference["digest"]) is not None
+        and isinstance(reference.get("size"), int)
+        and not isinstance(reference.get("size"), bool)
+        and 0 <= reference["size"] <= MAX_REVIEW_INPUT_BYTES
+        and isinstance(reference.get("iteration"), int)
+        and not isinstance(reference.get("iteration"), bool)
+        and reference["iteration"] >= 1
+        and reference["iteration"] == expected_iteration
+        and valid_review_perspective(reference.get("perspective"))
+    )
+
+
+def _load_imported_review(cwd: Path, state: dict, reference_path: str, expected_iteration: int) -> tuple[dict, dict, dict]:
+    """Resolve a state-recorded immutable import; caller-provided paths add no authority."""
+    records = state.get("review_evidence_refs")
+    if not isinstance(records, list):
+        raise ValueError("review import reference is unavailable")
+    matches = [
+        ref for ref in records
+        if _review_import_ref_is_valid(ref, expected_iteration) and ref.get("path") == reference_path
+    ]
+    if len(matches) != 1:
+        raise ValueError("review import reference is missing or ambiguous")
+    reference = matches[0]
+    try:
+        content = _read_strict_review_file(cwd / reference["path"])
+    except ValueError as exc:
+        raise ValueError("review import evidence is unavailable") from exc
+    if len(content) != reference["size"] or "sha256:" + hashlib.sha256(content).hexdigest() != reference["digest"]:
+        raise ValueError("review import evidence integrity mismatch")
+    payload = _parse_strict_review_bytes(content, expected_iteration)
+    if payload["perspective"] != reference["perspective"]:
+        raise ValueError("review import evidence perspective mismatch")
+    metric = {"json_bytes": len(content), "prose_bytes": 0, "prose_ratio": 0}
+    return payload, metric, reference
+
+
+def _derive_failure_ledger(cwd: Path, score_history: object) -> dict:
+    """Rebuild the materialized ledger only from immutable review aggregates."""
+    if not isinstance(score_history, list):
+        raise ValueError("score_history must be a list")
+    observations: list[dict] = []
+    for entry in score_history:
+        if not isinstance(entry, dict):
+            raise ValueError("score_history entry must be an object")
+        reference = entry.get("review_evidence_ref")
+        if reference is None:
+            continue
+        if (not isinstance(reference, dict) or reference.get("kind") != "review-aggregate"
+                or not isinstance(reference.get("path"), str)
+                or not isinstance(reference.get("digest"), str)
+                or _SHA256_REF_RE.fullmatch(reference["digest"]) is None):
+            raise ValueError("failure ledger review reference is invalid")
+        content = _read_bounded_review_evidence(cwd, reference["path"])
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        if digest != reference["digest"] or reference.get("generation") != digest[7:23]:
+            raise ValueError("failure ledger review reference integrity mismatch")
+        try:
+            aggregate = json.loads(content.decode("utf-8"), object_pairs_hook=_reject_duplicate_review_keys)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateReviewJsonKey) as exc:
+            raise ValueError("failure ledger review aggregate is invalid") from exc
+        iteration = entry.get("iteration")
+        if (not isinstance(aggregate, dict) or aggregate.get("schema") != "mission-review-aggregate/1"
+                or aggregate.get("iteration") != iteration or not isinstance(aggregate.get("inputs"), list)):
+            raise ValueError("failure ledger review aggregate binding mismatch")
+        for review in aggregate["inputs"]:
+            observations.append({
+                "iteration": iteration, "review": review,
+                "review_aggregate_ref": {"kind": "review-aggregate", "digest": digest},
+            })
+    try:
+        return reduce_failure_ledger(observations)
+    except LearningContractError as exc:
+        raise ValueError(f"failure ledger input is invalid: {exc}") from exc
+
+
+def cmd_review_import(args):
+    """Validate one untrusted review before atomically making it state-owned evidence."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    if args.iteration < 1:
+        print("ERROR: --iteration は 1 以上で指定してください", file=sys.stderr)
+        sys.exit(2)
+    try:
+        if args.input is not None:
+            content = _read_strict_review_file(Path(args.input))
+        else:
+            content = sys.stdin.buffer.read(MAX_REVIEW_INPUT_BYTES + 1)
+        review = _parse_strict_review_bytes(content, args.iteration)
+    except ValueError as exc:
+        outcome = _command_outcome(args, "review-import", "invalid-input")
+        guidance = build_guidance("review-import", "schema-invalid", {"iteration": args.iteration})
+        outcome["guidance"] = True
+        _record_command_outcome_only(cwd, outcome)
+        _emit_json_command_failure(args, outcome, guidance)
+        print(f"ERROR: review import rejected: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    outcome = _command_outcome(args, "review-import", "ok")
+    mission8 = "unknown"
+    repository = _legacy_lifecycle_repository(
+        cwd,
+        sf,
+        stamp=True,
+        strict_read=True,
+        lease_reason="review-import",
+    )
+    with repository.transaction(), _PublishedFilesTransaction() as published_files:
+        data = repository.load()
+        mission8 = str(data.get("mission_id") or "unknown")[:8]
+        archive_name = f"iter-{args.iteration}-{mission8}-review-input-{digest[7:23]}.json"
+        try:
+            evidence_publish = published_files.add(
+                _publish_review_archive_transaction(cwd, archive_name, content)
+            )
+            destination = evidence_publish.path
+        except ValueError as exc:
+            failure = _command_outcome(args, "review-import", "invalid-input")
+            guidance = build_guidance("review-import", "schema-invalid", {"iteration": args.iteration})
+            failure["guidance"] = True
+            _record_command_outcome_only(cwd, failure)
+            _emit_json_command_failure(args, failure, guidance)
+            print(f"ERROR: review import archive rejected: {exc}", file=sys.stderr)
+            sys.exit(2)
+        reference = legacy_review_input_ref(typed_review_input_ref({
+            "kind": "review-input",
+            "path": str(destination.relative_to(cwd)),
+            "digest": digest,
+            "size": len(content),
+            "iteration": args.iteration,
+            "perspective": review["perspective"],
+        }))
+        previous = data.get("review_evidence_refs")
+        records = previous if isinstance(previous, list) else []
+        retained = [item for item in records if isinstance(item, dict) and item != reference]
+        data["review_evidence_refs"] = (retained + [reference])[-128:]
+        _append_command_outcome(data, outcome)
+        data["updated_at"] = iso_now()
+        _verify_published_file(evidence_publish)
+        repository.save(data)
+    print(json.dumps({
+        "ok": True,
+        "outcome_kind": "ok",
+        "outcome": outcome,
+        "review_evidence_ref": reference,
+    }, ensure_ascii=False))
+
+
+def cmd_plan_import(args):
+    """Validate one provider result and atomically publish only an inert plan candidate."""
+    request = PlanImportRequest(
+        input_path=args.input,
+        invocation_id=args.invocation_id,
+        registry=getattr(args, "registry", None),
+        json_output=bool(getattr(args, "json", False)),
+    )
+    workspace = PlanImportWorkspaceServices(
+        current_directory=Path.cwd,
+        resolve_state_file=resolve_state_file,
+        path_exists=Path.exists,
+        path_from_string=Path,
+        read_strict_file=_read_strict_review_file,
+        read_bytes=Path.read_bytes,
+        inspect_repository_bytes=inspect_repository_bytes,
+        v5_format=RepositoryFormat.V5,
+        state_dir=state_dir,
+        join_path=Path.__truediv__,
+        path_is_absolute=Path.is_absolute,
+        path_parts=lambda path: path.parts,
+        relative_path=Path.relative_to,
+    )
+    policy = PlanImportPolicyServices(
+        provider_gate=_provider_gate,
+        enforce_session_lease_for_write=_enforce_session_lease_for_write,
+        invocation_by_id=invocation_by_id,
+        find_provider=_find_provider,
+        require_current_provider_application=_require_current_provider_application,
+        require_current_primary_planning_binding=_require_current_primary_planning_binding,
+        validate_provider_plan_import=validate_provider_plan_import,
+        planning_failure=PlanningFailure,
+        sha256_reference_match=_SHA256_REF_RE.fullmatch,
+    )
+    state_effects = PlanImportStateEffectsServices(
+        compatibility_operation_arguments=_compatibility_operation_arguments,
+        canonical_compatibility_operation=_canonical_compatibility_operation,
+        repository_factory=_legacy_lifecycle_repository,
+        published_files_transaction=_PublishedFilesTransaction,
+        publish_review_archive_transaction=_publish_review_archive_transaction,
+        publish_output_transaction=_publish_output_transaction,
+        verify_published_file=_verify_published_file,
+        canonical_plan_bytes=canonical_plan_bytes,
+        stamp_metadata=stamp_metadata,
+        clock=iso_now,
+    )
+    try:
+        result = run_plan_import(request, workspace, policy, state_effects)
+    except PlanImportFailure as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(exc.exit_code)
+    print(result.rendered)
+
+
+def _read_core_plan_input(source: Path) -> bytes:
+    """Read one stable bounded regular plan document without following links."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(os.fspath(source), os.O_RDONLY | os.O_NONBLOCK | nofollow)
+    except OSError as exc:
+        raise PlanContractError("plan-input-unreadable") from exc
+    try:
+        initial = os.fstat(fd)
+        if not stat.S_ISREG(initial.st_mode) or initial.st_nlink != 1:
+            raise PlanContractError("plan-input-not-regular")
+        if initial.st_size > MAX_PLAN_RESULT_BYTES:
+            raise PlanContractError("result-too-large")
+        chunks: list[bytes] = []
+        remaining = initial.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 64 * 1024))
+            if not chunk:
+                raise PlanContractError("plan-input-changed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(fd, 1) or _stat_identity(os.fstat(fd)) != _stat_identity(initial):
+            raise PlanContractError("plan-input-changed")
+        try:
+            named = os.lstat(source)
+        except OSError as exc:
+            raise PlanContractError("plan-input-changed") from exc
+        if _stat_identity(named) != _stat_identity(initial):
+            raise PlanContractError("plan-input-changed")
+        return b"".join(chunks)
+    except OSError as exc:
+        raise PlanContractError("plan-input-unreadable") from exc
+    finally:
+        os.close(fd)
+
+
+def cmd_planning_adopt_core(args):
+    """Validate and publish one core-produced plan as canonical authority."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        _provider_gate("state-missing")
+    try:
+        raw = _read_core_plan_input(Path(args.input))
+        document = _validate_document(_strict_plan_load(raw), workspace=cwd)
+    except PlanContractError as exc:
+        _provider_gate(str(exc))
+    session_id = sf.stem
+    try:
+        target_bytes = sf.read_bytes()
+        inspected = inspect_repository_bytes(target_bytes, expected_session_id=session_id)
+        target_digest = "sha256:" + hashlib.sha256(target_bytes).hexdigest()
+        caller_operation_id, operation_arguments = _compatibility_operation_arguments(
+            {"source_id": args.source_id},
+            target_digest=target_digest,
+            require_caller=inspected.format is RepositoryFormat.V5,
+        )
+        operation_id, operation_command = _canonical_compatibility_operation(
+            session_id, "planning-adopt-core", operation_arguments,
+            caller_operation_id=caller_operation_id,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    repository = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, pre_admit_lease=True, session_id=session_id,
+        operation_id=operation_id, operation_command=operation_command,
+        operation_command_type="planning-adopt-core",
+    )
+    with repository.transaction(), _PublishedFilesTransaction() as published_files:
+        data = repository.load()
+        replayed = getattr(repository, "operation_replayed", False)
+        if replayed:
+            print(json.dumps({"ok": True, "canonical_plan": data.get("canonical_plan")}, indent=2 if args.json else None, ensure_ascii=False))
+            return
+        if data.get("planning_policy_version") != 1 or data.get("phase") != "planning":
+            _provider_gate("planning-policy-not-active")
+        if data.get("planning_strategy") not in {None, "core"}:
+            _provider_gate("planning-strategy-not-core")
+        if data.get("planning_provider_required") is True:
+            _provider_gate("planning-provider-required")
+
+        iteration = data.get("iteration")
+        # `init` writes 0 and only `push-score` raises it, so the first plan of a
+        # session is adopted at 0.  Reject bool, non-int, and negative values.
+        if type(iteration) is not int or iteration < 0:
+            _provider_gate("core-iteration-invalid")
+        source_id = (
+            f"core-{iteration}-{secrets.token_hex(6)}"
+            if args.source_id is None
+            else args.source_id
+        )
+        if not isinstance(source_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", source_id) is None:
+            _provider_gate("core-source-id-invalid")
+        records = data.get("planning_source_records")
+        records = records if isinstance(records, dict) else {}
+        previous = records.get(f"core:{source_id}")
+        if previous is None:
+            generation = 1
+        else:
+            previous_generation = previous.get("generation") if isinstance(previous, dict) else None
+            if type(previous_generation) is not int or previous_generation < 1:
+                _provider_gate("core-source-generation-invalid")
+            generation = previous_generation + 1
+        source_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+        metadata = {
+            "authority": {
+                "owner": "mission",
+                "may_write_state": False,
+                "may_decide_review": False,
+                "may_decide_score": False,
+                "may_decide_completion": False,
+            },
+            "provenance": {
+                "source": "core",
+                "source_id": source_id,
+                "iteration": iteration,
+            },
+            "capability_verification": {
+                "selection_verified": False,
+                "class_exact_match": False,
+                "variant_exact_match": False,
+            },
+        }
+        # document 側の schema は candidate へ展開されるため、mission-plan/1 以外を
+        # 持ち込まれると保存 plan の schema が乗っ取られる。値を検証して fail-closed にする。
+        if "schema" in document and document["schema"] != "mission-plan/1":
+            _provider_gate("core-plan-schema-invalid")
+        candidate = {"schema": "mission-plan/1", **document, "mission_metadata": metadata}
+        canonical = canonical_plan_bytes(candidate)
+        canonical_digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        candidate_path = state_dir(cwd) / "plans" / f"{canonical_digest[7:23]}.json"
+        candidate_file = published_files.add(_publish_output_transaction(candidate_path, canonical))
+        plan = {
+            "schema": "mission-plan/1",
+            "path": str(candidate_file.path.relative_to(cwd)),
+            "digest": canonical_digest,
+            "source": "core",
+            "source_id": source_id,
+            "source_digest": source_digest,
+            "selection_source": "core",
+            "iteration": iteration,
+            "generation": generation,
+            "validated_at": iso_now(),
+        }
+        # Publication is adapter-owned; A4 owns the authority-bearing plan
+        # admission and the canonical state mutation after that publication.
+        # #767 D1: adoption also refuses when the handoff bound to the plan
+        # being replaced may not be dropped, so it shares this failure mapping.
+        try:
+            typed_plan_binding(plan)
+            canonical_plan_identity(cwd, plan, reader=_read_strict_review_file)
+            commit_plan_evidence(
+                state=data, plan=plan, lease_verified=True, publish=lambda _binding: None
+            )
+        except (OSError, PlanningFailure, PlanningLifecycleError) as exc:
+            _provider_gate(f"core-plan-not-adoptable:{exc}")
+        records[f"core:{source_id}"] = {
+            key: plan[key]
+            for key in ("generation", "source", "source_id", "selection_source", "iteration")
+        }
+        data["planning_source_records"] = records
+        data["updated_at"] = iso_now()
+        _verify_published_file(candidate_file)
+        repository.save(data)
+    print(json.dumps({"ok": True, "canonical_plan": plan}, indent=2 if args.json else None, ensure_ascii=False))
+
+
+def cmd_planning_promote_provider_plan(args):
+    """Promote only a #397-validated provider candidate to canonical authority."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    session_id = sf.stem
+    try:
+        target_bytes = sf.read_bytes()
+        inspected = inspect_repository_bytes(target_bytes, expected_session_id=session_id)
+        target_digest = "sha256:" + hashlib.sha256(target_bytes).hexdigest()
+        caller_operation_id, operation_arguments = _compatibility_operation_arguments(
+            {"invocation_id": args.invocation_id},
+            target_digest=target_digest,
+            require_caller=inspected.format is RepositoryFormat.V5,
+        )
+        operation_id, operation_command = _canonical_compatibility_operation(
+            session_id, "planning-promote-provider-plan", operation_arguments,
+            caller_operation_id=caller_operation_id,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    repository = _legacy_lifecycle_repository(
+        cwd, sf, stamp=True, strict_read=True, pre_admit_lease=True, session_id=session_id,
+        operation_id=operation_id, operation_command=operation_command,
+        operation_command_type="planning-promote-provider-plan",
+    )
+    with repository.transaction():
+        data = repository.load()
+        replayed = getattr(repository, "operation_replayed", False)
+        if replayed:
+            print(json.dumps({"ok": True, "canonical_plan": data.get("canonical_plan")}, ensure_ascii=False))
+            return
+        if data.get("planning_policy_version") != 1 or data.get("phase") != "planning":
+            _provider_gate("planning-policy-not-active")
+        if data.get("planning_strategy") != "provider-primary":
+            _provider_gate("planning-strategy-not-primary")
+        primary = _require_current_primary_planning_binding(data)
+        imports = data.get("provider_plan_imports") or {}
+        record = imports.get(args.invocation_id) if isinstance(imports, dict) else None
+        if not isinstance(record, dict):
+            _provider_gate("provider-plan-import-missing")
+        invocation = invocation_by_id(data, args.invocation_id)
+        if (invocation.get("provider_id") != primary.get("provider_id")
+                or invocation.get("selection_id") != primary.get("selection_id")):
+            _provider_gate("planning-primary-invocation-provider-mismatch")
+        if invocation.get("status") != "completed" or invocation.get("iteration") != data.get("iteration"):
+            _provider_gate("provider-plan-invocation-not-current")
+        candidate_path, candidate_digest = record.get("candidate_path"), record.get("candidate_digest")
+        if not isinstance(candidate_path, str) or not isinstance(candidate_digest, str):
+            _provider_gate("provider-plan-import-invalid")
+        source_digest = record.get("raw_result_digest")
+        plan = {"schema": "mission-plan/1", "path": candidate_path, "digest": candidate_digest,
+                "source": "provider", "source_id": args.invocation_id, "source_digest": source_digest,
+                "selection_source": invocation.get("selection_source") or "automatic",
+                "iteration": data.get("iteration"), "generation": record.get("generation"), "validated_at": iso_now()}
+        # #767 D1: adoption also refuses when the handoff bound to the plan
+        # being replaced may not be dropped, so it shares this failure mapping.
+        try:
+            typed_plan_binding(plan)
+            _raw, _steps = canonical_plan_identity(cwd, plan, reader=_read_strict_review_file)
+            commit_plan_evidence(
+                state=data, plan=plan, lease_verified=True, publish=lambda _binding: None
+            )
+        except (OSError, PlanningFailure, PlanningLifecycleError) as exc:
+            _provider_gate(f"provider-plan-not-adoptable:{exc}")
+        data.setdefault("planning_source_records", {})[f"provider:{args.invocation_id}"] = {
+            key: plan[key] for key in ("generation", "source", "source_id", "selection_source", "iteration")
+        }
+        data["updated_at"] = iso_now()
+        repository.save(data)
+    print(json.dumps({"ok": True, "canonical_plan": plan}, ensure_ascii=False))
+
+
+def cmd_planning_reselect(args):
+    """Explicitly opt an active legacy planning session into fresh selection only."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    session_id = sf.stem
+    try:
+        target_bytes = sf.read_bytes()
+        inspected = inspect_repository_bytes(
+            target_bytes,
+            expected_session_id=session_id,
+        )
+        target_digest = "sha256:" + hashlib.sha256(target_bytes).hexdigest()
+        caller_operation_id, operation_arguments = _compatibility_operation_arguments(
+            {},
+            target_digest=target_digest,
+            require_caller=inspected.format is RepositoryFormat.V5,
+        )
+        operation_id, operation_command = _canonical_compatibility_operation(
+            session_id,
+            "planning-reselect",
+            operation_arguments,
+            caller_operation_id=caller_operation_id,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    repository = _legacy_lifecycle_repository(
+        cwd,
+        sf,
+        stamp=True,
+        strict_read=True,
+        session_id=session_id,
+        operation_id=operation_id,
+        operation_command=operation_command,
+        operation_command_type="planning-reselect",
+    )
+    with repository.transaction():
+        data = repository.load()
+        replayed = getattr(repository, "operation_replayed", False)
+        if replayed:
+            print(json.dumps({"ok": True, "planning_policy_version": 1, "next_action": "reselect-planning-provider"}, ensure_ascii=False))
+            return
+        if not data.get("loop_active") or data.get("halt_reason") or data.get("phase") != "planning":
+            _provider_gate("legacy-reselection-requires-active-planning")
+        if any(isinstance(r, dict) and r.get("status") == "running" for r in data.get("specialist_invocations") or []):
+            _provider_gate("legacy-reselection-running-invocation")
+        # Do not copy raw legacy candidate records.  Fresh recommendation is
+        # deliberately a separate caller action after this bounded migration.
+        data["planning_policy_version"] = 1
+        data.pop("planning_strategy", None)
+        data.pop("canonical_plan", None)
+        data.pop("executor_handoff", None)
+        data["specialists_candidates"] = []
+        data["specialists_selected"] = []
+        data["specialists_decision"] = _new_specialist_selection_checkpoint()
+        # A legacy raw specialist record is intentionally not copied into a
+        # public backup before it is discarded.
+        data["updated_at"] = iso_now()
+        repository.save(data, backup=False)
+    print(json.dumps({"ok": True, "planning_policy_version": 1, "next_action": "reselect-planning-provider"}, ensure_ascii=False))
+
+
+def _cmd_executor_handoff(args, operation: str):
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    session_id = sf.stem
+    command_name = EXECUTOR_HANDOFF_COMMAND_NAMES[operation]
+    command_arguments = {
+        "begin": {},
+        "verify": {"step_id": getattr(args, "step_id", None)},
+        "record": {
+            "result": getattr(args, "result", None),
+            "step_id": getattr(args, "step_id", None),
+        },
+        "complete": {},
+        "abort": {"reason": getattr(args, "reason", None)},
+    }[operation]
+    try:
+        target_bytes = sf.read_bytes()
+        inspected = inspect_repository_bytes(
+            target_bytes,
+            expected_session_id=session_id,
+        )
+        target_digest = "sha256:" + hashlib.sha256(target_bytes).hexdigest()
+        caller_operation_id, operation_arguments = _compatibility_operation_arguments(
+            command_arguments,
+            target_digest=target_digest,
+            require_caller=inspected.format is RepositoryFormat.V5,
+        )
+        operation_id, operation_command = _canonical_compatibility_operation(
+            session_id,
+            command_name,
+            operation_arguments,
+            caller_operation_id=caller_operation_id,
+        )
+    except (OSError, RepositorySelectionError, ValueError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    repository = _legacy_lifecycle_repository(
+        cwd,
+        sf,
+        stamp=True,
+        strict_read=True,
+        session_id=session_id,
+        operation_id=operation_id,
+        operation_command=operation_command,
+        operation_command_type=command_name,
+    )
+    at = iso_now()
+
+    def prepare(data):
+        handoff = data.get("executor_handoff")
+        plan = data.get("canonical_plan")
+        try:
+            if not isinstance(handoff, dict) or not isinstance(plan, dict):
+                raise PlanningLifecycleError("executor-handoff-missing")
+            def replay_facts():
+                replay_steps = list(handoff.get("step_ids", []))
+                return replay_steps, dict.fromkeys(replay_steps, ()), b""
+
+            def fresh_facts():
+                expected = _trusted_canonical_plan_binding(data, plan)
+                raw, steps = canonical_plan_identity(
+                    cwd,
+                    plan,
+                    expected=expected,
+                    reader=_read_strict_review_file,
+                )
+                verify_handoff_binding(
+                    handoff,
+                    plan_path=plan.get("path"),
+                    plan_digest=plan.get("digest"),
+                    plan_generation=plan.get("generation"),
+                    plan_source=plan.get("source"),
+                    source_id=plan.get("source_id"),
+                    selection_source=plan.get("selection_source"),
+                    iteration=data.get("iteration"),
+                    step_ids=steps,
+                )
+                document = json.loads(raw)
+                dependencies = {
+                    item["id"]: tuple(item.get("depends_on", []))
+                    for item in document["steps"]
+                    if isinstance(item, dict)
+                    and isinstance(item.get("id"), str)
+                }
+                return steps, dependencies, raw
+
+            steps, dependencies, raw = {
+                "replay": replay_facts,
+                "fresh": fresh_facts,
+            }[EXECUTOR_HANDOFF_FACTS_SOURCE[(
+                bool(getattr(repository, "operation_replayed", False)),
+                EXECUTOR_HANDOFF_READS_PLAN[operation],
+            )]]()
+            return prepare_executor_handoff(
+                data,
+                ExecutorHandoffRequest(
+                    operation=operation,
+                    at=at,
+                    step_id=getattr(args, "step_id", None),
+                    result=getattr(args, "result", None),
+                    reason=getattr(args, "reason", None),
+                ),
+                ExecutorHandoffFacts(
+                    plan_path=plan.get("path"),
+                    plan_digest=plan.get("digest"),
+                    plan_generation=plan.get("generation"),
+                    plan_source=plan.get("source"),
+                    source_id=plan.get("source_id"),
+                    selection_source=plan.get("selection_source"),
+                    iteration=data.get("iteration"),
+                    step_ids=tuple(steps),
+                    dependencies=dependencies,
+                    decision_iteration=plan.get("iteration"),
+                    raw=raw,
+                ),
+            )
+        except (OSError, PlanningFailure, ValueError, PlanningLifecycleError) as exc:
+            if operation in {"begin", "verify"} and str(exc).startswith(
+                "canonical-"
+            ):
+                return prepare_executor_handoff_rejection(
+                    data,
+                    at=at,
+                    attempted_operation=operation,
+                    reason_code=str(exc),
+                )
+            raise
+
+    try:
+        # FencedCommitError passes through to main() (#747 item 6), whose
+        # _reject_fenced_lease_for_cli classifies the code; everything else
+        # this command rejects is collapsed by the use case.
+        response = run_executor_handoff(
+            repository,
+            prepare,
+            operation=operation,
+            passthrough=(FencedCommitError,),
+            rejected=(OSError, PlanningFailure, ValueError, PlanningLifecycleError),
+        )
+    except ExecutorHandoffRejected as exc:
+        print(f"ERROR: executor handoff rejected: {exc}", file=sys.stderr)
+        sys.exit(2)
+    print(json.dumps(response, ensure_ascii=False))
+
+
+def cmd_executor_handoff_begin(args): _cmd_executor_handoff(args, "begin")
+def cmd_executor_handoff_verify(args): _cmd_executor_handoff(args, "verify")
+def cmd_executor_handoff_record(args): _cmd_executor_handoff(args, "record")
+def cmd_executor_handoff_complete(args): _cmd_executor_handoff(args, "complete")
+
+
+def _emit_handoff_error(exc: Exception) -> None:
+    print(f"ERROR: {exc}", file=sys.stderr)
+
+
+def cmd_handoff_publish(args):
+    cwd = Path.cwd()
+    try:
+        payload = load_handoff_payload(args.input)
+        result = publish_evidence_handoff(cwd, args.topic, payload, producer_session=args.producer_session)
+    except EvidenceHandoffError as exc:
+        _emit_handoff_error(exc)
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def cmd_handoff_await(args):
+    cwd = Path.cwd()
+    try:
+        result = await_evidence_handoff(cwd, args.topic, after_seq=args.after_seq, timeout_sec=args.timeout_sec)
+    except EvidenceHandoffTimeout:
+        print(json.dumps({
+            "status": "timeout",
+            "topic": args.topic,
+            "after_seq": args.after_seq,
+            "timeout_sec": args.timeout_sec,
+        }, ensure_ascii=False))
+        sys.exit(3)
+    except EvidenceHandoffError as exc:
+        _emit_handoff_error(exc)
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def cmd_handoff_verify(args):
+    cwd = Path.cwd()
+    try:
+        result = verify_evidence_handoff(args.path, expect_digest=args.expect_digest, cwd=cwd)
+    except EvidenceHandoffError as exc:
+        _emit_handoff_error(exc)
+        sys.exit(2)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def _cap_for_findings(findings: list[dict]) -> float | None:
+    counts = {"High": 0, "Medium": 0, "Low": 0}
+    for finding in findings:
+        counts[finding["severity"]] += 1
+    if counts["High"] >= 1:
+        return 3.0
+    if counts["Medium"] >= 3:
+        return 3.5
+    if 1 <= counts["Medium"] <= 2:
+        return 4.0
+    if counts["Low"] >= 4:
+        return 4.3
+    if 2 <= counts["Low"] <= 3:
+        return 4.5
+    if counts["Low"] == 1:
+        return 4.7
+    return None
+
+
+def _apply_reviewer_caps(review: dict) -> tuple[dict, list[dict]]:
+    scores = {key: float(review["scores"][key]) for key in REVIEW_SCORE_KEYS}
+    cap_log = []
+    for axis in REVIEW_SCORE_KEYS:
+        axis_findings = [f for f in review.get("findings", []) if f.get("axis") == axis]
+        cap = _cap_for_findings(axis_findings)
+        if cap is not None and scores[axis] > cap:
+            cap_log.append({"perspective": review["perspective"], "axis": axis, "original": scores[axis], "cap": cap})
+            scores[axis] = cap
+    return scores, cap_log
+
+
+def _parse_reviewer_windows(specs: list[str], valid_perspectives: set[str]) -> list[dict]:
+    """#282: '--reviewer-window P=<start>..<end>' 申告を検証して構造化する.
+
+    観測専用の self-report (orchestrator が spawn/return 時刻を申告する)。
+    review JSON の verbatim 契約には触れない。形式不正・未知 perspective・
+    重複・end<start は strict に exit 2 で拒否する。
+    """
+    windows = []
+    seen = set()
+    for spec in specs:
+        head, sep, times = spec.partition("=")
+        start_raw, tsep, end_raw = times.partition("..")
+        if not sep or not tsep or not head.strip() or not start_raw.strip() or not end_raw.strip():
+            print(f"ERROR: --reviewer-window の形式が不正です: {spec!r} "
+                  "(期待: '<perspective>=<start_iso>..<end_iso>')", file=sys.stderr)
+            sys.exit(2)
+        perspective, start_raw, end_raw = head.strip(), start_raw.strip(), end_raw.strip()
+        if perspective not in valid_perspectives:
+            print(f"ERROR: --reviewer-window の perspective {perspective!r} が "
+                  f"--input の reviewer に存在しません", file=sys.stderr)
+            sys.exit(2)
+        if perspective in seen:
+            print(f"ERROR: --reviewer-window の perspective {perspective!r} が重複しています", file=sys.stderr)
+            sys.exit(2)
+        seen.add(perspective)
+        try:
+            start = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
+        except ValueError:
+            print(f"ERROR: --reviewer-window の時刻が ISO 8601 として解釈できません: {spec!r}", file=sys.stderr)
+            sys.exit(2)
+        # naive/aware 混在は比較で TypeError になるため、naive は UTC とみなして正規化する
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        if end < start:
+            print(f"ERROR: --reviewer-window の end が start より前です: {spec!r}", file=sys.stderr)
+            sys.exit(2)
+        windows.append({
+            "perspective": perspective,
+            "started_at": start_raw,
+            "ended_at": end_raw,
+            "_start": start,
+            "_end": end,
+        })
+    return windows
+
+
+def _observe_parallel_execution(windows: list[dict]):
+    """#282: 全ペアの時間帯が重なれば True、1 ペアでも disjoint なら False、判定不能は 'unknown'."""
+    if len(windows) < 2:
+        return "unknown"
+    for i in range(len(windows)):
+        for j in range(i + 1, len(windows)):
+            a, b = windows[i], windows[j]
+            if not (a["_start"] < b["_end"] and b["_start"] < a["_end"]):
+                return False
+    return True
+
+
+def _consensus_score(max_delta: float) -> float:
+    if max_delta <= 0.5:
+        return 5.0
+    if max_delta <= 1.0:
+        return 4.0
+    if max_delta <= 1.5:
+        return 3.0
+    if max_delta <= 2.0:
+        return 2.0
+    return 1.0
+
+
+_ARTIFACT_HEADING_RE = re.compile(r"^ {0,3}(#{1,3})(?:[ \t]+(.*?))?[ \t]*$")
+_ARTIFACT_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_ARTIFACT_STUB_RE = re.compile(
+    r"(?:"
+    r"recorded below(?:\s+once\s+.+\s+completes)?|"
+    r"once\s+.+\s+completes|"
+    r"will be (?:recorded|populated|filled)|"
+    r"to be (?:recorded|determined)|"
+    r"TBD|"
+    r"後で記録|"
+    r"完了後に記録|"
+    r"review-finalize\s*(?:後|完了後)(?:に記録)?"
+    r")[.!。]?[ \t]*",
+    re.IGNORECASE,
+)
+_ARTIFACT_LINT_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _read_regular_artifact_utf8(path: Path) -> str:
+    """Read a bounded regular file from one descriptor without blocking on FIFOs."""
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(f"artifact path is not a regular file: {path}")
+        chunks = []
+        remaining = _ARTIFACT_LINT_MAX_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        if len(payload) > _ARTIFACT_LINT_MAX_BYTES:
+            raise OSError(
+                "artifact exceeds lint size limit "
+                f"({_ARTIFACT_LINT_MAX_BYTES} bytes): {path}"
+            )
+        return payload.decode("utf-8")
+    finally:
+        os.close(fd)
+
+
+def lint_artifact_completeness(artifact_text: str) -> list[dict]:
+    """Detect empty H1-H3 sections and forward-reference-only stubs."""
+    sections: list[tuple[str, list[str]]] = []
+    current: tuple[str, list[str]] | None = None
+    fence_char: str | None = None
+    fence_length = 0
+    for line in artifact_text.splitlines():
+        fence_match = _ARTIFACT_FENCE_RE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            suffix = fence_match.group(2)
+            if fence_char is None:
+                # CommonMark: a backtick fence info string containing a backtick
+                # is not a valid opener. Tilde-fence info has no such restriction.
+                if marker[0] != "`" or "`" not in suffix:
+                    fence_char = marker[0]
+                    fence_length = len(marker)
+            elif (
+                marker[0] == fence_char
+                and len(marker) >= fence_length
+                and not suffix.strip()
+            ):
+                fence_char = None
+                fence_length = 0
+        heading_match = None if fence_char is not None else _ARTIFACT_HEADING_RE.match(line)
+        if heading_match:
+            raw_heading = (heading_match.group(2) or "").strip()
+            # An optional ATX closing sequence is recognized only when separated
+            # from the title by whitespace. Thus `Score###` remains literal text.
+            heading = (
+                ""
+                if re.fullmatch(r"#+", raw_heading)
+                else re.sub(r"[ \t]+#+[ \t]*$", "", raw_heading).strip()
+            )
+            current = (heading, [])
+            sections.append(current)
+        elif current is not None:
+            current[1].append(line)
+
+    findings = []
+    for heading, body_lines in sections:
+        content_lines = [line.strip() for line in body_lines if line.strip()]
+        if not content_lines:
+            findings.append({
+                "heading": heading,
+                "kind": "empty-section",
+                "excerpt": "",
+            })
+            continue
+        if all(_ARTIFACT_STUB_RE.fullmatch(line) for line in content_lines):
+            findings.append({
+                "heading": heading,
+                "kind": "stub-forward-reference",
+                "excerpt": "\n".join(content_lines),
+            })
+    return findings
+
+
+def _lint_state_artifact(cwd: Path, data: dict) -> tuple[list[dict], str]:
+    """Lint the canonical artifact identity, with a read-only legacy fallback."""
+    if data.get("artifact_applicability") == "not-applicable":
+        return [], "skipped"
+    artifact_path, canonical = artifact_path_from_state(data)
+    if not artifact_path:
+        return (
+            ([], "missing")
+            if data.get("artifact_applicability") in {"producing", "pending"}
+            else ([], "skipped")
+        )
+    if not canonical:
+        try:
+            path = Path(artifact_path).expanduser()
+            if not path.is_absolute():
+                path = cwd / path
+            path = path.resolve()
+            try:
+                path.relative_to(cwd.resolve())
+            except UnicodeError:
+                raise
+            except ValueError:
+                print(
+                    "WARN #351: artifact lint skipped: "
+                    f"path outside project root: {artifact_path}",
+                    file=sys.stderr,
+                )
+                return [], "skipped"
+            artifact_text = _read_regular_artifact_utf8(path)
+        except (OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
+            print(f"WARN #351: artifact lint skipped: {exc}", file=sys.stderr)
+            return [], "skipped"
+        findings = lint_artifact_completeness(artifact_text)
+        return findings, "findings" if findings else "clean"
+    try:
+        if data.get("artifact_applicability") == "producing":
+            _, payload = validate_artifact_identity(data, cwd)
+        else:
+            _, payload = capture_artifact_identity(
+                cwd,
+                artifact_path,
+                str(data.get("session_id") or "legacy"),
+                canonical=canonical,
+            )
+        try:
+            artifact_text = payload.decode("utf-8")
+        except UnicodeError as exc:
+            if data.get("artifact_applicability") == "producing":
+                raise ArtifactContractError("artifact is not valid UTF-8") from exc
+            raise
+    except ArtifactContractError:
+        if data.get("artifact_applicability") == "producing":
+            raise
+        print("WARN #351: artifact lint skipped: invalid artifact contract", file=sys.stderr)
+        return [], "skipped"
+    except (OSError, UnicodeError, ValueError, TypeError, RuntimeError) as exc:
+        print(f"WARN #351: artifact lint skipped: {exc}", file=sys.stderr)
+        return [], "skipped"
+    findings = lint_artifact_completeness(artifact_text)
+    return findings, "findings" if findings else "clean"
+
+
+def cmd_aggregate_reviews(args):
+    request = ReviewAggregationRequest(
+        iteration=args.iteration, raw_input=getattr(args, "input", None),
+        raw_input_refs=getattr(args, "input_refs", None), out=getattr(args, "out", None), min_reviewers=getattr(args, "min_reviewers", None),
+        raw_reviewer_windows=getattr(args, "reviewer_windows", None), record_outcome=getattr(args, "record_outcome", True),
+        json=getattr(args, "json", False), base_sha=getattr(args, "base_sha", None), head_sha=getattr(args, "head_sha", None),
+        event_id=getattr(args, "event_id", None), root_event_id=getattr(args, "root_event_id", None), raw_attempt=getattr(args, "attempt", ...), retry_of=getattr(args, "retry_of", None),
+    )
+    services = ReviewAggregationServices(
+        current_directory=Path.cwd,
+        resolve_state_file=resolve_state_file,
+        path_exists=Path.exists,
+        load_authoritative_state=_load_authoritative_state,
+        command_outcome=_command_outcome,
+        revision_scope_from_args=_revision_scope_from_args,
+        validate_revision_scope=_validate_revision_scope,
+        load_review_json=_load_review_json,
+        load_imported_review=_load_imported_review,
+        printer=print,
+        stderr=sys.stderr,
+        system_exit=SystemExit,
+        build_guidance=build_guidance,
+        apply_reviewer_caps=_apply_reviewer_caps,
+        reduce_reviews_to_score=reduce_reviews_to_score,
+        consensus_score=_consensus_score,
+        review_failure=ReviewFailure,
+        review_score_keys=REVIEW_SCORE_KEYS,
+        parse_reviewer_windows=_parse_reviewer_windows,
+        observe_parallel_execution=_observe_parallel_execution,
+        record_command_outcome_only=_record_command_outcome_only,
+        emit_json_command_failure=_emit_json_command_failure,
+        command_outcome_emission_target=args,
+        review_prose_bytes_warn=REVIEW_PROSE_BYTES_WARN,
+        review_prose_ratio_warn=REVIEW_PROSE_RATIO_WARN,
+        legacy_lifecycle_repository=_legacy_lifecycle_repository,
+        current_review_lineage=_current_review_lineage,
+        validate_artifact_state_consistency=validate_artifact_state_consistency,
+        lint_state_artifact=_lint_state_artifact,
+        artifact_contract_error=ArtifactContractError,
+        invalidate_artifact_lint_observation=invalidate_artifact_lint_observation,
+        clock=iso_now,
+        canonical_artifact_identity_snapshot=canonical_artifact_identity_snapshot,
+        end_activity_segment=end_activity_segment,
+        transition_phase=_transition_phase,
+        record_activity_event=record_activity_event,
+        append_command_outcome=_append_command_outcome,
+        expected_context_mode=_expected_context_mode,
+        context_manifest_generated=_context_manifest_generated,
+        json_dumps=json.dumps,
+        sha256=hashlib.sha256,
+        state_dir=state_dir,
+        path_from_string=Path,
+        same_publish_target=_same_publish_target,
+        command_outcome_exit=CommandOutcomeExit,
+        published_file=_PublishedFile,
+        publish_review_archive_transaction=_publish_review_archive_transaction,
+        publish_output_transaction=_publish_output_transaction,
+        verify_published_file=_verify_published_file,
+        rollback_published_file=_rollback_published_file,
+        published_rollback_recovery_error=PublishedRollbackRecoveryError,
+        close_published_file=_close_published_file,
+    )
+    print(run_aggregate_reviews(request, services).rendered)
+
+def _reject_on_score_item_mismatch(args, items: dict) -> None:
+    """Reject (exit 2) when self-reported scores INFLATE above the item scores (#122).
+
+    Only the legacy --items path supplies self-reported composite/min_item; the
+    --scoring-json path recomputes both from items, so this cannot fire there.
+    The gate uses the stored self-reported values, so over-reporting is the
+    bypass to close ("全項目 3.0 でも min_item 4.0 と申告すれば合格"). It was
+    previously only a WARNING and is now a hard error. Under-reporting is left
+    permitted because it is conservative (it can only make the gate stricter).
+    """
+    numeric_values = [float(v) for v in items.values() if isinstance(v, (int, float)) and not math.isnan(float(v))]
+    if not numeric_values:
+        return
+    item_mean = sum(numeric_values) / len(numeric_values)
+    item_min = min(numeric_values)
+    errors = []
+    if args.composite - item_mean > 0.1:
+        errors.append(f"composite={args.composite} > items mean={item_mean:.2f}")
+    if args.min_item - item_min > 0.1:
+        errors.append(f"min_item={args.min_item} > items min={item_min:.2f}")
+    if errors:
+        print(
+            "ERROR: 自己申告スコアが items 明細より上振れしています (許容 0.1 超): "
+            + "; ".join(errors)
+            + "。composite/min_item を items から算出した値に下げるか、--scoring-json を使ってください。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _validate_consensus_policy(data: dict, items: dict) -> None:
+    """Retained call site: new score items are always exactly the four axes."""
+    if set(items) != CANONICAL_SCORE_KEYS:
+        print("ERROR: 新規 score items は4つの正規採点軸だけで指定してください。", file=sys.stderr)
+        sys.exit(2)
+
+
+def _require_score_resubmit_reason(data: dict, iteration: int, reason: str | None) -> None:
+    """Reject a duplicate score before any aggregate or archive side effect."""
+    already_scored = any(
+        isinstance(entry, dict) and entry.get("iteration") == iteration
+        for entry in data.get("score_history", [])
+    )
+    if already_scored and not reason:
+        print(
+            f"ERROR: iteration {iteration} は既に採点済みです。"
+            ' 同一 iteration を再 push する場合は --resubmit-reason "<理由>" を指定してください (#122)。',
+            file=sys.stderr,
+        )
+        raise CommandOutcomeExit(2, "expected-gate")
+
+
+def cmd_context_manifest(args):
+    print(run_context_manifest_cli(args, Path.cwd(), _EVIDENCE_CLI_SERVICES))
+
+
+def cmd_push_score(args):
+    """Phase 5 scoring JSON 生成後、orchestrator が呼ぶ score_history append.
+
+    標準フローでは aggregate-reviews が scoring JSON を生成し、
+    orchestrator (mission/SKILL.md Phase 5 直後) がそのパスを渡してこのコマンドを呼ぶ。
+    """
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。先に `init` してください。", file=sys.stderr)
+        sys.exit(1)
+    if not _nonnegative_int(args.open_high):
+        print("ERROR: --open-high は bool ではない 0 以上の整数で指定してください", file=sys.stderr)
+        sys.exit(2)
+    if args.iteration < 1:
+        print("ERROR: --iteration は 1 以上で指定してください", file=sys.stderr)
+        sys.exit(2)
+    scoring_payload = None
+    if args.scoring_json:
+        # ADR-002 Stage 1 (G-1): items を scoring JSON ファイルから読み、
+        # composite/min_item を CLI 側で再計算する (orchestrator の転記レイヤを排除)。
+        if args.items is not None or args.composite is not None or args.min_item is not None:
+            print(
+                "ERROR: --scoring-json と --items/--composite/--min-item は併用できません "
+                "(composite/min_item は items から CLI が再計算します)。",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        items, json_notes, json_open_high, scoring_payload = _load_scoring_json(args.scoring_json)
+        score_axis_values = [float(items[axis]) for axis in REVIEW_SCORE_KEYS]
+        args.composite = round(sum(score_axis_values) / len(score_axis_values), 2)
+        args.min_item = round(min(score_axis_values), 2)
+        # scoring JSON が authoritative: JSON に open_high があれば CLI --open-high より優先
+        if json_open_high is not None:
+            args.open_high = json_open_high
+        if json_notes and not args.notes:
+            args.notes = json_notes
+    else:
+        if args.items is None or args.composite is None or args.min_item is None:
+            print(
+                "ERROR: --scoring-json を使わない場合は --items/--composite/--min-item が必須です。",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        # G-2: scoring evidence なしの push-score は default reject。
+        # DEPRECATED (#226/A-4): MISSION_REQUIRE_SCORING_EVIDENCE=0 は scoring-evidence gate を
+        # バイパスする移行期 escape hatch。次のマイナーリリースで削除予定。codex-preflight --strict は
+        # この env を検出して exit 2 にする。新規利用は禁止。
+        if not args.scoring_output:
+            if os.environ.get("MISSION_REQUIRE_SCORING_EVIDENCE") == "0":
+                print(
+                    "DEPRECATED ESCAPE HATCH: scoring evidence なしの push-score を許可しました "
+                    "(MISSION_REQUIRE_SCORING_EVIDENCE=0)。この env は次のマイナーリリースで削除予定です。"
+                    " --scoring-json (推奨) または --scoring-output へ移行してください。",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "ERROR: scoring evidence が必須です。"
+                    " --scoring-json (推奨) または --scoring-output を指定してください。",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+        print(
+            "DeprecationWarning: push-score の --items 経路は将来のマイナーリリースで削除予定です。"
+            " --scoring-json を使用してください (#122)。",
+            file=sys.stderr,
+        )
+        items = _validate_score_args(args)
+        _reject_on_score_item_mismatch(args, items)
+    _reject_normalized_scale(items)
+
+    repository = _legacy_lifecycle_repository(
+        cwd,
+        sf,
+        stamp=True,
+        strict_read=True,
+        lease_reason="push-score",
+    )
+    with repository.transaction(), _PublishedFilesTransaction() as published_files:
+        data = repository.load()
+        _reject_active_provider_mutation(data, "push-score")
+        _validate_consensus_policy(data, items)
+        try:
+            provenance = _validate_provenance(
+                scoring_payload.get("score_provenance") if scoring_payload else None,
+                # A push is always a new score write, even if an attacker
+                # deleted/downgraded schema_version from an active state.
+                require=True,
+            )
+        except ValueError as exc:
+            print(f"ERROR: provenance: {exc}", file=sys.stderr)
+            sys.exit(2)
+        verified_archive = None
+        if provenance is not None:
+            try:
+                verified_archive = _revalidate_score_provenance(cwd, {
+                    "iteration": args.iteration, "items": items,
+                    "composite": args.composite, "min_item": args.min_item,
+                    "open_high": args.open_high,
+                    "review_agreement": scoring_payload.get("review_agreement") if scoring_payload else None,
+                    "agreement_detail": scoring_payload.get("agreement_detail") if scoring_payload else None,
+                    "score_provenance": provenance,
+                }, data,
+                                              require_scoring_artifact=False)
+            except ValueError as exc:
+                print(f"ERROR: provenance: {exc}", file=sys.stderr)
+                sys.exit(2)
+        now = iso_now()
+        # #122: 同一 iteration の再 push は gate 迂回の温床 (低スコア push 後に
+        # 高スコアで上書き)。再 push には差し替え理由を必須化する。旧 entry は履歴として残す。
+        resubmit_reason = getattr(args, "resubmit_reason", None)
+        _require_score_resubmit_reason(data, args.iteration, resubmit_reason)
+        entry = {
+            "iteration": args.iteration,
+            "composite": args.composite,
+            "min_item": args.min_item,
+            "items": items,
+            "timestamp": now,
+            # #690: bounded context manifests read these.  The source marker is
+            # what lets a manifest tell "this iteration had no findings" apart
+            # from "this entry predates the producer".
+            **findings_summary_fields(verified_archive),
+        }
+        if resubmit_reason:
+            entry["resubmit_reason"] = resubmit_reason
+        if args.notes:
+            entry["notes"] = args.notes
+        # Issue #3: open_high を保存 (mark-passes gate で参照)
+        entry["open_high"] = getattr(args, "open_high", 0)
+        # #593 B-1: 採点対象 artifact の digest。gate の判定には使わない (記録のみ)。
+        _digest, _digest_status = _artifact_digest_for_iteration(cwd, data)
+        entry["artifact_digest"] = _digest
+        entry["artifact_digest_status"] = _digest_status
+        if args.scoring_json:
+            if scoring_payload.get("findings_evidence_path") is not None:
+                entry["findings_evidence_path"] = scoring_payload["findings_evidence_path"]
+            if "review_agreement" in scoring_payload:
+                review_agreement = scoring_payload["review_agreement"]
+                entry["review_agreement"] = None if review_agreement is None else float(review_agreement)
+            if scoring_payload.get("agreement_detail") is not None:
+                entry["agreement_detail"] = scoring_payload["agreement_detail"]
+            # archive を state 書き込みより先に行う (crash 時に state が実在しない
+            # scoring_evidence_path を指す dangling reference を防ぐ。他 archive 系と同順序)
+            entry["score_source"] = provenance["score_source"] if provenance else "scoring-json"
+            if provenance is not None:
+                entry["score_provenance"] = provenance
+                if provenance["score_source"] == "manual-import":
+                    entry["manual_evidence_ref"] = provenance["manual_evidence_ref"]
+                else:
+                    entry["review_evidence_ref"] = provenance["review_evidence_ref"]
+                entry["revision_scope"] = provenance["revision_scope"]
+            scoring_publish = published_files.add(
+                _archive_scoring_json(cwd, args.iteration, data, entry, scoring_payload)
+            )
+            scoring_json_archived_to = str(scoring_publish.path)
+            artifact_state_path = str(scoring_publish.path.relative_to(cwd))
+            entry["scoring_evidence_path"] = artifact_state_path if provenance is not None else scoring_json_archived_to
+            artifact_bytes = _read_bounded_review_evidence(cwd, artifact_state_path)
+            if provenance is not None:
+                provenance["scoring_evidence_ref"] = {
+                    "kind": "scoring-artifact",
+                    "path": artifact_state_path,
+                    "digest": "sha256:" + hashlib.sha256(artifact_bytes).hexdigest(),
+                }
+        data.setdefault("score_history", []).append(entry)
+        data["failure_ledger"] = _derive_failure_ledger(cwd, data["score_history"])
+        # 改善2: top-level iteration を同期 (orchestrator の set 取りこぼしで
+        # iteration と score_history 長が不整合になる問題への対処)。
+        data["iteration"] = args.iteration
+        _transition_phase(data, "scoring", now)  # M4 (2026-06-10): phase 自動更新
+        # Q11: stagnation_count 自動更新。
+        # append 後の score_history から前エントリの composite を取得し改善幅を判定。
+        # 初回 (前エントリなし) は 0 にリセット。改善幅 >= 0.1 も 0 にリセット。
+        # 改善幅 < 0.1 は +1 する (後方互換: data.get で既存 state にも対応)。
+        history = data["score_history"]
+        if len(history) >= 2:
+            prev_composite = history[-2].get("composite")
+            cur_composite = entry["composite"]
+            if _is_valid_composite(prev_composite) and 0 <= (cur_composite - prev_composite) < 0.1:
+                data["stagnation_count"] = data.get("stagnation_count", 0) + 1
+            else:
+                data["stagnation_count"] = 0
+        else:
+            data["stagnation_count"] = 0
+        transaction_outcome = getattr(args, "transaction_outcome", None)
+        if transaction_outcome is not None:
+            _append_command_outcome(data, transaction_outcome)
+        data["updated_at"] = now
+        # A successful provenance-bearing score is the only migration path.
+        data["schema_version"] = SCHEMA_VERSION
+        if args.scoring_json:
+            _verify_published_file(scoring_publish)
+        repository.save(data)
+
+    if args.scoring_json:
+        archived_to = scoring_json_archived_to  # StateLock 内で archive 済み (dangling path 防止)
+    elif args.scoring_output:
+        archived_to = _archive_scoring_output(cwd, args.scoring_output, args.iteration, data, entry)
+    else:
+        archived_to = None
+
+    result = {"ok": True, "appended": entry}
+    if archived_to:
+        result["archived_to"] = archived_to
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def _artifact_digest_for_iteration(cwd: Path, state: dict) -> tuple[str | None, str]:
+    """#593 B-1: 採点対象 artifact の sha256 を返す (digest, status)。
+
+    iteration ごとに記録することで `digest[N] != digest[N+1]` から
+    「反復して成果物が実際に変わったか」を判定できる。これがないと
+    「ゲートの誤検知 (弾いたが直すものが無い)」と「修正の失敗 (直したが
+    改善しない)」を区別できず、gate 精度を測れない。
+
+    本文は保存しない (サイズ・機密)。digest のみ。
+    収集不能でも例外にせず、**理由を必ず返す** (null + 理由 null にすると
+    「未設定」と「読めなかった」が区別できなくなる)。
+    """
+    try:
+        path_text, _canonical = artifact_path_from_state(state)
+    except Exception as exc:  # noqa: BLE001 — 記録は本流を止めない
+        return None, f"error:{type(exc).__name__}"
+    if not isinstance(path_text, str) or not path_text.strip():
+        return None, "not-configured"
+    try:
+        target = Path(path_text)
+        if not target.is_absolute():
+            target = cwd / target
+        if not target.exists():
+            return None, "missing"
+        if not target.is_file():
+            return None, "not-a-file"
+        return "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest(), "ok"
+    except OSError as exc:
+        return None, f"unreadable:{type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001
+        return None, f"error:{type(exc).__name__}"
+
+
+def cmd_verification_record(args):
+    """#594 A: executor 完了後・reviewer 起動前の検証結果を記録する。
+
+    reviewer は読むだけでは executor と同じ盲点に落ちる。テスト実行・存在
+    確認・再計算は**モデルの意見ではなく事実**であり、真の独立性を生む。
+
+    **gate の式は変更しない。** 記録はゲートの入力を増やすものであり、
+    検証が失敗しても本コマンドは mission を止めない (判断は reviewer と
+    gate に委ねる)。
+    """
+    raw = sys.stdin.read() if getattr(args, "stdin", False) else Path(args.input).read_text(encoding="utf-8")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"verification payload is not valid JSON: {exc}")
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state file が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    try:
+        prepared = prepare_verification_record_operation(
+            payload,
+            iteration=args.iteration,
+            state_path=sf,
+            compatibility_arguments=_compatibility_operation_arguments,
+            canonical_operation=_canonical_compatibility_operation,
+        )
+        result = run_verification_record(
+            VerificationRecordRequest(
+                now=iso_now(),
+                iteration=args.iteration,
+                checks=prepared.checks,
+                kind=prepared.kind,
+            ),
+            _legacy_lifecycle_repository(
+                cwd, sf, stamp=True, pre_admit_lease=True,
+                session_id=sf.stem,
+                operation_id=prepared.operation_id,
+                operation_command=prepared.operation_command,
+                operation_command_type="verification-record",
+            ),
+        )
+    except EvidenceFailure as exc:
+        raise SystemExit(exc.code) from exc
+    print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
+
+
+def cmd_verification_run(args):
+    """Execute one policy-frozen criterion and persist the runner receipt."""
+    try:
+        output = run_verification_receipt_cli(
+            VerificationReceiptCliRequest(args.criterion, args.repro_input),
+            _VERIFICATION_RECEIPT_CLI_SERVICES,
+        )
+    except EvidenceFailure as exc:
+        print(exc.code, file=sys.stderr)
+        sys.exit(2)
+    print(output)
+
+
+_CLAIMS_LEDGER_CLI_SERVICES = ClaimsLedgerCliServices(
+    resolve_state_file, _resolve_evidence_output_path, _legacy_evidence_repository,
+)
+
+
+def cmd_verification_claims(args):
+    try:
+        rendered = render_claims_ledger_cli(args, _CLAIMS_LEDGER_CLI_SERVICES)
+    except EvidenceFailure as exc:
+        print(f"ERROR: {exc.code}", file=sys.stderr)
+        sys.exit(2)
+    print(rendered)
+
+
+def cmd_fresh_review_prepare(args):
+    print(run_fresh_review_prepare_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_budget_reconcile(args):
+    print(run_budget_reconcile_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES, cleanup_jobs=cleanup_jobs))
+
+
+def cmd_budget_status(args):
+    print(run_budget_status_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_fresh_review_run(args):
+    print(run_fresh_review_dispatch_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES, fresh_review_host))
+
+
+def cmd_fresh_review_reconcile(args):
+    print(run_fresh_review_dispatch_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES, fresh_review_host))
+
+
+def cmd_fresh_review_withdraw(args):
+    print(run_fresh_review_withdraw_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_fresh_review_import(args):
+    print(run_fresh_review_import_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES, fresh_review_host))
+
+
+def cmd_repair_origins(args):
+    print(run_repair_origins_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_fresh_review_status(args):
+    print(run_fresh_review_status_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_acceptance_contract_import(args):
+    print(run_acceptance_contract_import_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_acceptance_contract_status(args):
+    print(run_acceptance_contract_status_cli(args, _ACCEPTANCE_CONTRACT_CLI_SERVICES))
+
+
+def cmd_review_finalize(args):
+    """#283: aggregate-reviews → push-score を 1 コマンドで実行する (Phase 5 transactional).
+
+    既存の cmd_aggregate_reviews / cmd_push_score をそのまま内部呼び出しし、
+    validator (min-reviewers / strict review 検証 / findings gate / #122 再 push 保護) を複製しない。
+    集計が exit 非0 なら push-score には到達せず、score_history は不変 (atomic)。
+    """
+    outcome = _command_outcome(args, "review-finalize", "ok")
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if sf.exists():
+        try:
+            _snapshot, current = _load_authoritative_state(sf)
+            _require_score_resubmit_reason(
+                current, args.iteration, args.resubmit_reason,
+            )
+        except SystemExit as error:
+            _emit_finalize_failure(args, "", error, site="resubmit")
+            raise error
+    agg_args = argparse.Namespace(
+        iteration=args.iteration,
+        input=args.input,
+        input_refs=getattr(args, "input_refs", []) or [],
+        out=args.out,
+        json=True,
+        min_reviewers=args.min_reviewers,
+        reviewer_windows=args.reviewer_windows,
+        base_sha=args.base_sha,
+        head_sha=args.head_sha,
+        record_outcome=False,
+    )
+    agg_stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(agg_stdout):
+            cmd_aggregate_reviews(agg_args)
+    except SystemExit as error:
+        _emit_finalize_failure(args, agg_stdout.getvalue(), error)
+        raise error
+    agg_result = json.loads(agg_stdout.getvalue())
+
+    push_args = argparse.Namespace(
+        iteration=args.iteration,
+        composite=None,
+        min_item=None,
+        items=None,
+        scoring_json=agg_result["out"],
+        notes=args.notes,
+        scoring_output=None,
+        open_high=0,
+        resubmit_reason=args.resubmit_reason,
+        record_outcome=False,
+        transaction_outcome=outcome,
+    )
+    push_stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(push_stdout):
+            cmd_push_score(push_args)
+    except SystemExit as error:
+        _emit_finalize_failure(args, push_stdout.getvalue(), error, site="push")
+        raise error
+    push_result = json.loads(push_stdout.getvalue())
+
+    print(json.dumps({
+        "ok": True,
+        "outcome_kind": "ok",
+        "outcome": outcome,
+        "aggregate": agg_result,
+        "push": push_result,
+    }, ensure_ascii=False, indent=2))
+
+
+def cmd_closeout(args):
+    """#283: mark-passes → next を 1 コマンドで実行する (Phase 6 transactional).
+
+    標準経路専用で --force は受け付けない (override は mark-passes を直接使う)。
+    gate 未達なら mark-passes の exit code を保ち、next 相当の guidance を
+    JSON で返す。state は mark-passes が exit 前に書き込まないため不変。
+    """
+    sf = resolve_state_file(Path.cwd())
+    if sf.exists():
+        _snapshot, current = _load_authoritative_state(sf)
+        try:
+            already_passed = closeout_already_passed(current)
+        except ReviewFailure as error:
+            print(f"ERROR: {error.message}", file=sys.stderr)
+            sys.exit(2)
+        if already_passed:
+            next_stdout = io.StringIO()
+            with contextlib.redirect_stdout(next_stdout):
+                cmd_next(argparse.Namespace())
+            print(json.dumps({
+                "ok": True,
+                "mark_passes": {
+                    "ok": True,
+                    "passes": True,
+                    "forced": bool(current.get("passes_forced")),
+                    "already_passed": True,
+                },
+                "next": json.loads(next_stdout.getvalue()),
+            }, ensure_ascii=False, indent=2))
+            return
+    mp_args = argparse.Namespace(force=False, reason=None, approved_by_user=False)
+    mp_stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(mp_stdout):
+            cmd_mark_passes(mp_args)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        # 防衛的分岐: 現在 cmd_mark_passes は sys.exit(0) を発しない (成功時は return) ため
+        # code == 0 には通常到達しない。到達した場合のみ成功経路へ継続する。
+        if code != 0:
+            next_stdout = io.StringIO()
+            with contextlib.redirect_stdout(next_stdout):
+                cmd_next(argparse.Namespace())
+            print(json.dumps({
+                "ok": False,
+                "closeout": "mark-passes-gate-failed",
+                "next": json.loads(next_stdout.getvalue()),
+            }, ensure_ascii=False, indent=2))
+            sys.exit(code)
+
+    next_stdout = io.StringIO()
+    with contextlib.redirect_stdout(next_stdout):
+        cmd_next(argparse.Namespace())
+    print(json.dumps({
+        "ok": True,
+        "mark_passes": json.loads(mp_stdout.getvalue()),
+        "next": json.loads(next_stdout.getvalue()),
+    }, ensure_ascii=False, indent=2))
+
+
+def _verify_force_pass_approval(data: dict, args, cwd: Path) -> dict:
+    latest_scope = next(
+        (
+            entry.get("revision_scope")
+            for entry in reversed(data.get("score_history", []))
+            if isinstance(entry, dict) and isinstance(entry.get("revision_scope"), dict)
+        ),
+        {"kind": "not-applicable", "reason_code": "non-git"},
+    )
+    terminal_object = dict(data)
+    terminal_object.update({"passes": True, "loop_active": False, "passes_forced": True})
+    _write_terminal_outcome(terminal_object)
+    request = build_approval_request(
+        session_id=data.get("session_id"),
+        mission_id=data.get("mission_id"),
+        revision_scope=latest_scope,
+        terminal_object_digest=terminal_state_digest(terminal_object),
+        approval_evidence_ref=getattr(args, "approval_evidence_ref", None),
+        approved_actor=getattr(args, "approved_actor", None),
+        approved_at=getattr(args, "approved_at", None),
+        reason_code=getattr(args, "reason_code", None),
+        event_nonce=secrets.token_hex(32),
+    )
+    verification = verify_force_approval(
+        request, getattr(args, "approval_verifier", None), cwd=cwd,
+        state=data
+    )
+    if _force_envelope_replayed(cwd, verification):
+        raise ValueError("approval request or receipt was already consumed")
+    validate_receipt_binding(cwd, verification)
+    if data.get("force_approval"):
+        raise ValueError("approval envelope was already consumed")
+    return verification
+
+
+def _validate_force_pass_terminal(data: dict, verification: dict) -> None:
+    if verification["request"]["terminal_object_digest"] != terminal_state_digest(data):
+        raise ValueError("force approval terminal state binding changed before write")
+
+
+def _validate_pass_score_evidence(cwd: Path, data: dict, latest: dict) -> None:
+    _revalidate_score_provenance(cwd, latest, data)
+    _validate_findings_evidence_gate(cwd, latest)
+    axis, delta = _max_agreement_delta(latest)
+    if delta is not None and 1.0 < delta <= 1.5:
+        print(
+            f"WARNING: reviewer agreement is low on {axis} (max-min={delta:.2f}); "
+            "consider one additional review.",
+            file=sys.stderr,
+        )
+
+
+def _validate_pass_artifact_gate(cwd: Path, data: dict) -> None:
+    validate_artifact_state_consistency(data, require_resolved=True)
+    artifact_error = _artifact_gate_error(data, cwd)
+    if artifact_error:
+        raise ValueError(artifact_error)
+    if data.get("artifact_applicability") != "producing":
+        return
+    artifact = _artifact_state(data)
+    identity_present = any(key in artifact for key in ("path", "digest", "size", "producer_run_id"))
+    coverage = _artifact_profile_coverage(cwd, data)
+    if identity_present:
+        validate_artifact_identity(data, cwd)
+        if coverage.get("gate_active") and (
+            data.get("artifact_lint_status") not in {"clean", "findings"}
+            or not artifact_lint_observation_matches(data)
+        ):
+            raise ValueError(
+                "artifact lint observation is missing for a profile with an active coverage gate"
+            )
+    elif coverage.get("gate_active"):
+        raise ValueError("artifact path is missing")
+    else:
+        print(
+            "WARN: artifact coverage gate is not active for this profile; "
+            "recording a terminal missing observation",
+            file=sys.stderr,
+        )
+
+
+def _validate_pass_specialist_gate(data: dict, specialist_waiver: str) -> None:
+    if _specialist_selection_checkpoint_expected(data) and not _has_specialist_selection_checkpoint(data):
+        raise ValueError(
+            "specialist selection checkpoint missing before pass: record task_profile.primary "
+            "and specialists_decision.policy, including fallback/degraded policy when no external "
+            "specialist is used."
+        )
+    checkpoint_error = _specialist_selection_checkpoint_error(data)
+    if checkpoint_error:
+        raise ValueError(checkpoint_error)
+    decision = data.get("specialists_decision")
+    if isinstance(decision, dict) and decision.get("decision") == "selected":
+        invocation_gaps = selected_without_terminal_invocations(data)
+        if invocation_gaps and not specialist_waiver:
+            skills = ", ".join(item["skill"] for item in invocation_gaps)
+            raise ValueError(
+                "terminal specialist invocation missing before pass: "
+                f"{skills}. Record a terminal result or pass --specialist-waiver <reason>."
+            )
+    specialist_report = candidate_accounting_report(data)
+    if specialist_report.get("accounting_required"):
+        skills = ", ".join(
+            candidate["skill"]
+            for candidate in specialist_report.get("required_unaccounted_candidates", [])
+        )
+        raise ValueError(
+            "specialist accounting required before pass: "
+            f"{skills}. Record used/skipped/unavailable/failed evidence or use user-approved --force."
+        )
+    if specialist_report.get("result_required"):
+        skills = ", ".join(
+            candidate["skill"]
+            for candidate in specialist_report.get("result_required_unmet_candidates", [])
+        )
+        raise ValueError(
+            "required specialist result evidence missing before pass: "
+            f"{skills}. Required providers must produce completed/inline-applied/skill-tool-applied "
+            "evidence or use user-approved --force."
+        )
+
+
+def cmd_mark_passes(args):
+    """Delegate evidence validation and completion authority to A2 + kernel."""
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state file が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    force = bool(getattr(args, "force", False))
+    specialist_waiver = (getattr(args, "specialist_waiver", None) or "").strip()
+    try:
+        result = run_mark_pass(
+            _legacy_lifecycle_repository(cwd, sf, stamp=False, strict_read=True),
+            MarkPassRequest(
+                force=force,
+                reason=getattr(args, "reason", None),
+                approved_by_user=bool(getattr(args, "approved_by_user", False)),
+                specialist_waiver=specialist_waiver,
+                at=iso_now(),
+            ),
+            MarkPassServices(
+                verify_force_approval=lambda data: _verify_force_pass_approval(data, args, cwd),
+                validate_force_terminal=_validate_force_pass_terminal,
+                validate_score_evidence=lambda data, latest: _validate_pass_score_evidence(
+                    cwd, data, latest
+                ),
+                validate_artifact_gate=lambda data: _validate_pass_artifact_gate(cwd, data),
+                validate_specialist_gate=_validate_pass_specialist_gate,
+                transition_phase=_transition_phase,
+                optional_unclosed_skills=_unclosed_optional_specialist_skills,
+                selection_id=_current_selection_id,
+                capture_acceptance_candidates=AcceptanceCandidateServices(cwd, load_verifier_policy),
+                capture_fresh_review_completion=FreshReviewCompletionServices(
+                    cwd, load_verifier_policy, _read_stable_payload_beneath),
+                early_stop_evaluation=lambda data, latest, at: _early_stop_evaluation(
+                    cwd, data, latest, at, getattr(args, "early_stop_rationale", None)
+                ),
+            ),
+        )
+    except ReviewFailure as error:
+        print(f"ERROR: {error.message}", file=sys.stderr)
+        sys.exit(2)
+    except ArtifactContractError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    except FencedCommitError as error:
+        # 批2-a-3 (#632): mark-passes が execute 経由になり kernel invariant
+        # 違反が到達し得る。他 command と同じ構造化報告へ揃える（運用系の
+        # lease 診断は従来どおり下の ValueError 経路へ委ねる）
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        print(
+            f"ERROR: internal-invariant: {error.code}: {error.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    except (MissionStateDecodeError, UnsupportedSchemaVersionError, ValueError) as error:
+        prefix = "force approval: " if force else ""
+        print(f"ERROR: {prefix}{error}", file=sys.stderr)
+        sys.exit(2)
+
+    if force:
+        print(
+            "WARNING: --force により通常の score/specialist gate を skip して "
+            f"passes=true を書き込みます。reason={getattr(args, 'reason', None)!r}",
+            file=sys.stderr,
+        )
+    if result.unclosed_skills:
+        print(
+            "WARNING [#189]: selected specialist に invocation 終端ログがありません: "
+            f"{', '.join(result.unclosed_skills)}。"
+            " `mission-state.py specialists log-invocation --status skipped --reason \"<理由>\"` 等で"
+            " クローズアウトしてください (optional specialist のため mark-passes は成功させています)。",
+            file=sys.stderr,
+        )
+    output = {"ok": True, "passes": True, "forced": result.forced}
+    if result.forced:
+        output["force_approved_by_user"] = True
+    print(json.dumps(output))
+
+
+@contextlib.contextmanager
+def _review_group_transaction(cwd: Path):
+    """Serialize review discovery and publication with generation allocation."""
+
+    with _review_lineage_transaction(cwd, required=True):
+        yield
+
+
+def cmd_supersede_reviews(args):
+    """Terminalize older review generations without deleting their raw records."""
+
+    cwd = Path.cwd()
+    try:
+        with _review_group_transaction(cwd):
+            _supersede_reviews_locked(args, cwd)
+    except TimeoutError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _supersede_reviews_locked(args, cwd: Path):
+    """Publish one review group through the application boundary."""
+
+    request = SupersedeReviewsRequest(group=args.group, cwd=cwd)
+    services = SupersedeReviewsServices(
+        iter_state_files=_iter_state_files,
+        session_directory=session_dir,
+        path_lstat=Path.lstat,
+        path_read_bytes=Path.read_bytes,
+        path_resolve=Path.resolve,
+        is_regular_mode=stat.S_ISREG,
+        load_authoritative_state=_load_authoritative_state,
+        inspect_repository_bytes=inspect_repository_bytes,
+        v5_format=RepositoryFormat.V5,
+        repository_selection_error=RepositorySelectionError,
+        compatibility_operation_arguments=_compatibility_operation_arguments,
+        canonical_compatibility_operation=_canonical_compatibility_operation,
+        repository_factory=_legacy_lifecycle_repository,
+        resolve_session_id=resolve_session_id,
+        presented_lease_unset=_PRESENTED_LEASE_UNSET,
+        v5_repository_type=V5CompatibilityRepository,
+        legacy_repository_type=LegacyV4Repository,
+        fenced_error=FencedCommitError,
+        command_outcome_exit=CommandOutcomeExit,
+        reject_fenced_lease=_reject_fenced_lease_for_cli,
+        clock=iso_now,
+        transition_phase=_transition_phase,
+        write_terminal_outcome=_write_terminal_outcome,
+        terminal_paths=_SUPERSEDE_TERMINAL_PATHS,
+        printer=print,
+        stderr=sys.stderr,
+    )
+    try:
+        result = run_supersede_reviews(request, services)
+    except SupersedeReviewsFailure as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    print(result.rendered)
+
+
+@bounded_by_guard_timeout
+def cmd_mark_halt(args):
+    cwd = guard_application.project_root_of(args, Path.cwd, Path)
+    sf = guard_application.state_file_of(args, cwd, session_file, resolve_state_file)
+    if not sf.exists():
+        print("ERROR: state file が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    category = _normalize_halt_category(getattr(args, "category", None))
+    try:
+        result = run_mark_halt(
+            _legacy_lifecycle_repository(
+                cwd,
+                sf,
+                stamp=False,
+                strict_read=True,
+                allow_partial_lease_terminal_write=True,
+            ),
+            MarkHaltRequest(args.reason, category, iso_now()),
+            MarkHaltServices(
+                reject_active_provider_mutation=_reject_active_provider_mutation,
+                transition_phase=_transition_phase,
+                goal_dispatch_fields=_goal_dispatch_route_fields,
+            ),
+        )
+    except UnsupportedSchemaVersionError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    except LifecycleFailure as error:
+        print(f"ERROR: {error.message}", file=sys.stderr)
+        sys.exit(2)
+    except FencedCommitError as error:
+        # 運用系 (lease 競合等) は既存の CLI 診断経路へ委ねる。構造化するのは
+        # kernel invariant 違反のみ (批2-a-2 #631)
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        print(
+            f"ERROR: internal-invariant: {error.code}: {error.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if result.claim_source == TERMINALIZABLE_UNDECODABLE:
+        # 批2-a-3 (#632): 復号不能 doc への gate-only 降格は正常な terminal
+        # （冪等 halt）と区別できないと障害調査で追えない。state には書かない。
+        print(
+            "WARNING: halt fell back to the synthetic view because the session "
+            "document could not be decoded (transition claims were not applied)",
+            file=sys.stderr,
+        )
+    if result.aggregate_error is not None:
+        print(
+            f"WARNING: aggregate index update failed: {result.aggregate_error}",
+            file=sys.stderr,
+        )
+    print(json.dumps({"ok": True, "halt_reason": result.halt_reason, "halt_category": result.halt_category}))
+
+
+def cmd_reactivate(args):
+    """Reactivate a manually halted mission only with explicit user approval."""
+    if not args.approved_by_user:
+        print(
+            "ERROR: reactivate には --approved-by-user が必須です。",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    approved_reason = sanitize_activity_detail(args.reason)
+    if not approved_reason:
+        print("ERROR: reactivate の --reason は空にできません。", file=sys.stderr)
+        sys.exit(2)
+
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state file が見つかりません。先に init してください。", file=sys.stderr)
+        sys.exit(1)
+    try:
+        with _review_lineage_transaction(cwd, required=True):
+            _reactivate_with_repository(args, cwd, sf, approved_reason)
+    except TimeoutError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _reactivate_with_repository(args, cwd: Path, sf: Path, approved_reason: str):
+    try:
+        result = run_reactivate(
+            _legacy_lifecycle_repository(cwd, sf, stamp=True, strict_read=True),
+            ReactivateRequest(
+                approved_by_user=args.approved_by_user,
+                reason=approved_reason,
+                expected_category=args.expected_category,
+                phase=args.phase,
+                at=iso_now(),
+            ),
+        )
+    except UnsupportedSchemaVersionError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+    except (LifecycleFailure, ActivityTimingError) as error:
+        message = error.message if isinstance(error, LifecycleFailure) else str(error)
+        print(f"ERROR: {message}", file=sys.stderr)
+        sys.exit(2)
+    except FencedCommitError as error:
+        # 運用系 (lease 競合等) は既存の CLI 診断経路へ委ねる。構造化するのは
+        # kernel invariant 違反のみ (批2-a-2 #631)
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        print(
+            f"ERROR: internal-invariant: {error.code}: {error.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if result.aggregate_error is not None:
+        print(
+            f"WARNING: aggregate index update failed: {result.aggregate_error}",
+            file=sys.stderr,
+        )
+    print(json.dumps({"ok": True, "reactivated": True, "audit": result.audit}, ensure_ascii=False))
+
+
+def _pid_is_agent(pid: int) -> bool:
+    """PID 再利用対策: pid が alive かつ comm がエージェント CLI (claude/codex) であることを確認.
+
+    テスト用: MISSION_FORCE_PID_IS_AGENT=1 が設定されている場合は常に True を返し、
+    project_root 不存在チェックのみを切り分けて検証できるようにする。
+    注意: この関数を呼ぶ全箇所 (cleanup-stale / refresh-pid 等) に影響するため、本番では設定しないこと。
+    """
+    # テスト専用バイパス: subprocess テストで _pid_is_agent=True を固定したい場合
+    if os.environ.get("MISSION_FORCE_PID_IS_AGENT") == "1":
+        return True
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    except Exception:
+        return False
+    try:
+        r = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=2)
+        comm = (r.stdout or "").strip()
+        return _comm_is_agent(comm)
+    except subprocess.TimeoutExpired:
+        # 高負荷で ps が応答しない場合は保守的に alive 扱い (誤 halt 防止。
+        # cleanup-stale --execute から呼ばれるため False は不可逆な halt に直結する)
+        return True
+    except Exception:
+        return False
+
+
+def cmd_refresh_pid(args):
+    """R1: resume 後に state.pid を現セッションの agent CLI PID に更新.
+
+    既存 pid が alive かつ agent CLI プロセスの場合は --force なしでは拒否。
+    dead OR alive だが agent CLI プロセスでない (= PID 再利用) 場合は自動継承。
+    --reactivate (デフォルト true) で halt_reason を解除し loop_active=true に復帰。
+    """
+    cwd = Path.cwd()
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        print("ERROR: state.json が見つかりません。", file=sys.stderr)
+        sys.exit(1)
+    new_pid = find_agent_pid()
+    try:
+        with _review_lineage_transaction(cwd, required=True):
+            _refresh_pid_with_repository(args, cwd, sf, new_pid)
+    except TimeoutError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _refresh_pid_with_repository(args, cwd: Path, sf: Path, new_pid: int):
+    try:
+        result = run_refresh_pid(
+            _legacy_lifecycle_repository(
+                cwd,
+                sf,
+                stamp=False,
+                lease_reason=getattr(args, "lease_reason", None),
+            ),
+            RefreshPidRequest(
+                new_pid=new_pid,
+                force=args.force,
+                reactivate=not getattr(args, "no_reactivate", False),
+                at=iso_now(),
+            ),
+            RefreshPidServices(
+                lease_fields_present=_lease_fields_present,
+                pid_is_agent=_pid_is_agent,
+                resume_phase_timing=_resume_phase_timing,
+            ),
+        )
+    except (LifecycleFailure, ActivityTimingError) as error:
+        message = error.message if isinstance(error, LifecycleFailure) else str(error)
+        print(f"ERROR: {message}", file=sys.stderr)
+        sys.exit(2)
+    except FencedCommitError as error:
+        # 運用系 (lease 競合等) は既存の CLI 診断経路へ委ねる。構造化するのは
+        # kernel invariant 違反のみ (批2-a-2 #631)
+        if error.code not in {"transition-divergence", "transition-unsealed"}:
+            raise
+        print(
+            f"ERROR: internal-invariant: {error.code}: {error.detail}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if result.aggregate_error is not None:
+        print(
+            f"WARNING: aggregate index update failed: {result.aggregate_error}",
+            file=sys.stderr,
+        )
+    print(json.dumps({
+        "ok": True,
+        "old_pid": result.old_pid,
+        "new_pid": result.new_pid,
+        "reactivated": result.reactivated,
+        "prev_halt_reason": result.previous_halt_reason,
+        "prev_loop_active": result.previous_loop_active,
+    }))
+
+
+def _capture_command_output(fn, ns) -> tuple[int, str]:
+    """Run a cmd_* function in-process, capturing its stdout JSON and exit code.
+
+    Used by `resume` to compose existing subcommands without duplicating their
+    logic. stderr is left untouched (errors surface to the user naturally). A
+    SystemExit is caught so one step's exit does not abort the whole sequence.
+
+    Note: redirect_stdout mutates process-global sys.stdout, so this is not
+    thread-safe. `resume` runs the steps sequentially in a single thread, so
+    this is fine; do not call it from concurrent threads.
+    """
+    buf = io.StringIO()
+    code = 0
+    try:
+        with contextlib.redirect_stdout(buf):
+            fn(ns)
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    return code, buf.getvalue()
+
+
+def cmd_resume(args):
+    """#123: compaction/resume 復帰を 1 コマンドに統合する.
+
+    順序は固定 (refresh-pid → cleanup-empty → cleanup-stale → next)。refresh-pid を
+    先に実行することで、自 state の pid が現 agent CLI に更新されてから cleanup-stale が
+    走り、自分の (復帰直後は旧 dead pid の) state を誤って orphan halt しない。返り値は
+    `next` の出力に resume サマリを添えたもの。
+    """
+    cwd = Path.cwd()
+    dry_run = bool(getattr(args, "dry_run", False))
+    resume = {
+        "pid_refreshed": False,
+        "reactivated": False,
+        "cleaned_empty": False,
+        "halted_stale": 0,
+        "dry_run": dry_run,
+        "version_skew": _detect_version_skew(),  # #186: None (no skew) or skew details
+    }
+    sf = resolve_state_file(cwd)
+
+    # 1. refresh-pid を最優先 (cleanup-stale より必ず先)。state 不在時は skip。
+    if sf.exists():
+        code, out = _capture_command_output(
+            cmd_refresh_pid,
+            argparse.Namespace(
+                force=bool(getattr(args, "force", False)),
+                no_reactivate=False,
+                lease_reason="resume",
+            ),
+        )
+        if code not in (0, None):
+            # foreign live owner 等 (refresh-pid が stderr に理由を出して exit 済)。
+            sys.exit(code)
+        resume["pid_refreshed"] = True
+        try:
+            resume["reactivated"] = bool(_parse_captured_json(out).get("reactivated"))
+        except (ValueError, AttributeError):
+            pass
+
+    # 2. cleanup-empty (空 .mission-state/ を rmdir)。
+    _, ce_out = _capture_command_output(cmd_cleanup_empty, argparse.Namespace(path=str(cwd)))
+    try:
+        resume["cleaned_empty"] = _parse_captured_json(ce_out).get("action") == "removed"
+    except ValueError:
+        pass
+
+    # 3. cleanup-stale --root cwd (dry-run 指定時は --execute しない)。
+    _, cs_out = _capture_command_output(
+        cmd_cleanup_stale,
+        argparse.Namespace(root=str(cwd), execute=not dry_run),
+    )
+    try:
+        resume["halted_stale"] = len(_parse_captured_json(cs_out).get("halted", []))
+    except ValueError:
+        pass
+
+    # 4. next (state から次の 1 手を決定論導出)。
+    _, next_out = _capture_command_output(cmd_next, argparse.Namespace())
+    try:
+        out_obj = _parse_captured_json(next_out)
+    except ValueError:
+        out_obj = {"next_action": "init", "summary": "state を判定できませんでした"}
+    out_obj["resume"] = resume
+    print(json.dumps(out_obj, ensure_ascii=False))
+
+
+def cmd_update_project_root(args):
+    """P2-1: project_root を正しいパスに更新する (陳腐化救済用).
+
+    project_root が不存在になった state (ディレクトリ移動・rename 等で発生) は
+    cleanup-stale に孤児扱いされ続ける。このコマンドで正しいパスに更新することで
+    rescue できる (実例: cc-48c91727, project_root=/dev/project-c 不存在)。
+    state.json が存在するディレクトリの cwd で実行すること。
+    legacy state.json も sessions/<sid>.json も両方対応する。
+    """
+    cwd = Path.cwd()
+    # sessions/<sid>.json を優先、なければ legacy state.json にフォールバック
+    sf = resolve_state_file(cwd)
+    if not sf.exists():
+        legacy = state_dir(cwd) / "state.json"
+        if legacy.exists():
+            sf = legacy
+        else:
+            print("ERROR: state.json が見つかりません。", file=sys.stderr)
+            sys.exit(1)
+    new_root = str(Path(args.path).resolve())
+    loaded_session_id = _load_state_json(sf).get("session_id")
+    result = run_update_project_root(
+        _legacy_lifecycle_repository(
+            cwd,
+            sf,
+            stamp=False,
+            session_id=(
+                loaded_session_id
+                if isinstance(loaded_session_id, str) and loaded_session_id
+                else sf.stem
+            ),
+        ),
+        UpdateProjectRootRequest(new_root=new_root, at=iso_now()),
+    )
+    print(json.dumps({"ok": True, "old_project_root": result.old_root, "new_project_root": result.new_root}))
+
+
+def cmd_cleanup_empty(args):
+    """A-3: 空または一時 artifact のみの .mission-state/ を削除."""
+    target = Path(args.path).resolve() / ".mission-state"
+    if not target.exists():
+        print(json.dumps({"ok": True, "action": "nothing", "path": str(target)}))
+        return
+    contents = list(target.iterdir())
+    if (
+        len(contents) == 1
+        and not target.is_symlink()
+        and contents[0].name == "tmp"
+        and contents[0].is_dir()
+        and not contents[0].is_symlink()
+    ):
+        shutil.rmtree(contents[0])
+        contents = []
+    if not contents:
+        target.rmdir()
+        print(json.dumps({"ok": True, "action": "removed", "path": str(target)}))
+    else:
+        print(json.dumps({"ok": True, "action": "skipped", "path": str(target), "contents": [c.name for c in contents]}))
+
+
+def _terminalize_state_file(
+    sf: Path,
+    proj: Path,
+    *,
+    reason: str,
+    category: str,
+    set_terminal_phase: bool,
+    expected_pid: Any = None,
+    require_missing_root: bool = False,
+    require_stale_no_score: bool = False,
+    require_dead_pid: bool = False,
+    require_expired_lease: bool = False,
+) -> bool:
+    """Re-read and revalidate inside the format-pinned write transaction."""
+
+    class StaleCleanupPreconditionChanged(Exception):
+        pass
+
+    def validate_latest(latest: dict, *, expired_lease_admitted: bool) -> None:
+        if not latest.get("loop_active") or latest.get("passes") or latest.get("halt_reason"):
+            raise StaleCleanupPreconditionChanged
+        if expected_pid is not None and latest.get("pid") != expected_pid:
+            raise StaleCleanupPreconditionChanged
+        if require_missing_root:
+            stored_root = latest.get("project_root", "")
+            if not stored_root or Path(stored_root).exists():
+                raise StaleCleanupPreconditionChanged
+        if require_stale_no_score:
+            age_sec = _state_age_since_update_sec(latest)
+            if (
+                latest.get("score_history")
+                or latest.get("awaiting_user")
+                or age_sec is not None and age_sec < _stale_active_seconds()
+            ):
+                raise StaleCleanupPreconditionChanged
+        if require_dead_pid:
+            try:
+                if _pid_is_agent(int(latest.get("pid") or 0)):
+                    raise StaleCleanupPreconditionChanged
+            except (TypeError, ValueError):
+                pass
+        if (
+            require_expired_lease
+            and not expired_lease_admitted
+            and not _expired_lease_without_heartbeat(latest)[0]
+        ):
+            raise StaleCleanupPreconditionChanged
+
+    class ValidatingJanitorRepository:
+        def __init__(self, repository, *, expired_lease_admitted: bool) -> None:
+            self._repository = repository
+            self._expired_lease_admitted = expired_lease_admitted
+
+        def transaction(self):
+            return self._repository.transaction()
+
+        def load(self):
+            latest = self._repository.load()
+            validate_latest(
+                latest,
+                expired_lease_admitted=self._expired_lease_admitted,
+            )
+            return latest
+
+        def execute(self, command, **kwargs):
+            return self._repository.execute(command, **kwargs)
+
+        def save(self, state, **kwargs) -> None:
+            self._repository.save(state, **kwargs)
+
+    def terminalize_without_phase(data: dict, at: str, trusted: bool) -> None:
+        if category == "stale":
+            _accrue_phase_for_terminal_control(
+                data,
+                data.get("phase"),
+                at,
+                trusted_boundary=trusted,
+            )
+            data["phase_started_at"] = at
+        close_activity_for_terminal(
+            data,
+            at,
+            trusted_boundary=trusted,
+        )
+
+    def nondecreasing_terminal_time(latest: dict, sampled: str) -> str:
+        sampled_at = _parse_iso_datetime(sampled)
+        updated_at = _parse_iso_datetime(latest.get("updated_at"))
+        if sampled_at and updated_at and sampled_at < updated_at:
+            return str(latest["updated_at"])
+        return sampled
+
+    def write_terminal_state(data: dict, *, administrative: bool = False) -> None:
+        # Janitor has already revalidated the state under the repository lock.
+        write_legacy_terminal(sf, data, atomic_write=_atomic_write, backup_state=backup_state)
+
+    _selection_snapshot, selection_state = _load_authoritative_state(
+        sf,
+        legacy_compatibility=True,
+        allow_missing_schema_session_mismatch=True,
+    )
+    loaded_session_id = selection_state.get("session_id")
+    selected_session_id = (
+        loaded_session_id
+        if isinstance(loaded_session_id, str) and loaded_session_id
+        else sf.stem
+    )
+
+    def janitor_coordinator(authority_format: str) -> RecoverableAggregateIndex:
+        return RecoverableAggregateIndex(
+            state_dir(proj),
+            session_id=selected_session_id,
+            authority_format=authority_format,
+            clock=lambda: parse_iso_datetime(iso_now()) or datetime.now(timezone.utc),
+        )
+
+    def legacy_janitor_factory(format_guard):
+        coordinator = janitor_coordinator("legacy-v4")
+        return LegacyV4Repository(
+            lock=lambda: StateLock(lock_file(proj)),
+            read_state=lambda: read_session_json(sf),
+            write_state=write_terminal_state,
+            backup_state=lambda: None,
+            aggregate_recover=coordinator.recover,
+            aggregate_prepare=coordinator.prepare,
+            aggregate_finalize=coordinator.finalize,
+            format_guard=format_guard,
+        )
+
+    def v5_janitor_factory(format_guard):
+        coordinator = janitor_coordinator("v5")
+        return V5CompatibilityRepository(
+            repository=LocalFencedRepository(
+                state_dir(proj),
+                clock=_lease_now,
+                lease_ttl_seconds=_lease_ttl_seconds(),
+            ),
+            session_id=selected_session_id,
+            lease_owner_session_id=resolve_session_id(),
+            # A janitor never reuses the stale writer's token. Expiry is
+            # admitted as a fenced takeover by the v5 repository itself.
+            presented_lease_id=None,
+            aggregate_recover=coordinator.recover,
+            aggregate_prepare=coordinator.prepare,
+            aggregate_finalize=coordinator.finalize,
+            format_guard=format_guard,
+        )
+
+    repository = _select_repository_for_cli(
+        selected_session_id,
+        sf,
+        legacy_janitor_factory,
+        v5_janitor_factory,
+    )
+    now = iso_now()
+    try:
+        result = run_mark_halt(
+            ValidatingJanitorRepository(
+                repository,
+                # v5 begin() has already fenced the expired lease with a
+                # tokenless takeover. Its projected state contains the renewed
+                # pending lease, so repeating the old-expiry predicate here
+                # would reject every valid janitor write.
+                expired_lease_admitted=isinstance(
+                    repository, V5CompatibilityRepository
+                ),
+            ),
+            MarkHaltRequest(
+                reason=reason,
+                category=category,
+                at=now,
+                set_terminal_phase=set_terminal_phase,
+            ),
+            MarkHaltServices(
+                reject_active_provider_mutation=lambda _state, _command: None,
+                transition_phase=_transition_phase,
+                goal_dispatch_fields=_goal_dispatch_route_fields,
+                terminalize_without_phase=terminalize_without_phase,
+                effective_at=nondecreasing_terminal_time,
+            ),
+        )
+    except StaleCleanupPreconditionChanged:
+        return False
+
+    if result.aggregate_error is not None:
+        print(
+            f"WARNING: aggregate index update failed: {result.aggregate_error}",
+            file=sys.stderr,
+        )
+    return True
+
+
+def _expired_lease_without_heartbeat(data: dict) -> tuple[bool, str]:
+    """Return eligibility and reason for lease-based stale cleanup."""
+    expires = parse_iso_datetime(str(data.get("lease_expires_at") or ""))
+    if expires is None:
+        return False, "lease-expiry-invalid"
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    expires = expires.astimezone(timezone.utc)
+    if _lease_now() < expires:
+        return False, "lease-unexpired"
+    heartbeat = parse_iso_datetime(
+        data.get("last_activity_at") or data.get("updated_at")
+    )
+    if heartbeat is not None:
+        if heartbeat.tzinfo is None:
+            heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+        heartbeat = heartbeat.astimezone(timezone.utc)
+        heartbeat_age = (_lease_now() - heartbeat).total_seconds()
+        if heartbeat > expires and heartbeat_age < _lease_ttl_seconds():
+            return False, "lease-expired-activity-heartbeat-present"
+    return True, "expired-session-lease"
+
+
+@bounded_by_guard_timeout
+def cmd_cleanup_stale(args):
+    request = CleanupStaleRequest(
+        root=getattr(args, "root", None),
+        execute=args.execute,
+    )
+    services = CleanupStaleServices(
+        default_search_roots=_default_search_roots,
+        path_from_string=Path,
+        path_exists=Path.exists,
+        iter_state_files=_iter_state_files,
+        preflight_session_paths=preflight_session_paths,
+        load_authoritative_state=_load_authoritative_state,
+        lease_fields_present=_lease_fields_present,
+        expired_lease_without_heartbeat=_expired_lease_without_heartbeat,
+        project_root_of=_project_root_of,
+        terminalize_state_file=_terminalize_state_file,
+        fenced_commit_error=FencedCommitError,
+        pid_is_agent=_pid_is_agent,
+        state_age_since_update_sec=_state_age_since_update_sec,
+        stale_active_seconds=_stale_active_seconds,
+        path_stem=archive_path_stem,
+        path_to_string=str,
+    )
+    result = run_cleanup_stale(request, services)
+    print(result.rendered)
+
+
+def cmd_list(args):
+    """C-4: 全プロジェクトの active state.json 一覧."""
+    search_roots = _default_search_roots()
+    results = []
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for sf in _iter_state_files(root):
+            try:
+                snapshot, document = _load_authoritative_state(
+                    sf,
+                    legacy_compatibility=True,
+                    allow_missing_schema_session_mismatch=True,
+                )
+                project_root = snapshot.project_root or str(_project_root_of(sf))
+                results.append({
+                    "project_root": project_root,
+                    "loop_active": snapshot.loop_active,
+                    "passes": snapshot.passes,
+                    "halt_reason": snapshot.halt_reason,
+                    "iteration": snapshot.iteration,
+                    "pid": snapshot.pid,
+                    "session_id": snapshot.session_id,
+                    "agent": document.get("agent"),
+                    "mission_id": document.get("mission_id"),
+                    "mission": snapshot.mission[:80],
+                    "updated_at": snapshot.updated_at,
+                })
+            except (CanonicalStateEncodingError, FreshReviewError):
+                raise
+            except Exception as e:
+                results.append({"path": str(sf), "error": str(e)})
+    print(json.dumps(results, indent=2, ensure_ascii=False))
+
+
+def _lane_report_wall_clock_sec(
+    state: dict, snapshot: AuthoritativeSnapshot | None = None
+) -> float:
+    authoritative = snapshot or _authoritative_snapshot_for_state(state)
+    started = parse_iso_datetime(state.get("started_at"))
+    updated = parse_iso_datetime(authoritative.updated_at)
+    if not started or not updated:
+        return 0.0
+    try:
+        seconds = (updated - started).total_seconds()
+    except TypeError:
+        return 0.0
+    return seconds if seconds >= 0 else 0.0
+
+
+def _lane_report_session_role(state: dict) -> str:
+    return _authoritative_snapshot_for_state(state).session_role
+
+
+def _lane_report_root_run_id(state: dict):
+    root_run_id = state.get("root_run_id")
+    return root_run_id if isinstance(root_run_id, str) and root_run_id else None
+
+
+def _lane_report_session_entry(
+    state: dict,
+    *,
+    slo_minutes: int | None,
+) -> dict:
+    snapshot = _authoritative_snapshot_for_state(state)
+    summary = summarize_activity_states(
+        [state], phases=[snapshot.phase], session_roles=[snapshot.session_role]
+    )
+    role = snapshot.session_role
+    role_summary = summary.get("role_summaries", {}).get(role, {})
+    wait_totals = role_summary.get("wait_totals_sec") if isinstance(role_summary, dict) else {}
+    wait_totals = wait_totals if isinstance(wait_totals, dict) else {}
+    wait_total_sec = 0.0
+    normalized_wait_totals: dict[str, float] = {}
+    for kind in sorted(WAIT_KINDS):
+        seconds = wait_totals.get(kind)
+        if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds >= 0:
+            wait_total_sec += float(seconds)
+            normalized_wait_totals[kind] = float(seconds)
+    observed_active_sec = 0.0
+    if isinstance(role_summary, dict):
+        active = role_summary.get("observed_active_sec")
+        if isinstance(active, (int, float)) and not isinstance(active, bool) and active >= 0:
+            observed_active_sec = float(active)
+    entry = {
+        "session_id": snapshot.session_id,
+        "session_role": role,
+        "phase": snapshot.phase,
+        "wall_clock_sec": _lane_report_wall_clock_sec(state, snapshot),
+        "observed_active_sec": observed_active_sec,
+        "wait_totals_sec": normalized_wait_totals,
+        "unobserved_gap_sec": float(summary.get("unobserved_gap_sec") or 0.0),
+        "wait_total_sec": wait_total_sec,
+    }
+    if slo_minutes is not None:
+        terminal = snapshot.phase in {"done", "halted"} or not snapshot.loop_active
+        entry["slo_breached"] = bool(
+            role == "implementer"
+            and terminal
+            and entry["wall_clock_sec"] > float(slo_minutes) * 60.0
+        )
+    return entry
+
+
+def _lane_report_group_entry(root_run_id, sessions: list[dict]) -> dict:
+    implementer_wait_sec = 0.0
+    non_implementer_active_sec = 0.0
+    for session in sessions:
+        role = session["session_role"]
+        if role == "implementer":
+            implementer_wait_sec += float(session["wait_total_sec"])
+        else:
+            non_implementer_active_sec += float(session["observed_active_sec"])
+    return {
+        "root_run_id": root_run_id,
+        "sessions": sessions,
+        "rendezvous_loss_sec": max(0.0, implementer_wait_sec - non_implementer_active_sec),
+    }
+
+
+def _lane_positive_minutes(value: str) -> int:
+    minutes = int(value)
+    if minutes <= 0:
+        raise argparse.ArgumentTypeError("--slo-minutes must be a positive integer")
+    return minutes
+
+
+def cmd_lane_report(args):
+    """Read-only lane duration report across current search roots."""
+    search_roots = _default_search_roots()
+    states: list[dict] = []
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for sf in _iter_state_files(root):
+            if sf.parent.name != "sessions":
+                continue
+            try:
+                snapshot, document = _load_authoritative_state(
+                    sf,
+                    legacy_compatibility=True,
+                    allow_missing_schema_session_mismatch=True,
+                )
+            except (CanonicalStateEncodingError, FreshReviewError):
+                raise
+            except Exception as exc:
+                if is_live_session_path(sf):
+                    print(
+                        "ERROR: authoritative live session is unreadable: %s" % exc,
+                        file=sys.stderr,
+                    )
+                    sys.exit(2)
+                continue
+            if not _is_mission_state_record(document):
+                continue
+            states.append(AuthoritativeStateRecord(snapshot, document))
+    if not states:
+        print("ERROR: lane-report requires at least one mission state", file=sys.stderr)
+        sys.exit(1)
+    lane_snapshots = [_authoritative_snapshot_for_state(state) for state in states]
+    overall = summarize_activity_states(
+        states,
+        phases=[snapshot.phase for snapshot in lane_snapshots],
+        session_roles=[snapshot.session_role for snapshot in lane_snapshots],
+    )
+    ordered_states = sorted(
+        states,
+        key=lambda item: str(
+            _authoritative_snapshot_for_state(item).session_id or ""
+        ),
+    )
+    entries = [
+        _lane_report_session_entry(
+            state,
+            slo_minutes=getattr(args, "slo_minutes", None),
+        )
+        for state in ordered_states
+    ]
+    groups: dict[object, list[dict]] = {}
+    for state, entry in zip(ordered_states, entries):
+        groups.setdefault(_lane_report_root_run_id(state), []).append(entry)
+    grouped_entries = [
+        _lane_report_group_entry(
+            root_run_id,
+            sorted(sessions, key=lambda item: str(item.get("session_id") or "")),
+        )
+        for root_run_id, sessions in sorted(
+            groups.items(),
+            key=lambda item: (item[0] is not None, str(item[0]) if item[0] is not None else ""),
+        )
+    ]
+    report = {
+        "sessions": entries,
+        "role_summaries": overall.get("role_summaries", {}),
+        "groups": grouped_entries,
+        # 集約意味論: 全 implementer の待機合算 - 従属レーンの実働合算 (下限0)
+        "rendezvous_loss_sec": sum(group["rendezvous_loss_sec"] for group in grouped_entries),
+    }
+    if getattr(args, "slo_minutes", None) is not None:
+        report["slo_minutes"] = args.slo_minutes
+    print(json.dumps(report, indent=2 if getattr(args, "json", False) else 0, ensure_ascii=False))
+
+
+def cmd_halt(args):
+    """C-4: active state.json に halt_reason を立てて停止."""
+    if args.all:
+        # 候補1: --root 指定時はその root のみ走査 (テスト分離・スコープ指定)。未指定は従来通り全 root
+        search_roots = [Path(args.root)] if getattr(args, "root", None) else _default_search_roots()
+        category = _normalize_halt_category(getattr(args, "category", None))
+        halted = []
+        errors = list()
+        for sf in preflight_session_paths(search_roots, _iter_state_files):
+            try:
+                data = _read_legacy_json_file(sf)
+                if data.get("loop_active") and not data.get("passes") and not data.get("halt_reason"):
+                    proj = _project_root_of(sf)
+                    changed = _terminalize_state_file(
+                        sf, proj, reason=args.reason, category=category,
+                        set_terminal_phase=True,
+                    )
+                    if changed:
+                        halted.append(str(proj))
+            except CapacityWriteError as error:
+                record_session_error(errors, sf, error)
+            except (CanonicalStateEncodingError, FreshReviewError):
+                raise
+            except Exception as e:
+                print(f"WARN: skip {sf}: {e}", file=sys.stderr)
+        print(json.dumps({"ok": True, "halted": halted, "halt_category": category, "errors": errors}))
+    else:
+        if getattr(args, "root", None):
+            print("WARN: --root は --all と併用時のみ有効です (無視されました)", file=sys.stderr)
+        cmd_mark_halt(args)
+
+
+def _parse_date_to_iso_prefix(s: str | None) -> str | None:
+    """YYYY-MM-DD を返す (そのまま prefix 比較に使う)."""
+    if not s:
+        return None
+    # 簡易 validate
+    if len(s) < 10 or s[4] != "-" or s[7] != "-":
+        print(f"ERROR: --since/--until は YYYY-MM-DD 形式: {s}", file=sys.stderr)
+        sys.exit(1)
+    return s[:10]
+
+
+def _matches_period(document: dict, since: str | None, until: str | None) -> bool:
+    snapshot = getattr(document, "authoritative_snapshot", None)
+    if snapshot is None:
+        snapshot = authoritative_snapshot_from_document(document)
+    updated = (snapshot.updated_at or "")[:10]
+    if not updated:
+        return True  # 日時不明は除外しない (warn は将来)
+    if since and updated < since:
+        return False
+    if until and updated > until:
+        return False
+    return True
+
+
+def _state_read_error(path: Path) -> dict[str, str]:
+    """Return stable aggregate metadata without exposing reader internals."""
+    return {
+        "path": str(path),
+        "reason": "authoritative-state-unreadable",
+    }
+
+
+def _collect_states(
+    root: Path, *, state_read_errors: Optional[list[dict[str, str]]] = None
+) -> list[dict]:
+    """root 配下を再帰的にスキャンして state を収集 (現役 + archive、stats 用)。
+
+    glob パターンは _iter_state_files に集約 (重複していた 3 つの glob を統合)。
+    """
+    states = []
+    archive_validations: dict[Path, WorktreeArchiveValidation] = {}
+    for sf in _iter_state_files(
+        root,
+        include_archive=True,
+        archive_validations=archive_validations,
+    ):
+        try:
+            snapshot, document = _load_authoritative_state(
+                sf,
+                archive_validation=archive_validations.get(
+                    sf.resolve(strict=False)
+                ),
+                legacy_compatibility=True,
+                allow_missing_schema_session_mismatch=True,
+            )
+        except (CanonicalStateEncodingError, FreshReviewError):
+            raise
+        except UnsupportedSchemaVersionError:
+            raise
+        except Exception:
+            if is_live_session_path(sf):
+                if state_read_errors is not None:
+                    state_read_errors.append(_state_read_error(sf))
+                continue
+            continue
+        if not _is_mission_state_record(document):
+            continue
+        record = AuthoritativeStateRecord(snapshot, document)
+        record["_mission_source_path"] = str(sf)
+        states.append(record)
+    return states
+
+
+def _discover_project_roots(root: Path) -> list[Path]:
+    """Return project roots that contain a .mission-state directory under root."""
+    discovered: list[Path] = []
+    seen: set[str] = set()
+    root = Path(root)
+    if root.name == ".mission-state":
+        candidate = root.parent
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            discovered.append(candidate)
+        return discovered
+    for dirpath, dirnames, _filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+        if os.path.basename(dirpath) != ".mission-state":
+            continue
+        dirnames[:] = []
+        candidate = Path(dirpath).parent
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            discovered.append(candidate)
+    return discovered
+
+
+def _collect_learning_brief_states(
+    roots: list[Path], *, state_read_errors: Optional[list[dict[str, str]]] = None
+) -> list[dict]:
+    """Collect readable session states plus archived terminal generations."""
+    states: list[dict] = []
+    project_roots: list[Path] = []
+    seen_projects: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        states.extend(
+            _collect_states(root, state_read_errors=state_read_errors)
+        )
+        for project_root in _discover_project_roots(root):
+            key = str(project_root)
+            if key in seen_projects:
+                continue
+            seen_projects.add(key)
+            project_roots.append(project_root)
+    for project_root in sorted(project_roots, key=lambda path: str(path)):
+        state_root = project_root / ".mission-state"
+        try:
+            compaction = read_state_archive_compaction(state_root)
+        except ValueError:
+            continue
+        if compaction is None:
+            continue
+        for record in compaction.records:
+            canonical_path = record.get("canonical_path")
+            if not isinstance(canonical_path, str) or not canonical_path:
+                continue
+            try:
+                canonical_bytes = read_state_archive_file_bytes(project_root, canonical_path)
+                canonical_state = read_session_json(canonical_path, source=canonical_bytes)
+            except (CanonicalStateEncodingError, FreshReviewError):
+                raise
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                continue
+            if not _is_mission_state_record(canonical_state):
+                continue
+            canonical_state["_mission_source_path"] = str(project_root / canonical_path)
+            states.append(canonical_state)
+    deduped, _duplicate_state_group_count = _dedupe_states(states)
+    return deduped
+
+
+def _is_mission_state_record(state: object) -> bool:
+    if not isinstance(state, dict):
+        return False
+    return bool(state.get("mission") and state.get("mission_id") and state.get("session_id"))
+
+
+def _dedupe_states(states: list[dict]) -> tuple[list[dict], int]:
+    """Audit と同じ identity/rank で同一 session の代表 state を選ぶ."""
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for state in states:
+        key = state_identity(
+            state,
+            source_path=str(state.get("_mission_source_path") or ""),
+        )
+        groups.setdefault(key, []).append(state)
+    deduped = [
+        min(
+            group,
+            key=lambda state: _authoritative_snapshot_for_state(state).dedupe_rank(
+                str(state.get("_mission_source_path") or "")
+            ),
+        )
+        for group in groups.values()
+    ]
+    return deduped, sum(1 for group in groups.values() if len(group) > 1)
+
+
+def _is_valid_composite(c) -> bool:
+    """composite が採点値として有効か (数値・bool除外・NaN除外)."""
+    return _finite_score(c)
+
+
+def _score_provenance_counts(states: list[dict]) -> dict[str, int]:
+    counts = {"verified": 0, "legacy-unverifiable": 0, "invalid": 0}
+    for document in states:
+        snapshot = getattr(document, "authoritative_snapshot", None)
+        if snapshot is None:
+            snapshot = authoritative_snapshot_from_document(document)
+        terminal = not snapshot.loop_active
+        source_path = document.get("_mission_source_path")
+        project_root = project_root_from_state_path(source_path)
+        reader = None
+        if isinstance(source_path, str):
+            source = Path(source_path)
+            parts = source.parts
+            if ".mission-state" in parts:
+                index = parts.index(".mission-state")
+                if index + 2 < len(parts) and parts[index + 1] == "archive" and parts[index + 2].startswith("worktree-"):
+                    validation = validate_worktree_archive_bundle(Path(*parts[:index + 3]))
+                    persisted_state = {key: value for key, value in document.items() if key != "_mission_source_path"}
+                    if validation.status == "valid" and validation.state == persisted_state:
+                        reader = validated_archive_evidence_reader(validation)
+        for entry in document.get("score_history") or []:
+            counts[classify_score_provenance(
+                entry, terminal=terminal, project_root=project_root, state=document,
+                evidence_reader=reader,
+            )] += 1
+    return counts
+
+
+def _command_outcome_counts(states: list[dict]) -> dict[str, int]:
+    """Summarize state and failure-sidecar outcomes without trusting paths."""
+    sessions: list[tuple[list[dict], int, int]] = []
+    for state in states:
+        if state.get("_mission_snapshot_record") is True:
+            observation = validate_command_outcome_observation(
+                state.get("_command_outcome_observation")
+            )
+            if observation is None:
+                observation = observe_state_command_outcomes(state)
+            sessions.append((
+                observation["records"], observation["invalid_records"],
+                observation["corrupt_sidecars"],
+            ))
+            continue
+        source = state.get("_mission_source_path")
+        if not isinstance(source, str):
+            # Snapshots contain no live sidecars but may carry valid state data.
+            raw = state.get("command_outcomes") or []
+            if isinstance(raw, list):
+                sessions.append((
+                    [item for item in raw if isinstance(item, dict)],
+                    sum(not isinstance(item, dict) for item in raw), 0,
+                ))
+            else:
+                sessions.append(([], 1, 0))
+            continue
+        source_path = Path(source)
+        root = source_path.parent.parent if source_path.parent.name == "sessions" else source_path.parent
+        sid = state.get("session_id")
+        if not isinstance(sid, str) or not sid:
+            sessions.append(([], 1, 0))
+            continue
+        token = hashlib.sha256(sid.encode("utf-8")).hexdigest()[:16]
+        found, bad, damaged = iter_command_outcome_records(state, root, token)
+        sessions.append((found, bad, damaged))
+    return summarize_command_outcome_sessions(sessions)
+
+
+def _aggregate(
+    states: list[dict], duplicate_state_group_count: int = 0,
+    *, observation_now: datetime | None = None, state_read_error_count: int = 0,
+) -> dict:
+    snapshots = [_authoritative_snapshot_for_state(state) for state in states]
+    pass_rate_summary = summarize_authoritative_pass_rate_population(
+        snapshots,
+        now=observation_now,
+        stale_after_sec=_stale_active_seconds(),
+    )
+    durations = [d for d in (_duration_sec(s) for s in states) if d is not None and d >= 0]
+    bounded_context_observations = [
+        (
+            isinstance(state.get("iteration", 1), int)
+            and _expected_context_mode(state, state.get("iteration", 1))
+            == "bounded",
+            _context_manifest_generated(state, state.get("iteration", 1)),
+        )
+        for state in states
+    ]
+    return project_stats(
+        StatsProjectionInput(
+            states=states,
+            snapshots=snapshots,
+            pass_rate_summary=pass_rate_summary,
+            duplicate_state_group_count=duplicate_state_group_count,
+            state_read_error_count=state_read_error_count,
+            bounded_context_observations=bounded_context_observations,
+            score_provenance_counts=_score_provenance_counts(states),
+            command_outcome_counts=_command_outcome_counts(states),
+            duration_observations=durations,
+            artifact_coverage=summarize_artifact_coverage(
+                states,
+                terminal_outcomes=[
+                    snapshot.artifact_terminal_outcome for snapshot in snapshots
+                ],
+            ),
+            activity_timing=summarize_activity_states(
+                states,
+                phases=[snapshot.phase for snapshot in snapshots],
+                session_roles=[snapshot.session_role for snapshot in snapshots],
+            ),
+            planning_provider_kpis=reduce_planning_provider_kpis(
+                states, population_kind="observed"
+            ),
+            failure_ledger_counts=failure_ledger_counts(states),
+            iteration_recovery=reduce_iteration_recovery(states),
+        )
+    )
+
+
+def _format_text(stats: dict, since: Optional[str], until: Optional[str]) -> str:
+    request = StatsTextRequest(
+        stats=stats,
+        since=since,
+        until=until,
+        valid_phases=VALID_PHASES,
+    )
+    return format_stats_text(request)
+
+
+def cmd_stats(args):
+    """全プロジェクトの /mission セッションを横断集計 (read-only)。
+
+    --root 省略時は _default_search_roots() (MISSION_SEARCH_ROOTS、未設定なら cwd) のみをスキャンする。
+    --root は複数回指定でき、scripts/mission-audit.py と同じく各 root を集約する。
+    Path.home() 全体の rglob (86 秒) を避ける設計 (list/cleanup と統一)。
+    """
+    requested_roots = [Path(root) for root in args.root] if args.root else None
+    roots = requested_roots or _default_search_roots()
+    since = _parse_date_to_iso_prefix(args.since)
+    until = _parse_date_to_iso_prefix(args.until)
+    all_states = []
+    state_read_errors: list[dict[str, str]] = []
+    observation_now = None
+    if args.snapshot:
+        try:
+            document, roots, observation_now = consume_snapshot_document(
+                Path(args.snapshot), requested_roots=requested_roots
+            )
+        except SnapshotError as error:
+            print(f"ERROR: invalid state snapshot: {error}", file=sys.stderr)
+            raise SystemExit(2)
+        for item in document["records"]:
+            state = dict(item["state"])
+            try:
+                _validate_schema_version(state)
+            except UnsupportedSchemaVersionError as exc:
+                print(f"ERROR: invalid state snapshot: {exc}", file=sys.stderr)
+                raise SystemExit(2)
+            state["_mission_source_path"] = str(item["path"])
+            state["_mission_snapshot_record"] = True
+            if "command_outcome_observation" in item:
+                state["_command_outcome_observation"] = item["command_outcome_observation"]
+            all_states.append(state)
+        state_read_errors = list(document.get("state_read_errors") or [])
+    else:
+        try:
+            for r in roots:
+                if r.exists():
+                    all_states.extend(
+                        _collect_states(r, state_read_errors=state_read_errors)
+                    )
+        except UnsupportedSchemaVersionError as exc:
+            print(f"ERROR: invalid state snapshot: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+    filtered = [s for s in all_states if _matches_period(s, since, until)]
+    deduped, duplicate_state_group_count = _dedupe_states(filtered)
+    stats = _aggregate(
+        deduped,
+        duplicate_state_group_count,
+        observation_now=observation_now,
+        state_read_error_count=len(state_read_errors),
+    )
+    stats["roots"] = [str(root) for root in roots]
+    if args.json:
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+    else:
+        print(_format_text(stats, since, until))
+
+
+def cmd_learning_brief(args):
+    """Read-only failure-ledger learning brief across session and archive state roots."""
+    requested_roots = [Path(root) for root in args.root] if args.root else None
+    roots = requested_roots or _learning_brief_default_roots(Path.cwd())
+    state_read_errors: list[dict[str, str]] = []
+    try:
+        states = _collect_learning_brief_states(
+            roots, state_read_errors=state_read_errors
+        )
+        brief = summarize_learning_brief(
+            states,
+            weak_phase=getattr(args, "weak_phase", None),
+            limit=getattr(args, "limit", 10),
+        )
+    except LearningContractError as exc:
+        print(f"ERROR: learning brief: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    brief["state_read_error_count"] = len(state_read_errors)
+    if args.json:
+        print(json.dumps(brief, indent=2, ensure_ascii=False))
+        return
+    lines = [
+        "recurrence={recurrence} sessions={sessions} weak_phase={weak_phase} general_fix_rule={general_fix_rule}".format(
+            **rule,
+        )
+        for rule in brief["rules"]
+    ]
+    lines.insert(0, "state_read_error_count=%s" % len(state_read_errors))
+    print("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Issue #301: resolve-archive
+# ---------------------------------------------------------------------------
+
+_VALID_RESOLUTION_STATUSES = frozenset({"resolved", "superseded", "closed"})
+
+
+def _validate_resolve_archive_path(raw_path: str, cwd: Path) -> Path:
+    """resolve-archive の対象ファイルパスを検証して解決した絶対パスを返す。
+
+    拒否条件:
+    - .mission-state/ の外 (project root 境界違反 / path escape)
+    - パス上の symlink
+    - archive/worktree-*/generations/ 以下 (immutable bundle)
+    - 通常ファイルでない
+    """
+    # 絶対パスに解決 (.. を正規化するが symlink はまだ展開しない)
+    raw = Path(raw_path)
+    candidate = (cwd / raw) if not raw.is_absolute() else raw
+    candidate = Path(os.path.normpath(str(candidate)))
+
+    # cwd/.mission-state/ 内であることを確認 (normpath で .. を除去済み)
+    state_root = cwd / ".mission-state"
+    try:
+        candidate.relative_to(state_root)
+    except ValueError:
+        print(
+            f"ERROR: target path must be within <project-root>/.mission-state/; "
+            f"got: {candidate}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # パス上の各コンポーネントで symlink を検出
+    try:
+        check = cwd
+        for part in candidate.relative_to(cwd).parts:
+            check = check / part
+            if check.is_symlink():
+                print(
+                    f"ERROR: symlink detected in path component: {check}; "
+                    "resolve-archive does not follow symlinks",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: path validation failed: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    if not candidate.is_file():
+        print(f"ERROR: target is not a regular file: {candidate}", file=sys.stderr)
+        sys.exit(2)
+
+    # archive/worktree-*/generations/ 以下は immutable bundle — 変更禁止
+    try:
+        archive_root = state_root / "archive"
+        rel_to_archive = candidate.relative_to(archive_root)
+        parts = rel_to_archive.parts
+        if (
+            len(parts) >= 3
+            and parts[0].startswith("worktree-")
+            and parts[1] == "generations"
+        ):
+            print(
+                "ERROR: target is inside an immutable worktree archive generation "
+                f"({parts[0]}/generations/{parts[2]}/...); "
+                "resolve-archive cannot modify generation-frozen records",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    except ValueError:
+        pass  # not under archive/ — acceptable
+
+    return candidate
+
+
+def _validate_resolve_archive_record(
+    data: dict,
+    cwd: Path,
+    *,
+    allow_active_snapshot: bool = False,
+) -> None:
+    """resolve-archive の対象 record を検証する。問題があれば sys.exit(2)。
+
+    拒否条件:
+    - valid mission state record でない
+    - loop_active=true (active session) — allow_active_snapshot=True のとき archive/ 配下のみ skip
+    - passes=true (completed session)
+    - halt_reason が空 (non-halt terminal)
+    - PID が生存中 (belt-and-suspenders active check)
+    - project_root が cwd または cwd の配下パスと不一致 (別 project / #318)
+    """
+    if not _is_mission_state_record(data):
+        print(
+            "ERROR: target is not a valid mission state record "
+            "(missing mission / mission_id / session_id)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if data.get("loop_active") is True and not allow_active_snapshot:
+        print(
+            "ERROR: target record is active (loop_active=true); "
+            "cannot annotate an active session with resolve-archive",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if data.get("passes") is True:
+        print(
+            "ERROR: target record has passes=true; "
+            "resolve-archive only operates on terminal halted records (passes=false)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    halt_reason = str(data.get("halt_reason") or "").strip()
+    # #318: allow_active_snapshot=True は archive/ 配下の frozen snapshot 用 opt-in。
+    # mid-flight snapshot は halt_reason が空のまま保存されるため、このチェックも緩和する。
+    if not halt_reason and not allow_active_snapshot:
+        print(
+            "ERROR: target record has no halt_reason; "
+            "it is not a terminal halted record",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    # Belt-and-suspenders: PID 生存チェック
+    pid = data.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        try:
+            os.kill(pid, 0)
+            print(
+                f"ERROR: PID {pid} is still alive; "
+                "target record may still be active",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        except ProcessLookupError:
+            pass  # プロセス不存在 = OK
+        except PermissionError:
+            pass  # 別プロセス (OS がアクセス拒否) = not our session
+
+    # project_root チェック: cwd と一致、または cwd 配下のパス (#318: worktree 由来 record 対応)
+    record_root_raw = str(data.get("project_root") or "").strip()
+    if record_root_raw:
+        try:
+            resolved_record_root = Path(record_root_raw).resolve()
+            resolved_cwd = cwd.resolve()
+            # Path.is_relative_to は Python 3.9+。文字列 prefix 比較ではなく Path API を使う
+            # (文字列比較では /foo/bar-baz が /foo/bar の配下と誤判定する)
+            is_same = resolved_record_root == resolved_cwd
+            is_subdir = False
+            try:
+                resolved_record_root.relative_to(resolved_cwd)
+                is_subdir = True
+            except ValueError:
+                pass
+            if not (is_same or is_subdir):
+                print(
+                    f"ERROR: target record belongs to project {record_root_raw!r}, "
+                    f"not the current directory {cwd!r}; "
+                    "resolve-archive must be run from the record's project root",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+        except (OSError, ValueError) as exc:
+            print(
+                f"ERROR: could not validate project_root: {exc}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
+def _state_archive_reference(cwd: Path, path: Path) -> str:
+    try:
+        relative = path.relative_to(cwd)
+    except ValueError as exc:
+        raise WorktreeArchiveError("state archive path is outside the project") from exc
+    value = relative.as_posix()
+    if not value.startswith(".mission-state/"):
+        raise WorktreeArchiveError("state archive path is outside .mission-state")
+    return value
+
+
+def _reject_duplicate_state_archive_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError("state archive manifest contains duplicate keys")
+        document[key] = value
+    return document
+
+
+def _publish_state_archive_compaction(
+    cwd: Path,
+    target: Path,
+    canonical: Path,
+    target_data: dict,
+    retain_generations: int,
+) -> str:
+    """Publish one immutable materialized-state index without deleting lineage."""
+    if target == canonical:
+        raise WorktreeArchiveError("canonical and superseded paths must differ")
+    canonical_ref = _state_archive_reference(cwd, canonical)
+    target_ref = _state_archive_reference(cwd, target)
+    try:
+        canonical_bytes = read_state_archive_file_bytes(cwd, canonical_ref)
+        canonical_data = read_session_json(canonical, source=canonical_bytes)
+        target_bytes = read_state_archive_file_bytes(cwd, target_ref)
+    except (CanonicalStateEncodingError, FreshReviewError):
+        raise
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise WorktreeArchiveError("canonical state is unreadable") from exc
+    if not _is_mission_state_record(canonical_data):
+        raise WorktreeArchiveError("canonical state is not a mission state record")
+    if (
+        canonical_data.get("session_id") != target_data.get("session_id")
+        or canonical_data.get("mission_id") != target_data.get("mission_id")
+    ):
+        raise WorktreeArchiveError("canonical state identity does not match the superseded record")
+
+    state_root = cwd / ".mission-state"
+    try:
+        current = read_state_archive_compaction(state_root, verify_superseded=True)
+    except ValueError as exc:
+        raise WorktreeArchiveError("existing state archive compaction is invalid") from exc
+    records = copy.deepcopy(list(current.records)) if current else []
+    canonical_digest = hashlib.sha256(canonical_bytes).hexdigest()
+    target_digest = hashlib.sha256(target_bytes).hexdigest()
+    identity = (str(target_data["mission_id"]), str(target_data["session_id"]))
+    matches = [
+        record for record in records
+        if (record["mission_id"], record["session_id"]) == identity
+    ]
+    if len(matches) > 1:
+        raise WorktreeArchiveError("state archive canonical identity is ambiguous")
+    if matches:
+        record = matches[0]
+        if record["canonical_path"] != canonical_ref:
+            raise WorktreeArchiveError("state archive canonical path changed")
+        record["canonical_sha256"] = canonical_digest
+    else:
+        record = {
+            "canonical_path": canonical_ref,
+            "canonical_sha256": canonical_digest,
+            "mission_id": identity[0],
+            "session_id": identity[1],
+            "superseded": [],
+        }
+        records.append(record)
+    superseded = [item for item in record["superseded"] if item["path"] != target_ref]
+    superseded.append({"path": target_ref, "sha256": target_digest})
+    record["superseded"] = sorted(superseded, key=lambda item: item["path"])
+    records.sort(key=lambda item: (item["mission_id"], item["session_id"], item["canonical_path"]))
+
+    if current and records == list(current.records) and retain_generations == current.retention_generations:
+        return current.generation
+    core = {
+        "schema": STATE_ARCHIVE_GENERATION_SCHEMA,
+        "previous_generation": current.generation if current else None,
+        "retention_policy": {
+            "retain_generations": retain_generations,
+            "physical_deletion": "forbidden",
+        },
+        "records": records,
+    }
+    generation = state_archive_content_digest(core)
+    manifest = {
+        **core,
+        "created_at": iso_now(),
+        "content_digest": generation,
+    }
+    compaction = _ensure_regular_directory_path(
+        cwd, (".mission-state", "archive", "compaction")
+    )
+    compaction.mkdir(parents=True, exist_ok=True)
+    generations = _ensure_regular_directory_path(compaction, ("generations",))
+    generations.mkdir(parents=True, exist_ok=True)
+    generation_root = generations / generation
+    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+    if generation_root.exists() or generation_root.is_symlink():
+        if generation_root.is_symlink() or not generation_root.is_dir():
+            raise WorktreeArchiveError("state archive generation is not a regular directory")
+        existing_ref = (
+            Path(".mission-state") / "archive" / "compaction" / "generations"
+            / generation / "manifest.json"
+        ).as_posix()
+        try:
+            existing_bytes = read_state_archive_file_bytes(cwd, existing_ref)
+            existing_document = json.loads(
+                existing_bytes.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_state_archive_keys,
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise WorktreeArchiveError("state archive generation collision") from exc
+        expected_fields = {
+            "schema", "created_at", "previous_generation", "retention_policy",
+            "records", "content_digest",
+        }
+        existing_core = {
+            "schema": existing_document.get("schema"),
+            "previous_generation": existing_document.get("previous_generation"),
+            "retention_policy": existing_document.get("retention_policy"),
+            "records": existing_document.get("records"),
+        } if isinstance(existing_document, dict) else None
+        if (
+            not isinstance(existing_document, dict)
+            or set(existing_document) != expected_fields
+            or existing_core != core
+            or existing_document.get("content_digest") != generation
+            or state_archive_content_digest(existing_document) != generation
+            or not isinstance(existing_document.get("created_at"), str)
+            or not existing_document["created_at"]
+        ):
+            raise WorktreeArchiveError("state archive generation collision")
+        manifest = existing_document
+        manifest_bytes = existing_bytes
+    else:
+        staging = Path(tempfile.mkdtemp(prefix=".tmp-", dir=generations))
+        try:
+            atomic_write_json(staging / "manifest.json", manifest, administrative=True)
+            os.replace(staging, generation_root)
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+    try:
+        if (
+            read_state_archive_file_bytes(cwd, canonical_ref) != canonical_bytes
+            or read_state_archive_file_bytes(cwd, target_ref) != target_bytes
+        ):
+            raise WorktreeArchiveError("state archive source changed before publication")
+    except ValueError as exc:
+        raise WorktreeArchiveError("state archive source changed before publication") from exc
+    atomic_write_json(
+        compaction / "current.json",
+        {
+            "schema": STATE_ARCHIVE_POINTER_SCHEMA,
+            "generation": generation,
+            "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        },
+        administrative=True,
+    )
+    return generation
+
+
+def cmd_resolve_archive(args):
+    """#301: terminal halted record に resolution metadata を atomic に追記する。"""
+    cwd = Path.cwd().resolve()
+
+    # パスの検証と解決
+    target = _validate_resolve_archive_path(args.path, cwd)
+    canonical: Path | None = None
+    if args.canonical_path is not None:
+        if args.status != "superseded":
+            print("ERROR: --canonical-path requires --status superseded", file=sys.stderr)
+            sys.exit(2)
+        if args.retention_generations < 1:
+            print("ERROR: --retention-generations must be positive", file=sys.stderr)
+            sys.exit(2)
+        canonical = _validate_resolve_archive_path(args.canonical_path, cwd)
+
+    # lock ファイルは対象の .mission-state/ 直下
+    # (state_root = 対象ファイルから .mission-state を探す)
+    target_parts = target.parts
+    if ".mission-state" not in target_parts:
+        print("ERROR: cannot locate .mission-state in target path", file=sys.stderr)
+        sys.exit(2)
+    mission_state_idx = target_parts.index(".mission-state")
+    target_state_root = Path(*target_parts[: mission_state_idx + 1])
+    lock = target_state_root / ".state.lock"
+
+    # #318: --frozen-snapshot フラグの事前検証 (lock 外で行う)
+    frozen_snapshot = getattr(args, "frozen_snapshot", False)
+    if frozen_snapshot:
+        # archive/ 配下のみ有効（sessions/ は従来の active 拒否を維持）
+        archive_root = target_state_root / "archive"
+        try:
+            target.relative_to(archive_root)
+        except ValueError:
+            print(
+                "ERROR: --frozen-snapshot は archive/ 配下のファイルにのみ適用できます; "
+                f"sessions/ 配下の active record は従来どおり拒否されます: {target}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    archive_generation: str | None = None
+    with StateLock(lock):
+        # resolution_decided_at は lock 取得後に確定する (lock 競合待ちの間の
+        # 時刻を audit 証跡へ混入させない。Checker 指摘の反映)
+        now = iso_now()
+
+        def validate(data: dict) -> None:
+            # #318: --frozen-snapshot フラグが指定された場合、live session の terminal 性を確認する
+            if frozen_snapshot:
+                session_id = str(data.get("session_id") or "").strip()
+                if session_id:
+                    live_path = target_state_root / "sessions" / f"{session_id}.json"
+                    if live_path.exists():
+                        try:
+                            live_data = read_session_json(live_path)
+                            if live_data.get("loop_active") is True:
+                                print(
+                                    f"ERROR: live session {session_id!r} は loop_active=true のまま稼働中です; "
+                                    "--frozen-snapshot であっても active な live session がある間は resolution を付与できません",
+                                    file=sys.stderr,
+                                )
+                                sys.exit(2)
+                        except (OSError, json.JSONDecodeError) as exc:
+                            print(
+                                f"ERROR: live session ファイルの読み取りに失敗しました: {exc}",
+                                file=sys.stderr,
+                            )
+                            sys.exit(2)
+            # record の検証
+            _validate_resolve_archive_record(
+                data, cwd, allow_active_snapshot=frozen_snapshot
+            )
+
+        def mutate(data: dict) -> None:
+            # 既存の resolution を history へ append (audit trail 保持)
+            if data.get("resolution_status"):
+                prev = {"resolution_status": data["resolution_status"]}
+                if data.get("resolution_decided_at"):
+                    prev["resolution_decided_at"] = data["resolution_decided_at"]
+                if data.get("resolution_owner_issue"):
+                    prev["resolution_owner_issue"] = data["resolution_owner_issue"]
+                if data.get("resolution_evidence_url"):
+                    prev["resolution_evidence_url"] = data["resolution_evidence_url"]
+                if data.get("resolution_note"):
+                    prev["resolution_note"] = data["resolution_note"]
+                data.setdefault("resolution_history", []).append(prev)
+
+            # resolution metadata を設定し、v3 の明示 outcome だけを同じ transition 内で整合させる。
+            # outcome を持たない legacy record には追加しない。
+            data["resolution_status"] = args.status
+            if "terminal_outcome" in data:
+                _write_terminal_outcome(data)
+            data["resolution_decided_at"] = now
+            if args.owner_issue is not None:
+                data["resolution_owner_issue"] = args.owner_issue
+            if args.evidence_url is not None:
+                data["resolution_evidence_url"] = args.evidence_url
+            if args.note is not None:
+                data["resolution_note"] = args.note
+
+        # U5-1 (#635): identity 検証つき read → validation → atomic publish を
+        # administrative commit protocol に委譲する。#310 の administrative
+        # 書き込み (last_activity_at 非付与) は writer 参照ごと protocol へ渡す。
+        try:
+            captured, data = administrative_commit(
+                target,
+                validate=validate,
+                mutate=mutate,
+                write_document=atomic_write_json,
+            )
+        except AdministrativeCommitError as exc:
+            print(f"ERROR: administrative commit failed: {exc}", file=sys.stderr)
+            sys.exit(2)
+        if canonical is not None:
+            try:
+                archive_generation = _publish_state_archive_compaction(
+                    cwd,
+                    target,
+                    canonical,
+                    data,
+                    args.retention_generations,
+                )
+            except (OSError, ValueError, WorktreeArchiveError) as exc:
+                try:
+                    restore_administrative_record(captured, atomic_write_bytes)
+                except AdministrativeCommitError as rollback_error:
+                    print(
+                        "ERROR: state archive compaction failed and rollback "
+                        f"failed: {exc}; {rollback_error}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(2)
+                print(f"ERROR: state archive compaction failed: {exc}", file=sys.stderr)
+                sys.exit(2)
+
+    result: dict = {
+        "ok": True,
+        "path": str(target),
+        "resolution_status": args.status,
+        "resolution_decided_at": now,
+    }
+    if archive_generation is not None:
+        result["archive_generation"] = archive_generation
+    if args.owner_issue is not None:
+        result["resolution_owner_issue"] = args.owner_issue
+    if args.evidence_url is not None:
+        result["resolution_evidence_url"] = args.evidence_url
+    if args.note is not None:
+        result["resolution_note"] = args.note
+
+    print(json.dumps(result, indent=2 if args.json else None, ensure_ascii=False))
+
+
+def _add_initialization_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_init = sub.add_parser("init", help="新規ミッションで state.json を初期化")
+    p_init.add_argument(
+        "--new-mission",
+        action="store_true",
+        help="終端済みの同一 session を immutable generation へ退避して新しい mission を開始",
+    )
+    p_init.add_argument("--complexity", choices=["Simple", "Standard", "Complex", "Critical"], default=None,
+                        help="Phase 1 の複雑度判定結果。指定すると reviewer_count も自動設定 (Simple:1/Standard:2/Complex:3/Critical:3)。未指定は Unknown のまま WARN")
+    p_init.add_argument("mission", help="ミッション記述")
+    p_init.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    p_init.add_argument("--max-iter", type=int, default=None, help=f"最大反復回数。未指定={DEFAULT_MAX_ITER} / 0=上限なし(stagnation停止)")
+    p_init.add_argument("--budget-minutes", default=None,
+                        help="#238: 時間予算 (分・正の有限数)。next が budget_pressure を返し、80%%で warn、100%%超で spawn 系を consider-halt へ差し替える")
+    p_init.add_argument("--issue-ref", default=None, dest="issue_ref",
+                        help="関連 issue の参照。裸番号 `42` / `#42` / `host:owner/repo#42` / `https://.../issues/42` を受理し、"
+                             "#295 で Issue 番号へ正規化して比較する (形式差でも同一 Issue の active session があれば WARN)。"
+                             "下流の受理形式に合わせる場合は裸番号 `42` を推奨")
+    p_init.add_argument("--files", default=None,
+                        help="予定変更ファイルのカンマ区切り project-root 相対パス。同一 active session と重複する場合 WARN")
+    p_init.add_argument(
+        "--artifact-applicability",
+        choices=["producing", "not-applicable", "pending"],
+        default="pending",
+        help="成果物契約。profile 未確定時は pending、成果物を生成する実行は producing、対象外は not-applicable",
+    )
+    p_init.add_argument("--role", choices=["implementer", "checker", "planning", "analyze", "release"],
+                        default="implementer", dest="session_role",
+                        help="#311: session の役割。checker 系は iter=0 での証拠提出が正規出口となり、"
+                             "pass-rate は implementer 限定指標で別計上される")
+    p_init.add_argument("--force-mission", action="store_true", dest="force_mission",
+                        help="#276: Simple タスクでも goal へルーティングせず mission ループを強制する")
+    p_init.add_argument("--goal-dispatch", choices=sorted(GOAL_DISPATCH_MODES), default=None,
+                        dest="goal_dispatch",
+                        help="#355: Simple routing 後の完遂手段。inline または実行ホストの host-native goal 機構")
+    p_init.add_argument("--review-tier", choices=list(TIER_REVIEWER_COUNT), default=None,
+                        dest="review_tier",
+                        help="レビュー深度 (light/standard/full)。未指定は complexity・ミッション記述から auto 導出 (Issue #168)")
+    p_init.add_argument("--host-run-id", default=None)
+    p_init.add_argument("--root-run-id", default=None)
+    p_init.add_argument("--parent-run-id", default=None)
+    p_init.add_argument("--child-run-id", default=None)
+    p_init.add_argument("--logical-group-id", default=None)
+    p_init.add_argument("--review-group-id", default=None)
+    p_init.add_argument("--review-perspective", default=None)
+    p_init.add_argument("--base-sha", default=None)
+    p_init.add_argument("--head-sha", default=None)
+    p_init.set_defaults(func=cmd_init, _new_mission_assumptions_path=None)
+
+    p_parallel_init = sub.add_parser("parallel-init", help="create a versioned parallel child manifest")
+    p_parallel_init.add_argument("--group-id", required=True)
+    p_parallel_init.add_argument("--issue-ref", action="append", default=[])
+    p_parallel_init.set_defaults(func=cmd_parallel_init)
+    p_parallel_status = sub.add_parser("parallel-status", help="summarize planned parallel children")
+    p_parallel_status.add_argument("--group-id", required=True)
+    p_parallel_status.set_defaults(func=cmd_parallel_status)
+    p_parallel_closeout = sub.add_parser("parallel-closeout", help="terminalize a complete parallel group")
+    p_parallel_closeout.add_argument("--group-id", required=True)
+    p_parallel_closeout.set_defaults(func=cmd_parallel_closeout)
+
+
+def _add_queue_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_pregate = sub.add_parser("pregate", help="pre-gate evaluation cache sidecar")
+    p_pregate_sub = p_pregate.add_subparsers(dest="pregate_cmd", required=True)
+    p_pregate_record = p_pregate_sub.add_parser("record", help="record a pregate evaluation")
+    p_pregate_record.add_argument("--issue-ref", required=True)
+    p_pregate_record.add_argument("--input", required=True, help="evaluation JSON file path or - for stdin")
+    p_pregate_record.set_defaults(func=cmd_pregate)
+    p_pregate_check = p_pregate_sub.add_parser("check", help="lookup a pregate evaluation")
+    p_pregate_check.add_argument("--issue-ref", required=True)
+    p_pregate_check.add_argument("--subject-digest", required=True)
+    p_pregate_check.add_argument("--json", action="store_true")
+    p_pregate_check.set_defaults(func=cmd_pregate)
+    p_pregate_digest = p_pregate_sub.add_parser("digest", help="compute a canonical pregate subject digest")
+    p_pregate_digest.add_argument("--input", required=True, help="snapshot JSON file path or - for stdin")
+    p_pregate_digest.set_defaults(func=cmd_pregate)
+
+    p_gate_merge = sub.add_parser(
+        "gate-and-merge",
+        help="test the freshly integrated PR tree and merge only after final base/head checks",
+    )
+    p_gate_merge.add_argument("pr")
+    p_gate_merge.add_argument(
+        "--expected-head-sha",
+        default=None,
+        help="queue-verified PR head sha; mismatch fails closed",
+    )
+    p_gate_merge.add_argument(
+        "--expected-base-sha",
+        default=None,
+        help="queue-verified accepted base sha; mismatch fails closed",
+    )
+    p_gate_merge.add_argument(
+        "--reviewed-changeset-digest",
+        default=None,
+        help=(
+            "digest of the reviewed changeset, transcribed from the Checker report. "
+            "Never compute it at merge time: a value derived from the same diff the "
+            "gate observes always matches, so the check does nothing. Omit it to keep "
+            "the existing strict requirements instead."
+        ),
+    )
+    p_gate_merge.add_argument(
+        "--claimed-digest-source",
+        default=None,
+        choices=list(CLAIMED_DIGEST_SOURCES),
+        help=(
+            "where the reviewed changeset digest was claimed to come from. Required "
+            "together with --reviewed-changeset-digest, and rejected without it. This "
+            "records the claim, not the origin: the gate cannot tell a transcribed "
+            "digest from one the producer computed at merge time."
+        ),
+    )
+    p_gate_merge.set_defaults(func=cmd_gate_and_merge)
+
+    p_changeset_digest = sub.add_parser(
+        "changeset-digest",
+        help="compute the reviewed changeset digest for a base/head pair (read-only)",
+    )
+    p_changeset_digest.add_argument("--base-sha", required=True)
+    p_changeset_digest.add_argument("--head-sha", required=True)
+    p_changeset_digest.set_defaults(func=cmd_changeset_digest)
+
+    p_queue = sub.add_parser("queue", help="merge queue sidecar")
+    p_queue_sub = p_queue.add_subparsers(dest="queue_cmd", required=True)
+    p_queue_enqueue = p_queue_sub.add_parser("enqueue", help="enqueue one merge candidate")
+    p_queue_enqueue.add_argument("--issue-ref", required=True)
+    p_queue_enqueue.add_argument("--pr-ref", required=True)
+    p_queue_enqueue.add_argument("--head-sha", default=None)
+    p_queue_enqueue.add_argument("--base-sha", default=None)
+    p_queue_enqueue.add_argument("--from-state", action="store_true")
+    p_queue_enqueue.add_argument("--depends-on", default=None)
+    p_queue_enqueue.add_argument("--session", default=None)
+    p_queue_enqueue.set_defaults(func=cmd_queue)
+    p_queue_status = p_queue_sub.add_parser("status", help="list queue entries in enqueue order")
+    p_queue_status.add_argument("--json", action="store_true")
+    p_queue_status.set_defaults(func=cmd_queue)
+    p_queue_next = p_queue_sub.add_parser("next", help="return the next merge candidate")
+    p_queue_next.add_argument("--json", action="store_true")
+    p_queue_next.set_defaults(func=cmd_queue)
+    p_queue_verify = p_queue_sub.add_parser("verify", help="validate a candidate against the live base sha")
+    p_queue_verify.add_argument("--queue-id", required=True)
+    p_queue_verify.add_argument("--current-base-sha", required=True)
+    p_queue_verify.set_defaults(func=cmd_queue)
+    p_queue_mark = p_queue_sub.add_parser("mark", help="transition one queue entry")
+    p_queue_mark.add_argument("--queue-id", required=True)
+    p_queue_mark.add_argument("--status", required=True, choices=["merged", "invalidated", "superseded"])
+    p_queue_mark.add_argument("--reason", default=None)
+    p_queue_mark.set_defaults(func=cmd_queue)
+
+
+def _add_hook_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_stop_guard = sub.add_parser(
+        "stop-guard-observe",
+        help="record one digest-based stop-hook block observation",
+    )
+    p_stop_guard.add_argument("--session-id", required=True)
+    p_stop_guard.add_argument("--digest", required=True)
+    p_stop_guard.add_argument("--now-epoch", type=int, required=True)
+    p_stop_guard.add_argument("--ttl-seconds", type=int, required=True)
+    p_stop_guard.set_defaults(func=cmd_stop_guard_observe)
+
+    p_next = sub.add_parser("next", help="ADR-002 Stage 3: state から次の 1 手を JSON で返す (read-only。Codex/compaction 復帰時の進行ガイド)")
+    p_next.set_defaults(func=cmd_next)
+    p_stop_verdict = sub.add_parser(
+        "stop-verdict", help="authoritative session state の Stop-hook verdict を返す (read-only)"
+    )
+    p_stop_verdict_input = p_stop_verdict.add_mutually_exclusive_group(required=True)
+    p_stop_verdict_input.add_argument("--state-file")
+    p_stop_verdict_input.add_argument(
+        "--hook-input",
+        help="root-aware Stop hook input。'-' のとき stdin から JSON を読む",
+    )
+    p_stop_verdict.add_argument("--json", action="store_true")
+    p_stop_verdict.add_argument("--cwd", default=None)
+    p_stop_verdict.add_argument("--hook-session-id", default=None)
+    p_stop_verdict.add_argument("--hook-pid", type=int, default=None)
+    p_stop_verdict.add_argument("--hook-session-id-from-pid", action="store_true")
+    p_stop_verdict.add_argument("--planning-warn-iterations", type=int, default=3)
+    p_stop_verdict.set_defaults(func=cmd_stop_verdict)
+    p_freshness = sub.add_parser("freshness", help="state の freshness 判定を JSON で返す (read-only)")
+    p_freshness.add_argument("--state-file", required=True, help="判定対象の session state JSON")
+    p_freshness.set_defaults(func=cmd_freshness)
+
+    p_codex = sub.add_parser("codex-preflight", help="Codex /mission 起動時の state/hook guard readiness を診断")
+    p_codex.add_argument("--json", action="store_true", help="診断結果を JSON で出力")
+    p_codex.add_argument("--strict", action="store_true", help="active state が無い場合など required_actions があれば exit 2")
+    p_codex.add_argument("--require-stop-hook", action="store_true", dest="require_stop_hook",
+                         help="Codex Stop hook 未設定を required action として exit 2 にする")
+    p_codex.add_argument("--hook-config", default=None,
+                         help="Codex hooks.json の明示パス。未指定なら $CODEX_HOME/hooks.json と ~/.codex/hooks.json を確認")
+    p_codex.set_defaults(func=cmd_codex_preflight)
+
+    p_permission = sub.add_parser(
+        "permission-preflight",
+        help="Phase 0 の state/assumptions 書き込み可否を実書き込みで検証",
+    )
+    p_permission.add_argument("--json", action="store_true", help="診断結果を JSON で出力")
+    p_permission.set_defaults(func=cmd_permission_preflight)
+
+
+def _add_state_access_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_get = sub.add_parser("get", help="state.json の値取得")
+    p_get.add_argument("--field", default=None)
+    p_get.set_defaults(func=cmd_get)
+
+    p_set = sub.add_parser("set", help="state.json のフィールド更新 (key=value 複数可)")
+    p_set.add_argument("kvs", nargs="+")
+    p_set.add_argument("--json", action="store_true", help="失敗時に機械可読 outcome を出力")
+    _add_command_lineage_arguments(p_set)
+    p_set.set_defaults(func=cmd_set, command_outcome_tracking=True)
+
+
+def _add_review_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_pass = sub.add_parser("mark-passes", help="threshold gate を満たすとき passes=true, loop_active=false (--force には --reason --approved-by-user --approval-evidence-ref --approved-actor --approved-at --reason-code --approval-verifier が全て必須)")
+    p_pass.add_argument("--force", action="store_true",
+                        help="threshold gate を skip して強制的に passes=true を書き込む (--reason と --approved-by-user が必須)")
+    p_pass.add_argument("--reason", default=None,
+                        help="--force の理由 (state.force_reason に記録される)")
+    p_pass.add_argument("--approved-by-user", action="store_true", dest="approved_by_user",
+                        help="#185: --force と併用必須。ユーザーが明示的に override を承認したことの宣言 "
+                             "(orchestrator が自律的に付けてはならない — ユーザーの明示指示があった場合のみ)")
+    p_pass.add_argument("--specialist-waiver", default=None,
+                        help="selected checkpoint に terminal invocation がない場合の明示理由")
+    p_pass.add_argument("--approval-evidence-ref", default=None,
+                        help="verified approval record digest (sha256:<64 hex>)")
+    p_pass.add_argument("--approved-actor", default=None,
+                        help="approval role only; role:<opaque>, never an identity")
+    p_pass.add_argument("--approved-at", default=None, help="timezone-aware approval timestamp")
+    p_pass.add_argument("--reason-code", default=None,
+                        choices=sorted(_PROVENANCE_REASON_CODES))
+    p_pass.add_argument("--approval-verifier", default=None,
+                        help="configured approval verifier provider (neutral-test is test-only)")
+    p_pass.add_argument(
+        "--early-stop-rationale",
+        default=None,
+        help="#568: early-stop の継続条件が揃っていても停止する場合の理由 (記録のみ。gate は変えない)",
+    )
+    p_pass.set_defaults(func=cmd_mark_passes)
+
+    p_schema = sub.add_parser("schema", help="入力契約のスキーマを出力する (#683)")
+    p_schema.add_argument("--contract", required=True,
+                          choices=("planning-adopt-core", "review-import", "acceptance-contract-import", "fresh-review-prepare", "fresh-review-run", "fresh-review-reconcile", "fresh-review-import", "fresh-review-withdraw"),
+                          help="出力する契約")
+    p_schema.set_defaults(func=cmd_schema)
+    p_score = sub.add_parser("push-score", help="score_history に採点結果を append (orchestrator が Phase 5 直後に呼ぶ)")
+    p_score.add_argument("--iteration", type=int, required=True)
+    p_score.add_argument("--composite", type=float, default=None,
+                         help="自己申告 composite (従来経路)。--scoring-json 使用時は指定不可 (CLI が items から再計算する)")
+    p_score.add_argument("--min-item", type=float, default=None, dest="min_item",
+                         help="自己申告 min_item (従来経路)。--scoring-json 使用時は指定不可")
+    p_score.add_argument("--items", default=None, help=f'JSON 形式 (例: {{"mission_achievement": {DEFAULT_THRESHOLD}, "accuracy": {MIN_ITEM_THRESHOLD}, ...}})。--scoring-json 使用時は指定不可')
+    p_score.add_argument("--scoring-json", default=None, dest="scoring_json",
+                         help="aggregate-reviews などが生成した構造化 JSON 出力パス (ADR-002 Stage 1)。{\"items\": {...}, \"notes\"?, \"open_high\"?} を読み、"
+                              "composite/min_item を CLI 側で再計算し、evidence として archive に保存する。転記レイヤを排除する推奨経路")
+    p_score.add_argument("--notes", default=None)
+    p_score.add_argument("--scoring-output", default=None,
+                         help="legacy scorer Markdown 出力ファイルパス。指定すると .mission-state/archive/iter-N-scoring.md にコピー保存される (移行互換)")
+    p_score.add_argument("--open-high", type=int, default=0, dest="open_high",
+                         help="未解決の High 指摘件数 (mark-passes の gate で使用)。--scoring-json に open_high があればそちらを優先")
+    p_score.add_argument("--resubmit-reason", default=None, dest="resubmit_reason",
+                         help="同一 iteration を再 push する際に必須 (#122)。理由を score_history entry の resubmit_reason に記録する")
+    _add_command_lineage_arguments(p_score)
+    p_score.set_defaults(func=cmd_push_score, command_outcome_tracking=True, json=True)
+
+    p_manual_score = sub.add_parser(
+        "manual-score-capture",
+        help="typed mission-manual-score/1 を安全に archive し、manual-import 用 scoring JSON を生成",
+    )
+    p_manual_score.add_argument("--input", required=True, help="host user が用意した mission-manual-score/1 JSON")
+    p_manual_score.add_argument("--out", required=True, help="push-score --scoring-json に渡す出力 JSON")
+    p_manual_score.set_defaults(func=cmd_manual_score_capture)
+
+    p_import = sub.add_parser(
+        "review-import",
+        help="strict mission-review/1 を検証して state-local immutable evidence に取り込む",
+    )
+    p_import.add_argument("--iteration", type=int, required=True)
+    p_import.add_argument("--json", action="store_true", help="失敗時に機械可読 outcome を出力")
+    import_source = p_import.add_mutually_exclusive_group(required=True)
+    import_source.add_argument("--input", default=None, help="review JSON の regular file")
+    import_source.add_argument("--stdin", action="store_true", help="stdin から review JSON を読む")
+    _add_command_lineage_arguments(p_import)
+    p_import.set_defaults(
+        func=cmd_review_import, command_outcome_tracking=True, json=True,
+    )
+
+    p_agg = sub.add_parser("aggregate-reviews", help="#119: mission-review/1 JSON を決定論集計して push-score 互換 scoring JSON を生成")
+    p_agg.add_argument("--iteration", type=int, required=True)
+    p_agg.add_argument("--input", action="append", default=[],
+                       help="reviewer が出力した legacy mission-review/1 JSON。複数指定可")
+    p_agg.add_argument("--input-ref", action="append", default=[], dest="input_refs",
+                       help="review-import が返した state-local review evidence path。複数指定可")
+    p_agg.add_argument("--out", default=None,
+                       help="出力する push-score 互換 scoring JSON パス。未指定なら .mission-state/tmp/mission-scorer-iter-N-<mission8>.json")
+    p_agg.add_argument("--json", action="store_true", help="結果を JSON で出力")
+    p_agg.add_argument("--min-reviewers", type=int, default=None, dest="min_reviewers",
+                       help="#240: 最低 reviewer 数。不足なら exit 2 (合意偽装防止)")
+    p_agg.add_argument("--reviewer-window", action="append", default=[], dest="reviewer_windows",
+                       help="#282: reviewer 実行時間帯 '<perspective>=<start>..<end>' (ISO 8601)。"
+                            "reviewer 2 名以上では全 perspective 分が必須 (不足は exit 2)。"
+                            "実行時間帯の重なりは evidence に記録 (#350)")
+    p_agg.add_argument("--base-sha", default=None, help="exact reviewed git base SHA (requires --head-sha)")
+    p_agg.add_argument("--head-sha", default=None, help="exact reviewed git head SHA (requires --base-sha)")
+    _add_command_lineage_arguments(p_agg)
+    p_agg.set_defaults(func=cmd_aggregate_reviews, command_outcome_tracking=True)
+
+    p_rf = sub.add_parser("review-finalize",
+                          help="#283: aggregate-reviews → push-score を 1 コマンドで実行 (Phase 5 transactional)")
+    p_rf.add_argument("--iteration", type=int, required=True)
+    p_rf.add_argument("--input", action="append", default=[],
+                      help="reviewer が出力した legacy mission-review/1 JSON。複数指定可")
+    p_rf.add_argument("--input-ref", action="append", default=[], dest="input_refs",
+                      help="review-import が返した state-local review evidence path。複数指定可")
+    p_rf.add_argument("--out", default=None,
+                      help="scoring JSON の出力パス。未指定なら .mission-state/tmp/mission-scorer-iter-N-<mission8>.json")
+    p_rf.add_argument("--min-reviewers", type=int, default=None, dest="min_reviewers",
+                      help="#240: 最低 reviewer 数。不足なら exit 2 (score は push されない)")
+    p_rf.add_argument("--reviewer-window", action="append", default=[], dest="reviewer_windows",
+                      help="#282: reviewer 実行時間帯 '<perspective>=<start>..<end>'。"
+                           "reviewer 2 名以上では全 perspective 分が必須 (不足は exit 2、score は push されない) (#350)")
+    p_rf.add_argument("--notes", default=None)
+    p_rf.add_argument("--resubmit-reason", default=None, dest="resubmit_reason",
+                      help="#122: 同一 iteration の再 push 理由")
+    p_rf.add_argument("--base-sha", default=None, help="exact reviewed git base SHA")
+    p_rf.add_argument("--head-sha", default=None, help="exact reviewed git head SHA")
+    _add_command_lineage_arguments(p_rf)
+    p_rf.set_defaults(func=cmd_review_finalize)
+
+    p_closeout = sub.add_parser("closeout",
+                                help="#283: mark-passes → next を 1 コマンドで実行 (Phase 6 transactional)。"
+                                     "gate 未達なら exit 2 + next guidance。--force 非対応 (override は mark-passes 直接)")
+    p_closeout.set_defaults(func=cmd_closeout)
+
+    p_manifest = sub.add_parser("context-manifest",
+                                help="#241: bounded context manifest を生成 (reviewer fork 向け)")
+    p_manifest.add_argument("--iteration", type=int, default=None,
+                            help="対象 iteration (省略時: state の現在 iteration)")
+    p_manifest.add_argument("--out", required=True,
+                            help="出力 manifest JSON パス")
+    p_manifest.set_defaults(func=cmd_context_manifest)
+
+    p_verify = sub.add_parser(
+        "verification",
+        help="#594: executor 完了後・reviewer 起動前の検証結果を記録する",
+    )
+    verify_sub = p_verify.add_subparsers(dest="verification_command", required=True)
+    p_verify_record = verify_sub.add_parser("record", help="検証結果を state へ記録")
+    p_verify_record.add_argument("--iteration", type=int, required=True)
+    verify_source = p_verify_record.add_mutually_exclusive_group(required=True)
+    verify_source.add_argument("--stdin", action="store_true", help="stdin から JSON を読む")
+    verify_source.add_argument("--input", default=None, help="JSON ファイルパス")
+    p_verify_record.set_defaults(func=cmd_verification_record)
+    p_verify_run = verify_sub.add_parser("run", help="凍結済み verifier を実行し receipt を記録")
+    p_verify_run.add_argument("--criterion", required=True)
+    p_verify_run.add_argument("--repro-input", default=None, help="policy 登録済み replay 用の JSON input")
+    p_verify_run.set_defaults(func=cmd_verification_run, command_outcome_tracking=True)
+    p_verify_claims = verify_sub.add_parser("claims", help="implementation claim ledger を生成")
+    p_verify_claims.add_argument("--iteration", type=int, required=True)
+    p_verify_claims.add_argument("--doc-digest", required=True)
+    p_verify_claims.add_argument("--out", required=True)
+    p_verify_claims.set_defaults(func=cmd_verification_claims)
+    p_budget = sub.add_parser("budget", help="予算 ledger の表示と crash 精算")
+    p_budget_sub = p_budget.add_subparsers(dest="budget_command", required=True)
+    p_budget_sub.add_parser("status", help="予算 policy と ledger の状態").set_defaults(func=cmd_budget_status)
+    p_budget_sub.add_parser("reconcile", help="crash 後の予約を精算").set_defaults(func=cmd_budget_reconcile)
+    p_fresh = sub.add_parser("fresh-review", help="typed fresh-review request と起動を管理")
+    p_fresh_sub = p_fresh.add_subparsers(dest="fresh_review_command", required=True)
+    p_prepare = p_fresh_sub.add_parser("prepare", help="候補と入力を凍結し、一回使用の request を保存")
+    p_prepare.add_argument("--perspective", required=True)
+    p_prepare.add_argument("--adapter-registration-digest", required=True, help="起動前に登録と照合する binding（起動許可ではない）")
+    p_prepare.add_argument("--criterion", action="append", help="探索する criterion（既定: required 全件）")
+    p_prepare.add_argument("--allowed-tool", action="append", default=[], choices=("read-candidate", "replay-verifier"))
+    p_prepare.add_argument("--wall-time-sec", type=int, default=300)
+    p_prepare.add_argument("--max-tool-calls", type=int, default=64)
+    p_prepare.add_argument("--max-replays", type=int, default=16)
+    p_prepare.add_argument("--max-output-bytes", type=int, default=262144)
+    p_prepare.add_argument("--max-packet-bytes", type=int, default=1048576)
+    p_prepare.set_defaults(func=cmd_fresh_review_prepare, command_outcome_tracking=True)
+    p_fresh_sub.add_parser("import-lineage", help="保存済み反例の来歴だけを初回取込み（解決は付与しない）").set_defaults(func=cmd_repair_origins, command_outcome_tracking=True)
+    p_fresh_sub.add_parser("status", help="保存済み request と消費状態を表示").set_defaults(func=cmd_fresh_review_status)
+
+    p_run = p_fresh_sub.add_parser("run", help="dispatch intent を保存して登録 adapter を起動")
+    p_run.add_argument("--request", required=True)
+    p_run.add_argument("--adapter", required=True)
+    p_run.set_defaults(func=cmd_fresh_review_run, command_outcome_tracking=True)
+
+    p_reconcile = p_fresh_sub.add_parser("reconcile", help="host 観測で既存 dispatch を照合（再起動しない）")
+    p_reconcile.add_argument("--request", required=True)
+    p_reconcile.add_argument("--adapter", required=True)
+    p_reconcile.set_defaults(func=cmd_fresh_review_reconcile, command_outcome_tracking=True)
+
+    p_import = p_fresh_sub.add_parser("import", help="照合済み child の不合格 output と failed 終端を同時公開")
+    p_import.add_argument("--request", required=True)
+    p_import.add_argument("--adapter", required=True)
+    p_import.set_defaults(func=cmd_fresh_review_import, command_outcome_tracking=True)
+
+    p_withdraw = p_fresh_sub.add_parser("withdraw", help="容量超過時に pending request を取り下げる")
+    p_withdraw.add_argument("--request", required=True)
+    p_withdraw.set_defaults(func=cmd_fresh_review_withdraw, command_outcome_tracking=True)
+
+    p_acceptance = sub.add_parser("acceptance-contract", help="immutable acceptance contract を管理")
+    p_acceptance_sub = p_acceptance.add_subparsers(dest="acceptance_contract_command", required=True)
+    p_acceptance_import = p_acceptance_sub.add_parser("import", help="versioned acceptance contract を一度だけ保存")
+    p_acceptance_import.add_argument("--input", required=True)
+    p_acceptance_import.set_defaults(func=cmd_acceptance_contract_import, command_outcome_tracking=True)
+    p_acceptance_status = p_acceptance_sub.add_parser("status", help="保存済み acceptance contract の状態を表示")
+    p_acceptance_status.set_defaults(func=cmd_acceptance_contract_status)
+
+
+def _add_lifecycle_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_halt = sub.add_parser("mark-halt", help="halt_reason を立てて停止")
+    p_halt.add_argument("--reason", required=True)
+    p_halt.add_argument("--category", default=None,
+                         help=f"#190: halt の種別。有効値: {sorted(HALT_CATEGORIES)}。省略/不正値は 'other' + WARN"
+                              " (argparse choices は使わない: _normalize_halt_category が WARN+fallback で検証する)")
+    p_halt.set_defaults(func=cmd_mark_halt)
+
+    p_supersede = sub.add_parser("supersede-reviews", help="review groupの旧generationをstale_supersededへ終端化")
+    p_supersede.add_argument("--group", required=True)
+    p_supersede.set_defaults(func=cmd_supersede_reviews)
+
+    p_reactivate = sub.add_parser(
+        "reactivate",
+        help="明示的なユーザー承認を監査記録して手動 halt を再活性化",
+    )
+    p_reactivate.add_argument("--approved-by-user", action="store_true")
+    p_reactivate.add_argument("--reason", required=True)
+    p_reactivate.add_argument("--expected-category", required=True)
+    p_reactivate.add_argument(
+        "--phase",
+        choices=sorted(VALID_PHASES - {"done", "halted"}),
+        default="planning",
+    )
+    p_reactivate.set_defaults(func=cmd_reactivate)
+
+    p_refresh = sub.add_parser("refresh-pid", help="R1: resume 後に state.pid を現 agent CLI PID に更新 + orphan halt を解除")
+    p_refresh.add_argument("--force", action="store_true", help="既存 pid が alive な agent CLI プロセスでも強制継承")
+    p_refresh.add_argument("--no-reactivate", action="store_true", help="orphan halt の解除を行わない (純粋に pid だけ更新)")
+    p_refresh.set_defaults(func=cmd_refresh_pid)
+
+    p_resume = sub.add_parser("resume", help="#123: 復帰処理を統合実行 (refresh-pid → cleanup-empty → cleanup-stale → next)")
+    p_resume.add_argument("--force", action="store_true", help="refresh-pid に渡す: 既存 alive agent pid でも強制継承")
+    p_resume.add_argument("--dry-run", action="store_true", dest="dry_run", help="cleanup-stale を dry-run にする (halt しない)。refresh-pid/next は通常実行")
+    p_resume.add_argument("--json", action="store_true", help="出力は常に JSON (互換用の no-op フラグ)")
+    p_resume.set_defaults(func=cmd_resume)
+
+    p_uproot = sub.add_parser("update-project-root", help="P2-1: project_root を正しいパスに更新 (ディレクトリ移動・rename 後の rescue 用)")
+    p_uproot.add_argument("--path", required=True, help="新しい project_root パス")
+    p_uproot.set_defaults(func=cmd_update_project_root)
+
+    p_archive = sub.add_parser(
+        "archive-worktree",
+        help="#212: 完了した worktree の state/evidence を main checkout 側へ整合性付きで保存",
+    )
+    p_archive.add_argument(
+        "--destination-root",
+        required=True,
+        dest="destination_root",
+        help="保存先の project root (通常は main checkout)",
+    )
+    p_archive.add_argument("--dry-run", action="store_true", help="検証のみ行い、bundle を作成しない")
+    p_archive.add_argument("--json", action="store_true", help="結果を JSON 形式で出力")
+    p_archive.set_defaults(func=cmd_archive_worktree)
+
+    p_clean = sub.add_parser("cleanup-empty", help="空 .mission-state/ ディレクトリを rmdir")
+    p_clean.add_argument("path", help="プロジェクトルートパス")
+    p_clean.set_defaults(func=cmd_cleanup_empty)
+
+    p_clean2 = sub.add_parser("cleanup-stale", help="C-4: dead-PID の active state.json を検出 (--execute で halt 実行)")
+    p_clean2.add_argument("--execute", action="store_true", help="実際に halt 実行 (デフォルトは dry-run)")
+    p_clean2.add_argument("--root", default=None, help="探索ルート (デフォルト: MISSION_SEARCH_ROOTS、未設定なら cwd)")
+    p_clean2.set_defaults(func=cmd_cleanup_stale)
+
+    p_repair_aggregate = sub.add_parser(
+        "repair-aggregate-index",
+        help="authoritative session state から aggregate index を検査・明示修復",
+    )
+    p_repair_aggregate.add_argument(
+        "--execute",
+        action="store_true",
+        help="検査だけでなく aggregate index の再構築と pending intent 回収を実行",
+    )
+    p_repair_aggregate.set_defaults(func=cmd_repair_aggregate_index)
+
+    p_list = sub.add_parser("list", help="全プロジェクトの active state.json 一覧")
+    p_list.set_defaults(func=cmd_list)
+
+    p_lane = sub.add_parser(
+        "lane-report",
+        help="read-only lane duration report across current search roots",
+    )
+    p_lane.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_lane.add_argument("--slo-minutes", type=_lane_positive_minutes, default=None, dest="slo_minutes")
+    p_lane.set_defaults(func=cmd_lane_report)
+
+    p_halt2 = sub.add_parser("halt", help="state.json を halt させる (--all で全プロジェクト)")
+    p_halt2.add_argument("--reason", required=True)
+    p_halt2.add_argument("--category", default=None,
+                         help=f"#190: halt の種別。有効値: {sorted(HALT_CATEGORIES)}。省略/不正値は 'other' + WARN")
+    p_halt2.add_argument("--all", action="store_true")
+    p_halt2.add_argument("--root", default=None, help="--all と併用時のみ有効。指定 root 配下のみ halt (省略時は MISSION_SEARCH_ROOTS、未設定なら cwd)")
+    p_halt2.set_defaults(func=cmd_halt)
+
+
+def _add_reporting_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_stats = sub.add_parser("stats", help="全プロジェクトの /mission セッションを横断集計 (read-only)")
+    p_stats.add_argument("--root", action="append", default=None, help="スキャン対象ルート。複数回指定可 (デフォルト: MISSION_SEARCH_ROOTS、未設定なら cwd)")
+    p_stats.add_argument("--since", default=None, help="期間下限 (YYYY-MM-DD, updated_at で比較)")
+    p_stats.add_argument("--until", default=None, help="期間上限 (YYYY-MM-DD, updated_at で比較)")
+    p_stats.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_stats.add_argument("--snapshot", default=None, help="audit --snapshot-out で明示作成したsnapshotを利用 (invalid時はfail closed)")
+    p_stats.set_defaults(func=cmd_stats)
+
+    p_learning = sub.add_parser("learning", help="failure-ledger learning brief and related read-only helpers")
+    learning_sub = p_learning.add_subparsers(dest="learning_cmd", required=True)
+    p_brief = learning_sub.add_parser("brief", help="failure_ledger を横断集計して learning brief を出力")
+    p_brief.add_argument("--root", action="append", default=None,
+                         help="スキャン対象ルート。複数回指定可 (デフォルト: MISSION_SEARCH_ROOTS、未設定なら cwd)")
+    p_brief.add_argument("--weak-phase", default=None, choices=sorted(WEAK_PHASES),
+                         help="学習対象の weak_phase で絞り込む")
+    p_brief.add_argument("--limit", type=int, default=10, help="出力する rule の上限 (default: 10)")
+    p_brief.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_brief.set_defaults(func=cmd_learning_brief)
+
+    p_advance = sub.add_parser(
+        "advance",
+        help="#237: phase 遷移と activity 切替を 1 lock で atomic に行う (phase だけ進んで activity が空の state を作らない)",
+    )
+    p_advance.add_argument("--phase", required=True,
+                           help=f"遷移先 phase。terminal (done/halted) は mark-passes / mark-halt 専用。有効値: {sorted(VALID_PHASES - {'done', 'halted'})}")
+    p_advance.add_argument("--activity", default=None,
+                           help="任意の <kind>:<reason> override。省略時は遷移先 phase の既定値")
+    p_advance.add_argument("--detail", default=None,
+                           help="任意の補足。control 文字除去・160文字へ正規化")
+    p_advance.add_argument("--at", default=None,
+                           help="ISO timestamp。省略時は現在 UTC")
+    p_advance.add_argument(
+        "--artifact-applicability",
+        choices=["producing", "not-applicable"],
+        default=None,
+        help="executing で確定した portable artifact contract",
+    )
+    p_advance.add_argument(
+        "--artifact-path",
+        default=None,
+        help="producing 時の repository-relative artifact path",
+    )
+    p_advance.add_argument(
+        "--producer-run-id",
+        default=None,
+        help="artifact bytes を生成した executor run identifier",
+    )
+    p_advance.add_argument("--json", action="store_true", help="失敗時に機械可読 outcome を出力")
+    _add_command_lineage_arguments(p_advance)
+    p_advance.set_defaults(func=cmd_advance, command_outcome_tracking=True)
+
+
+def _add_activity_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_activity = sub.add_parser("activity", help="#211: phase 内の active/wait/idle segment を記録")
+    activity_sub = p_activity.add_subparsers(dest="activity_cmd", required=True)
+    p_activity_start = activity_sub.add_parser("start", help="activity segment を開始し、開いている前 segment を閉じる")
+    p_activity_start.add_argument("--kind", required=True, choices=sorted(ACTIVITY_KINDS))
+    p_activity_start.add_argument("--reason", required=True,
+                                  help="kind ごとの明示 reason enum")
+    p_activity_start.add_argument("--detail", default=None,
+                                  help="任意の補足。control 文字除去・160文字へ正規化")
+    p_activity_start.add_argument("--at", default=None,
+                                  help="ISO timestamp。省略時は現在 UTC")
+    p_activity_start.add_argument("--resume", action="store_true",
+                                  help="crash/resume: 旧 open は最終観測 updated_at までだけ確定")
+    p_activity_start.set_defaults(func=cmd_activity_start)
+    p_activity_end = activity_sub.add_parser("end", help="現在の activity segment を閉じる")
+    p_activity_end.add_argument("--at", default=None,
+                                help="ISO timestamp。省略時は現在 UTC")
+    p_activity_end.set_defaults(func=cmd_activity_end)
+
+    p_progress = sub.add_parser("progress", help="long-running mission の progress checkpoint を記録/取得")
+    progress_sub = p_progress.add_subparsers(dest="progress_cmd", required=True)
+    p_progress_update = progress_sub.add_parser("update", help="progress checkpoint を state と archive に記録")
+    p_progress_update.add_argument("--kind", default="batch", choices=["batch"], help="progress 種別")
+    p_progress_update.add_argument("--total", type=int, required=True)
+    p_progress_update.add_argument("--completed", type=int, required=True)
+    p_progress_update.add_argument("--batch-size", type=int, default=None, dest="batch_size")
+    p_progress_update.add_argument("--last-unit", default=None, dest="last_unit")
+    p_progress_update.add_argument("--artifact", default=None)
+    p_progress_update.add_argument("--iteration", type=int, default=None)
+    p_progress_update.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_progress_update.set_defaults(func=cmd_progress_update)
+    p_progress_get = progress_sub.add_parser("get", help="progress checkpoint を表示")
+    p_progress_get.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_progress_get.set_defaults(func=cmd_progress_get)
+    p_progress_clear = progress_sub.add_parser("clear", help="progress checkpoint を削除")
+    p_progress_clear.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_progress_clear.set_defaults(func=cmd_progress_clear)
+
+
+def _add_artifact_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_artifact = sub.add_parser("artifact", help="local mission artifact を作成・更新・export/publish 証跡化")
+    artifact_sub = p_artifact.add_subparsers(dest="artifact_cmd", required=True)
+    p_artifact_init = artifact_sub.add_parser("init", help="canonical local artifact を初期化")
+    p_artifact_init.add_argument("--format", default="markdown", choices=["markdown"])
+    p_artifact_init.add_argument("--title", default=None)
+    p_artifact_init.add_argument("--required-for-pass", action="store_true",
+                                 help="mark-passes 前に rendered artifact を必須にする")
+    p_artifact_init.add_argument("--redaction-status", default="unchecked", choices=sorted(ARTIFACT_REDACTION_STATUSES))
+    p_artifact_init.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_artifact_init.set_defaults(func=cmd_artifact_init)
+
+    p_artifact_append = artifact_sub.add_parser("append", help="artifact section に evidence block を追記")
+    p_artifact_append.add_argument("--section", required=True)
+    p_artifact_append.add_argument("--text", default=None)
+    p_artifact_append.add_argument("--file", default=None)
+    p_artifact_append.add_argument("--label", default=None)
+    p_artifact_append.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_artifact_append.set_defaults(func=cmd_artifact_append)
+
+    p_artifact_render = artifact_sub.add_parser("render", help="state と blocks から canonical Markdown を再生成")
+    p_artifact_render.add_argument("--redaction-status", default=None, choices=sorted(ARTIFACT_REDACTION_STATUSES))
+    p_artifact_render.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_artifact_render.set_defaults(func=cmd_artifact_render)
+
+    p_artifact_export = artifact_sub.add_parser("export", help="reviewed artifact を project 内の durable path に export")
+    p_artifact_export.add_argument("--to", required=True)
+    p_artifact_export.add_argument("--redaction-status", required=True, choices=sorted(ARTIFACT_REDACTION_STATUSES - {"unchecked"}))
+    p_artifact_export.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_artifact_export.set_defaults(func=cmd_artifact_export)
+
+    p_artifact_publish = artifact_sub.add_parser("publish", help="remote/local publish intent と approval evidence を記録")
+    p_artifact_publish.add_argument("--provider", required=True, choices=sorted(ARTIFACT_PUBLISH_PROVIDERS))
+    p_artifact_publish.add_argument("--destination", default=None)
+    p_artifact_publish.add_argument("--require-confirm", action="store_true")
+    p_artifact_publish.add_argument("--approval-text", default=None)
+    p_artifact_publish.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_artifact_publish.set_defaults(func=cmd_artifact_publish)
+
+
+def _add_specialists_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_spec = sub.add_parser("specialists", help="specialist skill の discovery / recommend / state 記録")
+    spec_sub = p_spec.add_subparsers(dest="specialists_cmd", required=True)
+    p_rec = spec_sub.add_parser("recommend", help="task_profile から specialist 候補を dry-run 推薦")
+    p_rec.add_argument("--task", required=True, help="分類対象のミッション文またはタスク説明")
+    p_rec.add_argument("--files", default=None, help="関連ファイルのカンマ区切り project-root 相対パス")
+    p_rec.add_argument("--registry", action="append", default=None,
+                       help="project/user specialist registry (JSON または限定 YAML)。複数指定可")
+    p_rec.add_argument("--skills-dir", default=None, help="追加 skill root のカンマ区切り")
+    p_rec.add_argument("--no-default-skill-roots", action="store_true",
+                       help="~/.codex/skills、~/.claude/skills、user registry を discovery しない (テスト/隔離用)")
+    p_rec.add_argument("--installed-skills", default=None, help="テスト/手動指定用の installed skill 名カンマ区切り")
+    p_rec.add_argument("--first-use", default=None, help="初回確認扱いにする skill 名カンマ区切り")
+    p_rec.add_argument("--consent-file", default=None,
+                       help="first-use provider consent allowlist JSON (default: ~/.config/mission/provider-consent.json)")
+    p_rec.add_argument("--complexity", default=None, choices=["Simple", "Standard", "Complex", "Critical", "Unknown"],
+                       help="auto_use.min_complexity 判定用の mission complexity")
+    p_rec.add_argument("--record-state", action="store_true", help="現在の mission state に推薦結果を記録")
+    p_rec.add_argument("--user-specified", default=None, dest="user_specified",
+                       help="Issue #100: ミッション本文でユーザーが名指ししたスキル (comma 区切り)。"
+                            "実質 confirmed-user として扱い、high-risk でも ask-user へ倒さず selected に記録する "
+                            "(first-use consent が必要な provider は名指しでも確認を維持)")
+    p_rec.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_rec.set_defaults(func=cmd_specialists)
+
+    p_consent = spec_sub.add_parser("consent", help="command/skill provider の first-use consent を記録")
+    p_consent.add_argument("--provider", required=True)
+    p_consent.add_argument("--consent-file", default=None,
+                           help="consent allowlist JSON (default: ~/.config/mission/provider-consent.json)")
+    p_consent.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_consent.set_defaults(func=cmd_specialists_consent)
+
+    p_decline = spec_sub.add_parser("decline", help="現在の specialist 候補を明示的に辞退")
+    p_decline.add_argument("--selection-id", required=True,
+                           help="現在の checkpoint と一致する selection_id")
+    p_decline.add_argument("--reason", required=True, help="今回利用しない理由")
+    p_decline.set_defaults(func=cmd_specialists_decline)
+
+    p_account = spec_sub.add_parser("accounting", help="available candidate の未処理 decision trail を確認")
+    p_account.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_account.set_defaults(func=cmd_specialists_accounting)
+
+    p_summary = spec_sub.add_parser("summary", help="final report 用の specialist usage summary を出力")
+    p_summary.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_summary.set_defaults(func=cmd_specialists_summary)
+
+    p_log = spec_sub.add_parser("log-invocation", help="specialist skill の実呼び出し/inline/skip 証跡を記録")
+    p_log.add_argument("--invocation-id", default=None,
+                       help="既存 selected/started invocation を同一 ID のまま terminal へ遷移")
+    p_log.add_argument("--iteration", type=int, required=True)
+    p_log.add_argument("--phase", required=True,
+                       choices=["planning", "execution", "review", "scoring", "critic"])
+    p_log.add_argument("--role", required=True)
+    p_log.add_argument("--skill", required=True)
+    p_log.add_argument("--mode", required=True, choices=sorted(SPECIALIST_INVOCATION_MODES))
+    p_log.add_argument("--status", required=True, choices=sorted(SPECIALIST_INVOCATION_STATUSES))
+    p_log.add_argument("--started-at", default=None, dest="started_at")
+    p_log.add_argument("--completed-at", default=None, dest="completed_at")
+    p_log.add_argument("--reason", default=None, help="skip/unavailable/failed 等の判断理由")
+    p_log.add_argument("--notes", default=None)
+    p_log.add_argument("--selection-source", default=None, choices=sorted(SPECIALIST_SELECTION_SOURCES),
+                       help="明示選択された specialist の selection metadata も同時に記録する")
+    p_log.add_argument("--bounded-purpose", default=None,
+                       help="broad/bounded orchestrator specialist を限定用途で使った目的")
+    p_log.add_argument("--evidence-output", default=None,
+                       help="specialist 出力 Markdown。指定時 archive/iter-N-<mission8>-specialist-<skill>.md に保存")
+    p_log.add_argument("--registry", action="append", default=None,
+                       help="external explicit registry の application 時再供給。複数指定可")
+    p_log.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_log.set_defaults(func=cmd_log_specialist_invocation, command_outcome_tracking=True)
+
+    def add_provider_invoke_arguments(command_parser):
+        command_parser.add_argument("--provider", required=True, help="state 内の role / skill / command")
+        command_parser.add_argument("--iteration", type=int, required=True)
+        command_parser.add_argument("--phase", required=True,
+                                    choices=["planning", "execution", "review", "scoring", "critic"])
+        command_parser.add_argument("--input-file", default=None, help="provider stdin packet に含める入力ファイル")
+        command_parser.add_argument("--preflight-id", default=None,
+                                    help="prepare-invocationで生成したper-invocation preflight ID")
+        command_parser.add_argument("--execution-isolator", default=None,
+                                    help="prepare時と一致するhost-only strict isolator ID")
+        command_parser.add_argument("--registry", action="append", default=None,
+                                    help="external explicit registry の application 時再供給。複数指定可")
+        command_parser.add_argument("--selection-source", default=None, choices=sorted(SPECIALIST_SELECTION_SOURCES),
+                                    help="ask-user 後に command provider を適用する場合の confirmed selection metadata")
+        command_parser.add_argument("--timeout", type=int, default=None,
+                                    help="command timeout seconds (default: provider timeout, then 120)")
+        command_parser.add_argument("--json", action="store_true", help="JSON 形式で出力")
+        _add_command_lineage_arguments(command_parser)
+        command_parser.set_defaults(func=cmd_invoke_command_provider, command_outcome_tracking=True)
+
+    p_cmd = spec_sub.add_parser("invoke-command", help="legacy command provider entrypoint; prepared flowはinvoke-preparedを使う")
+    add_provider_invoke_arguments(p_cmd)
+    p_invoke_prepared = spec_sub.add_parser(
+        "invoke-prepared", help="verified per-invocation preflightをsingle-use receiptで実行する"
+    )
+    add_provider_invoke_arguments(p_invoke_prepared)
+
+    p_prepare = spec_sub.add_parser(
+        "prepare-invocation", help="command provider のexact outbound packetを副作用なしでprepareする"
+    )
+    p_prepare.add_argument("--provider", required=True)
+    p_prepare.add_argument("--iteration", type=int, required=True)
+    p_prepare.add_argument("--phase", required=True,
+                           choices=["planning", "execution", "review", "scoring", "critic"])
+    p_prepare.add_argument("--input-file", required=True)
+    p_prepare.add_argument("--registry", action="append", default=None)
+    p_prepare.add_argument("--selection-source", default=None, choices=sorted(SPECIALIST_SELECTION_SOURCES))
+    p_prepare.add_argument("--execution-isolator", default=None,
+                           help="host-only execution-isolator/1 ID")
+    p_prepare.add_argument("--json", action="store_true")
+    p_prepare.set_defaults(func=cmd_prepare_provider_invocation, command_outcome_tracking=True)
+
+    p_plan_import = spec_sub.add_parser(
+        "plan-import", help="strict provider plan resultを検証してinert canonical candidateへ取り込む"
+    )
+    p_plan_import.add_argument("--input", required=True, help="providerが返したmission-provider-result/1 regular file")
+    p_plan_import.add_argument("--invocation-id", required=True)
+    p_plan_import.add_argument("--registry", action="append", default=None)
+    p_plan_import.add_argument("--json", action="store_true")
+    p_plan_import.set_defaults(func=cmd_plan_import, command_outcome_tracking=True)
+
+    p_verify_approval = spec_sub.add_parser(
+        "verify-approval", help="host-trusted verifierのevidenceからper-invocation receiptを生成する"
+    )
+    p_verify_approval.add_argument("--preflight-id", required=True)
+    p_verify_approval.add_argument("--evidence-ref", required=True)
+    p_verify_approval.add_argument("--approval-verifier", required=True)
+    p_verify_approval.add_argument("--json", action="store_true")
+    p_verify_approval.set_defaults(func=cmd_verify_provider_approval, command_outcome_tracking=True)
+
+    p_reconcile = spec_sub.add_parser(
+        "reconcile-invocation",
+        help="orphaned running provider invocationをfenced evidenceでterminal化",
+    )
+    p_reconcile.add_argument("--invocation-id", required=True)
+    p_reconcile.add_argument(
+        "--status", required=True, choices=["completed", "failed", "abandoned-unknown"]
+    )
+    p_reconcile.add_argument("--evidence", required=True)
+    p_reconcile.add_argument("--expected-fencing-epoch", required=True, type=int)
+    p_reconcile.add_argument("--json", action="store_true")
+    p_reconcile.set_defaults(func=cmd_reconcile_provider_invocation, command_outcome_tracking=True)
+
+
+def _add_planning_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_planning = sub.add_parser("planning", help="policy v1 planning lifecycle transitions")
+    planning_sub = p_planning.add_subparsers(dest="planning_cmd", required=True)
+    p_adopt_core = planning_sub.add_parser("adopt-core", help="validate and adopt one core planning document")
+    p_adopt_core.add_argument("--input", required=True, help="canonical mission-plan/1 document regular file")
+    p_adopt_core.add_argument("--source-id", default=None, help="bounded source generation identifier")
+    p_adopt_core.add_argument("--json", action="store_true")
+    p_adopt_core.set_defaults(func=cmd_planning_adopt_core, command_outcome_tracking=True)
+    p_promote = planning_sub.add_parser("promote-provider-plan", help="promote one validated primary provider candidate")
+    p_promote.add_argument("--invocation-id", required=True)
+    p_promote.set_defaults(func=cmd_planning_promote_provider_plan, command_outcome_tracking=True)
+    p_reselect = planning_sub.add_parser("reselect", help="explicitly migrate active legacy planning state without raw copy")
+    p_reselect.set_defaults(func=cmd_planning_reselect, command_outcome_tracking=True)
+
+
+def _add_executor_handoff_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_handoff = sub.add_parser("executor-handoff", help="consume a prepared canonical executor handoff")
+    handoff_sub = p_handoff.add_subparsers(dest="executor_handoff_cmd", required=True)
+    p_begin = handoff_sub.add_parser("begin", help="atomically begin one prepared handoff")
+    p_begin.set_defaults(func=cmd_executor_handoff_begin, command_outcome_tracking=True)
+    p_verify_step = handoff_sub.add_parser("verify-step", help="revalidate plan before a step")
+    p_verify_step.add_argument("--step-id", required=True)
+    p_verify_step.set_defaults(func=cmd_executor_handoff_verify, command_outcome_tracking=True)
+    p_record_step = handoff_sub.add_parser("record-step", help="record one verified completed step")
+    p_record_step.add_argument("--step-id", required=True)
+    p_record_step.add_argument("--result", required=True, choices=["ok", "partial", "failed"])
+    p_record_step.set_defaults(func=cmd_executor_handoff_record, command_outcome_tracking=True)
+    p_complete = handoff_sub.add_parser("complete", help="consume handoff after all canonical steps")
+    p_complete.set_defaults(func=cmd_executor_handoff_complete, command_outcome_tracking=True)
+    p_abort = handoff_sub.add_parser("abort", help="end an open handoff by operator decision")
+    # `--reason` is required: the discard cannot be undone, so it is not run
+    # without a record of why.
+    p_abort.add_argument("--reason", required=True, choices=EXECUTOR_HANDOFF_ABORT_REASONS)
+    # Wired as a binding rather than a fifth `cmd_executor_handoff_*` function.
+    # The thin-adapter guard requires any *new* adapter function to be free of
+    # violations (`docs/design/626-thin-adapter-guard.md` section 1), and a
+    # one-line delegation to a local helper is not: naming the helper is only
+    # allowed inside parser wiring, which is where this sits.
+    p_abort.set_defaults(
+        func=lambda args: _cmd_executor_handoff(args, "abort"),
+        command_outcome_tracking=True,
+    )
+
+
+def _add_evidence_handoff_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_handoff = sub.add_parser("handoff", help="local evidence handoff sidecar contract")
+    handoff_cli = p_handoff.add_subparsers(dest="handoff_cmd", required=True)
+    p_handoff_publish = handoff_cli.add_parser("publish", help="atomic write one evidence handoff envelope")
+    p_handoff_publish.add_argument("--topic", required=True)
+    p_handoff_publish.add_argument("--input", required=True, help="payload JSON regular file or '-' for stdin")
+    p_handoff_publish.add_argument("--producer-session", default=None)
+    p_handoff_publish.set_defaults(func=cmd_handoff_publish)
+    p_handoff_await = handoff_cli.add_parser("await", help="block until one newer evidence handoff exists")
+    p_handoff_await.add_argument("--topic", required=True)
+    p_handoff_await.add_argument("--after-seq", type=int, default=0)
+    p_handoff_await.add_argument("--timeout-sec", type=int, default=600)
+    p_handoff_await.set_defaults(func=cmd_handoff_await)
+    p_handoff_verify = handoff_cli.add_parser("verify", help="recompute and compare one handoff digest")
+    p_handoff_verify.add_argument("--path", required=True)
+    p_handoff_verify.add_argument("--expect-digest", default=None)
+    p_handoff_verify.set_defaults(func=cmd_handoff_verify)
+
+
+def _add_archive_resolution_parsers(subparsers) -> None:
+    sub = subparsers
+
+    p_resolve = sub.add_parser(
+        "resolve-archive",
+        help="#301: terminal halted record に監査可能な resolution metadata を追記する",
+    )
+    p_resolve.add_argument(
+        "--path", required=True,
+        help="対象 state ファイルのパス (.mission-state/ 以下の相対パスまたは絶対パス)",
+    )
+    p_resolve.add_argument(
+        "--status", required=True,
+        choices=sorted(_VALID_RESOLUTION_STATUSES),
+        help="解消区分: resolved / superseded / closed",
+    )
+    p_resolve.add_argument("--owner-issue", default=None, dest="owner_issue",
+                           help="起票元 Issue 参照 (例: 301)")
+    p_resolve.add_argument("--evidence-url", default=None, dest="evidence_url",
+                           help="解消証跡 URL (PR / commit / コメント等)")
+    p_resolve.add_argument("--note", default=None,
+                           help="自由記述の解消メモ")
+    p_resolve.add_argument(
+        "--canonical-path",
+        default=None,
+        help="superseded record に対応する materialized canonical state path",
+    )
+    p_resolve.add_argument(
+        "--retention-generations",
+        type=int,
+        default=3,
+        help="generation manifest の materialized retention policy (物理削除は行わない)",
+    )
+    p_resolve.add_argument("--json", action="store_true", help="JSON 形式で出力")
+    p_resolve.add_argument(
+        "--frozen-snapshot",
+        action="store_true",
+        dest="frozen_snapshot",
+        default=False,
+        help=(
+            "#318: archive/ 配下の frozen snapshot（loop_active=true のまま保存された mid-flight record）に "
+            "対して resolution を付与できる opt-in フラグ。"
+            "対応する live session（sessions/<session_id>.json）が存在しないか terminal であることを検証したうえで許可する。"
+            "live session が loop_active=true の場合は拒否（保守側）。"
+            "sessions/ 配下への適用は引き続き拒否。"
+        ),
+    )
+    p_resolve.set_defaults(func=cmd_resolve_archive)
+
+
+def _build_parser():
+    parser = argparse.ArgumentParser(description="/mission skill state manager")
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+    _add_initialization_parsers(subparsers)
+    _add_queue_parsers(subparsers)
+    _add_hook_parsers(subparsers)
+    _add_state_access_parsers(subparsers)
+    _add_review_parsers(subparsers)
+    _add_lifecycle_parsers(subparsers)
+    _add_reporting_parsers(subparsers)
+    _add_activity_parsers(subparsers)
+    _add_artifact_parsers(subparsers)
+    _add_specialists_parsers(subparsers)
+    _add_planning_parsers(subparsers)
+    _add_executor_handoff_parsers(subparsers)
+    _add_evidence_handoff_parsers(subparsers)
+    _add_archive_resolution_parsers(subparsers)
+    return parser
+
+
+def main():
+    from budgeted_exec import parse_cli
+    args = parse_cli(_build_parser())
+    try:
+        try:
+            args.func(args)
+        except UnsupportedSchemaVersionError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            raise SystemExit(2)
+        except FencedCommitError as error:
+            _reject_fenced_lease_for_cli(error)
+    except SystemExit as error:
+        code = error.code if isinstance(error.code, int) else 1
+        if (
+            code
+            and getattr(args, "command_outcome_tracking", False)
+            and not getattr(args, "command_outcome_emitted", False)
+        ):
+            try:
+                kind = getattr(error, "outcome_kind", "invalid-input")
+                if kind not in COMMAND_OUTCOME_KINDS:
+                    kind = "invalid-input"
+                outcome = _command_outcome(
+                    args, str(getattr(args, "cmd", "unknown")),
+                    kind,
+                )
+                guidance = getattr(error, "guidance", None)
+                if guidance:
+                    outcome["guidance"] = True
+                _record_command_outcome_only(Path.cwd(), outcome)
+                if getattr(args, "json", False):
+                    envelope = {"ok": False, "outcome_kind": outcome["outcome_kind"], "outcome": outcome}
+                    if guidance:
+                        envelope["guidance"] = guidance
+                    provider_reason = getattr(error, "provider_reason_code", None)
+                    if provider_reason:
+                        envelope["error"] = {
+                            "code": "provider-ineligible",
+                            "reason_code": provider_reason,
+                        }
+                    print(json.dumps(envelope, ensure_ascii=False))
+            except Exception:
+                pass
+        raise
+    except LeaseRejectedError as error:
+        outcome = _command_outcome(args, str(getattr(args, "cmd", "unknown")), "expected-gate")
+        guidance = getattr(error, "guidance", None)
+        if guidance:
+            outcome["guidance"] = True
+        _record_command_outcome_only(Path.cwd(), outcome)
+        if getattr(args, "json", False):
+            envelope = {"ok": False, "outcome_kind": "expected-gate", "outcome": outcome}
+            if guidance:
+                envelope["guidance"] = guidance
+            print(json.dumps(envelope, ensure_ascii=False))
+        raise SystemExit(2)
+    except CommandOutcomeInputError:
+        print('{"ok": false, "outcome_kind": "invalid-input"}')
+        raise SystemExit(2)
+    except (FreshReviewError, BudgetError, CapacityWriteError) as error:
+        print(f"ERROR: {error.code}", file=sys.stderr)
+        sys.exit(2)
+    except SpecialistPublicContractError as error:
+        print(json.dumps({
+            "ok": False,
+            "reason_code": "unsafe-legacy-specialist-record",
+            "field_path": error.field_path,
+        }, ensure_ascii=False))
+        raise SystemExit(2)
+    except SpecialistEvidenceInputError as error:
+        print(json.dumps({
+            "ok": False,
+            "reason_code": error.reason_code,
+            "field_path": error.field_path,
+        }, ensure_ascii=False))
+        raise SystemExit(2)
+    except PublishedRollbackRecoveryError as error:
+        envelope = {
+            "ok": False,
+            "outcome_kind": "internal-error",
+            "recovery_ref": error.recovery_ref,
+        }
+        try:
+            outcome = _command_outcome(
+                args, str(getattr(args, "cmd", "unknown")), "internal-error",
+            )
+            _record_command_outcome_only(Path.cwd(), outcome)
+            envelope["outcome"] = outcome
+        except Exception:
+            pass
+        print(json.dumps(envelope, ensure_ascii=False))
+        raise SystemExit(1)
+    except Exception:
+        # Never serialize exception text or a traceback: CLI input and provider
+        # output may be sensitive.  The typed outcome is the machine contract.
+        try:
+            outcome = _command_outcome(args, str(getattr(args, "cmd", "unknown")), "internal-error")
+            _record_command_outcome_only(Path.cwd(), outcome)
+            print(json.dumps({"ok": False, "outcome_kind": "internal-error", "outcome": outcome}, ensure_ascii=False))
+        except Exception:
+            print(json.dumps({"ok": False, "outcome_kind": "internal-error"}, ensure_ascii=False))
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

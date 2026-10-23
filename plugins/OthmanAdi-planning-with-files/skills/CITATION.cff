@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "planning-with-files"
+abstract: "Persistent file-based planning for AI coding agents, installable across 60+ agents via the Agent Skills standard. Implements Manus-style markdown working memory (task_plan.md, findings.md, progress.md) with per-turn plan re-injection, session recovery after /clear and compaction, SHA-256 plan attestation, and an opt-in completion gate for long-running agent tasks."
+authors:
+  - family-names: Adi
+    given-names: Ahmad Othman Ammar
+    alias: OthmanAdi
+version: "3.23.0"
+date-released: "2026-10-01"
+license: MIT
+url: "https://github.com/OthmanAdi/planning-with-files"
+repository-code: "https://github.com/OthmanAdi/planning-with-files"
+keywords:
+  - claude-code
+  - agent-skill
+  - planning
+  - task-management
+  - manus-style
+  - autonomous-agents
+  - markdown
+  - ai-agents
+  - context-engineering
+  - long-running-agents
+  - session-recovery
+  - context-rot

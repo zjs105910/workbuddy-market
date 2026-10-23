@@ -1,0 +1,6 @@
+[
+  {"label": "sonnet-5.5-high", "cli": "claude", "model": "claude-sonnet-5-5", "effort": "high"},
+  {"label": "opus-5.5-medium", "cli": "claude", "model": "claude-opus-5-5", "effort": "medium"},
+  {"label": "luna-6-high", "cli": "codex", "model": "gpt-6-luna", "effort": "high"},
+  {"label": "sol-6.1-medium", "cli": "codex", "model": "gpt-6.1-sol", "effort": "medium"}
+]
