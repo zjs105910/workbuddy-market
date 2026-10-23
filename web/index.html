@@ -3,14 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f6f9">
 <!-- 本机 API 的一次性口令：由服务端在返回本页时注入。
      第三方网页即使能访问 127.0.0.1:8777，也读不到这个值（跨源读响应被浏览器挡住），
      所以拿它当 CSRF token 用。 -->
 <meta name="market-token" content="__MARKET_TOKEN__">
 <title>本机插件市场 · WorkBuddy</title>
+<meta name="description" content="WorkBuddy 本机插件市场：把 ~/.workbuddy/skills 的技能打包注册进插件面板，本地优先，零依赖。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b6fe0'/%3E%3Ctext x='16' y='23' font-size='17' text-anchor='middle' fill='%23fff'%3E%E2%97%88%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<a class="skip" href="#content">跳到插件列表</a>
 <div class="wrap">
 
   <header class="top">
@@ -36,7 +40,7 @@
     </details>
   </header>
 
-  <div id="hint"></div>
+  <div id="hint" role="status" aria-live="polite"></div>
 
   <nav class="tabs" id="tabs" role="tablist" aria-label="市场主入口">
     <button class="tab on" id="tab-local" data-tab="local" role="tab" aria-selected="true">本机技能</button>
@@ -63,14 +67,14 @@
   </footer>
 </div>
 
-<div class="drawer" id="drawer">
-  <h4>事件流 <span style="flex:1"></span><button class="ghost tiny" id="btnLogClose">关闭</button></h4>
+<div class="drawer" id="drawer" role="dialog" aria-label="事件流">
+  <h2>事件流 <span style="flex:1"></span><button class="ghost tiny" id="btnLogClose">关闭</button></h2>
   <div class="list" id="logList"></div>
 </div>
 
-<div class="veil" id="veil">
+<div class="veil" id="veil" role="dialog" aria-modal="true" aria-labelledby="jobTitle">
   <div class="modal">
-    <h4><span id="jobTitle">执行中</span></h4>
+    <h2><span id="jobTitle">执行中</span></h2>
     <div class="bar"><i id="jobBar"></i></div>
     <div class="joblabel" id="jobLabel">准备中…</div>
     <pre class="out" id="jobOut"></pre>
@@ -80,7 +84,7 @@
 
 <div class="veil" id="cfm" role="dialog" aria-modal="true" aria-labelledby="cfmTitle">
   <div class="modal">
-    <h4 id="cfmTitle">确认</h4>
+    <h2 id="cfmTitle">确认</h2>
     <div class="body" id="cfmBody"></div>
     <div class="modal-foot">
       <button id="cfmNo">取消</button>
@@ -89,7 +93,7 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" aria-live="polite"></div>
 
 <!-- v2.22：前端拆为 ES Modules（零构建零依赖不变）。
      module 脚本默认 defer，时序与旧版 body 末尾脚本一致。 -->

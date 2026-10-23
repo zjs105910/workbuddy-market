@@ -4,6 +4,35 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.36.2 — 2026-10-23（打磨：前端可访问性 + 对比度 AA + 渲染性能）
+
+用 OpenDesign 设计技能（redesign-skill / web-design-guidelines /
+impeccable-design-polish）对 `web/` 三件套做三轮打磨，零新依赖、
+零构建、纯静态改动：
+
+- **可访问性**：`index.html` 补 `theme-color` / meta description /
+  data-URI favicon / 跳转链接（`.skip` 键盘聚焦现身）；`#hint`、
+  `#toast` 补 `role="status" aria-live="polite"`；job 弹窗与事件流
+  抽屉补 `role="dialog"` / `aria-modal` / `aria-labelledby`；静态
+  `h4` → `h2` 修正标题层级；`<details>` 摘要行补 focus-visible 焦点环。
+- **对比度 WCAG AA**：`--muted` `#6b7891`→`#5b6880`、`--faint`
+  `#95a1b6`→`#68758d`（白底 ≥4.5:1），meta/关键词/页脚等小号说明
+  文字不再低于门槛；层级关系保持 muted 深于 faint。
+- **渲染性能**：卡片加 `content-visibility:auto` +
+  `contain-intrinsic-size`（精选市场百卡级，视口外跳过渲染）；
+  全部 `transition` 缩写展开为显式属性清单（禁 `transition:all`）；
+  弹窗/抽屉滚动区 `overscroll-behavior:contain` 防滚动穿透。
+- **细节质感**：主按钮与 tab 选中态补 inset 高光 + 投影（与 logo
+  同质感）；搜索图标改垂直居中定位（不随字号漂移）；滚动容器
+  细滚动条（`scrollbar-width` / `scrollbar-color` + webkit thumb）；
+  `accent-color` 跟随主题色；`:active` 按压位移、`touch-action:
+  manipulation`、`text-wrap:balance/pretty`、`font-variant-numeric:
+  tabular-nums`、`prefers-reduced-motion` 全量关闭过渡。
+- **CI**：`release.yml` / `demo-video.yml` 的 Playwright 安装步补
+  `edge-tts`（demo 录音依赖，此前本机有、CI 缺）。
+- 验证：selftest **811** / pytest **118** / ui_smoke **49** 全绿
+  （ui_smoke 含 360/768/1280 三档无横向溢出与 JS 零报错）。
+
 ## 2.36.1 — 2026-10-22（修复：兼容模式 0 skill 仓库在本机技能页「隐形」）
 
 用户实测（录安装视频时发现）：探索 GitHub 以兼容模式（`--allow-non-skill`）
