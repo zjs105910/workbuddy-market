@@ -102,7 +102,7 @@ function ghPaint(){
     more.innerHTML = GH.items.length === 0 ? ""
       : full ? '<button class="tiny" data-ghmore="1"'+(GH.loadingMore?' disabled':'')+'>'+
                 (GH.loadingMore ? '正在加载…' : '加载更多（第 '+(GH.page+1)+' 页）')+'</button>'
-            : '<span style="color:var(--faint);font-size:12px">— 没有更多了 —</span>';
+            : '<span style="color:var(--faint);font-size:12px">没有更多了</span>';
   }
 }
 
@@ -370,7 +370,7 @@ export function renderCards(){
     h += local.length ? '<div class="grid">'+local.map(cardLocal).join("")+'</div>'
                       : (q ? '<div class="empty">没有符合条件的本机插件（换个关键词或分类试试）。</div>'
                       : '<div class="empty" style="text-align:left;line-height:2">'+
-                        '<b>未收录 ≠ 已删除</b> —— 你的 skills 都完好保存在 '+
+                        '<b>未收录 ≠ 已删除</b>，你的 skills 都完好保存在 '+
                         '~/.workbuddy/skills，一个都没动；市场默认收录 0 个是安全设计。'+
                         '<br>想收录两步走：① 编辑 market.config.json 的 '+
                         '<code>localPlugins</code> 把插件加进去 → ② 点右上角「重新打包」。</div>');

@@ -90,7 +90,7 @@ export function errorBox(title, err, retry){
   // 「已完成什么」：只有后端明确说了才展示 —— 宁可含糊不可撒谎。
   const doneLine = d.done
     ? '<div class="grp"><h5>已完成 / 未完成</h5><p class="desc" style="margin:0">'+esc(d.done)+'</p></div>'
-    : '<div class="grp"><h5>已完成 / 未完成</h5><p class="desc" style="margin:0">无法确认 —— 请以「本机技能」页的实际状态与事件流为准。</p></div>';
+    : '<div class="grp"><h5>已完成 / 未完成</h5><p class="desc" style="margin:0">无法确认，请以「本机技能」页的实际状态与事件流为准。</p></div>';
   const next = d.advice
     ? esc(d.advice)
     : '稍后重试；反复失败时点「查看详细日志」看事件流，或运行 <code>python launcher.py --status</code>。';

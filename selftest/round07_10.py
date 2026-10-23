@@ -440,7 +440,7 @@ def round9():
         "import market_core as c;"
         "assert (c.MARKET_ROOT / 'market.config.example.json').is_file(), c.MARKET_ROOT;"
         "assert '.workbuddy-market' in str(c.STATE_HOME), c.STATE_HOME;"
-        "assert c.MARKET_VERSION == '2.36.2', c.MARKET_VERSION;"
+        "assert c.MARKET_VERSION == '2.36.3', c.MARKET_VERSION;"
         "print('ok')"
     )
     p = subprocess.run([sys.executable, "-c", code_c], env=env_c, cwd=str(repo),
@@ -521,8 +521,8 @@ def round10():
 
     # --- 25B. 版本三处同号（core 兼容层 / 包内唯一来源 / selftest）
     ck("版本同号：version 模块 / core / selftest",
-       wm.version.MARKET_VERSION == "2.36.2"
-       and core.MARKET_VERSION == "2.36.2"
+       wm.version.MARKET_VERSION == "2.36.3"
+       and core.MARKET_VERSION == "2.36.3"
        and SELFTEST_VERSION == "2.36", core.MARKET_VERSION)
 
     # --- 25C. 功能冒烟：校验器

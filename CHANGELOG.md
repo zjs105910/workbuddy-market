@@ -4,6 +4,37 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.36.3 — 2026-10-23（设计感升级：taste-skill 六轮定向打磨）
+
+用 Leonxlnx/taste-skill（反 AI 味前端规范）按 Redesign 协议对 `web/`
+做定向演进与视觉升级，零新依赖、零构建；全部改动先真浏览器截图
+验收再进门禁：
+
+- **自动深色主题 + 手动切换**：全量 token 换值的 `html.dark` 深色
+  形态，跟随系统 `prefers-color-scheme`，右上角「主题」按钮可循环
+  自动 / 深色 / 浅色（localStorage 持久化，`<head>` 内联脚本按同口径
+  预置类防首屏闪烁，`theme-color` 地址栏联动）。品牌蓝拆填充 /
+  文字双 token，深色下填充 `#4f7fe8` 配 `#0d1117` 深字（≈4.6:1 AA），
+  文字态用 `#8fb0f8`；`color-scheme` 双端渲染原生控件。
+- **入口 tab 改分段控件**：panel-2 轨道 + 浮起白片选中态（主色字），
+  选中态从「实心蓝块」改为「浮起 + 主色字」。
+- **统计条去框呼吸**：中性数据脱框直排、数值 17px mono
+  （新增 `--mono` token）；状态类（服务正常 / 可更新）保留软胶囊。
+- **卡片减重与降噪**：边框调淡、阴影减半、hover 主色描边；meta
+  信息条去边框；关键词改「/」分隔纯文字；图标位 40px。
+- **圆角刻度成文**：35 处临时半径归一为 4 档 + 胶囊
+  （`--r-xs/sm/md/lg/pill` = 4/6/10/14/999），成文规则注释进 `:root`。
+- **色彩 token 收敛**：软底墨色收敛为 `--accent-ink` / `--warn-ink` /
+  `--accent-hover`；代码面板字面色收进 `--code-bg` / `--code-ink`。
+- **可见文案破折号清零**（7 处）：「— 没有更多了 —」装饰、详情弹窗
+  与提示条说明、诊断报告分隔符等改为逗号 / 冒号衔接。
+- **真 bug 修复**：`.hint` 原 `display:flex` 把纯文本混排拆成碎列
+  （文字被 gap 撕开）→ 改 block + `text-wrap:pretty`；`known_marketplaces
+  .json` 宽屏被 `overflow-wrap:anywhere` 拦腰截断 → anywhere 收进 460px 档。
+- **无障碍补强**：`.veil` 补 `prefers-reduced-transparency` 回退；
+  搜索框占位符显式上色（对比度可控）；行分隔线虚线统一转实线
+  （空态虚线框与「待初始化」虚线徽标保留语义）。
+
 ## 2.36.2 — 2026-10-23（打磨：前端可访问性 + 对比度 AA + 渲染性能）
 
 用 OpenDesign 设计技能（redesign-skill / web-design-guidelines /

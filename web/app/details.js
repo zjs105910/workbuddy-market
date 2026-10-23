@@ -51,7 +51,7 @@ export function regDetailHtml(e){
   if(rv && rv.reviewedAt) scope.push('时间 '+esc(rv.reviewedAt));
   h += '<div class="grp"><h5>② 是否可信？</h5><ul>'+
     '<li>信任分级：'+trustBadge(e.trust)+'</li>'+
-    '<li>审核范围：'+(scope.length ? scope.join(' · ') : '<b>审核范围未提供</b>（不代表已审核，也不代表未审核 —— 数据里没有，如实展示）')+'</li>'+
+    '<li>审核范围：'+(scope.length ? scope.join(' · ') : '<b>审核范围未提供</b>（不代表已审核，也不代表未审核：数据里没有，如实展示）')+'</li>'+
     (e.license ? '<li>许可证：'+esc(e.license)+'</li>' : '<li>许可证：未声明</li>')+
     '</ul>'+
     '<div class="note">「已审核」指收录时人工看过来源与内容，<b>不等于绝对安全</b>；'+
@@ -65,7 +65,7 @@ export function regDetailHtml(e){
       '<div class="note">该条目未声明权限清单（协议 v0.3 起支持；未声明 ≠ 不需要，'+
       '哈希校验链不受影响）。</div>') +
     '</div>';
-  h += '<div class="note">权限声明是对插件行为的<b>描述</b>，不是运行时沙箱 —— '+
+  h += '<div class="note">权限声明是对插件行为的<b>描述</b>，不是运行时沙箱：'+
        'WorkBuddy 不会在运行时强制限制这些能力；声明「不需要」也不代表绝对不碰。'+
        '安装前建议结合仓库脚本内容自行判断。</div>';
 

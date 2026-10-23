@@ -40,7 +40,7 @@ export async function showUpdateCenter(){
         '<code>'+esc(su.current)+'</code><span class="arrow">→</span>'+
         '<code>'+esc(su.latest)+'</code></div>'+
         '<div class="note">'+ (su.howToUpdate||[]).map(esc).join('<br>') +'</div>'+
-        '<div class="note">升级只在你确认后由你自己执行 —— 本市场不自我替换运行中的文件。</div></div>';
+        '<div class="note">升级只在你确认后由你自己执行，本市场不自我替换运行中的文件。</div></div>';
     } else {
       selfSec = '<div class="grp"><h5>市场本体</h5>'+
         '<div class="note">已是最新版本（'+esc(su.current)+'）。</div></div>';

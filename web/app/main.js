@@ -83,7 +83,7 @@ function render(){
            '之后在那边也能一键安装。注册只会往 <code>known_marketplaces.json</code> 加一条记录，先自动备份，可随时撤销。</div>';
   } else if(st.stats.ownedSkills === 0 && st.stats.localSkills > 0){
     hint = '<div class="hint">本机这 '+st.stats.localSkills+' 个 skill 都<b>不是本市场装的</b>（是别的途径装到你机器上的），'+
-           '所以卸载不会动它们 —— 这是刻意的。把一个 skill 删掉、再从市场装回来，它才归本市场托管。</div>';
+           '所以卸载不会动它们，这是刻意的。把一个 skill 删掉、再从市场装回来，它才归本市场托管。</div>';
   }
   $("#hint").innerHTML = hint;
 
@@ -305,7 +305,7 @@ async function loadDoctor(){
   const now = new Date().toISOString();
   const text = "WorkBuddy Market 诊断报告\n生成时间：" + now + "\n" +
     (d.checks || []).map(c => (c.ok ? (c.pending ? "[待初始化] " : (c.warn ? "[警告] " : "[通过] ")) : "[错误] ") + c.name +
-      (c.detail ? " — " + c.detail : "")).join("\n") +
+      (c.detail ? "：" + c.detail : "")).join("\n") +
     "\n（用户主目录已脱敏为 ~；本报告不含口令与令牌）\n";
   try{
     await navigator.clipboard.writeText(text);
@@ -323,6 +323,33 @@ async function loadDoctor(){
 $("#btnDoctor").onclick = loadDoctor;
 
 /* ---------------- 启动 ---------------- */
+/* 主题（auto/light/dark，localStorage 持久化）：html.dark 类由这里统一裁决，
+   index.html 头部的内联脚本只是首屏防闪烁的预演，口径与本处一致。
+   循环顺序：自动 → 深色 → 浅色 → 自动。 */
+const THEME_KEY = "wbm-theme";
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+const mqDark = window.matchMedia("(prefers-color-scheme: dark)");
+const THEME_LABEL = { auto: "主题:自动", dark: "主题:深色", light: "主题:浅色" };
+
+function applyTheme(){
+  let pref = "auto";
+  try{ pref = localStorage.getItem(THEME_KEY) || "auto"; }catch(e){}
+  const dark = pref === "dark" || (pref === "auto" && mqDark.matches);
+  document.documentElement.classList.toggle("dark", dark);
+  if(themeMeta) themeMeta.content = dark ? "#10141b" : "#f4f6f9";
+  const btn = $("#btnTheme");
+  if(btn) btn.textContent = THEME_LABEL[pref] || THEME_LABEL.auto;
+}
+
+$("#btnTheme").onclick = () => {
+  const order = ["auto", "dark", "light"];
+  let cur = "auto";
+  try{ cur = localStorage.getItem(THEME_KEY) || "auto"; }catch(e){}
+  try{ localStorage.setItem(THEME_KEY, order[(order.indexOf(cur) + 1) % 3]); }catch(e){}
+  applyTheme();
+};
+mqDark.addEventListener("change", applyTheme);   // 自动模式下系统切换实时跟手
+applyTheme();
 bindRefresh(refresh);
 refresh();
 setInterval(() => { if($("#drawer").classList.contains("show")) loadLog(); }, 5000);
