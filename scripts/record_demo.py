@@ -431,6 +431,7 @@ def main() -> int:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 context = browser.new_context(
+                    bypass_csp=True,
                     viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=1,
                     record_video_dir=str(raw_dir),
                     record_video_size={"width": WIDTH, "height": HEIGHT})

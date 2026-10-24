@@ -174,7 +174,8 @@ def main():
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page = browser.new_page(viewport={"width": 1280, "height": 900},
+                                    bypass_csp=True)
             page.on("pageerror", lambda e: page_errors.append(str(e)))
             page.on("console",
                     lambda m: console_errors.append(m.text)
@@ -701,7 +702,7 @@ def main():
             empty_cfg["remoteSources"] = []
             cfg_path.write_text(json.dumps(empty_cfg, ensure_ascii=False),
                                 encoding="utf-8")
-            pg2 = browser.new_page()
+            pg2 = browser.new_page(bypass_csp=True)
             errs2 = []
             pg2.on("pageerror", lambda e: errs2.append(str(e)))
             pg2.goto(base, wait_until="domcontentloaded")
@@ -720,7 +721,7 @@ def main():
 
             # --- 配置损坏：结构化错误 + 界面不白屏
             cfg_path.write_bytes(b"{broken,,,")
-            pg3 = browser.new_page()
+            pg3 = browser.new_page(bypass_csp=True)
             errs3 = []
             pg3.on("pageerror", lambda e: errs3.append(str(e)))
             pg3.goto(base, wait_until="domcontentloaded")
@@ -736,7 +737,7 @@ def main():
 
             # --- 配置缺失：同样结构化、不白屏
             cfg_path.unlink()
-            pg4 = browser.new_page()
+            pg4 = browser.new_page(bypass_csp=True)
             errs4 = []
             pg4.on("pageerror", lambda e: errs4.append(str(e)))
             pg4.goto(base, wait_until="domcontentloaded")
@@ -759,7 +760,7 @@ def main():
             cfg_path.write_bytes(cfg_backup)   # 还原，别污染后续
 
             # --- doctor 体检入口（v2.24，只读）
-            pg5 = browser.new_page()
+            pg5 = browser.new_page(bypass_csp=True)
             errs5 = []
             pg5.on("pageerror", lambda e: errs5.append(str(e)))
             pg5.goto(base, wait_until="domcontentloaded")

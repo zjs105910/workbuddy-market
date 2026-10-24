@@ -4,6 +4,27 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.37.1 — 2026-10-24（修复 v2.37.0 引入的 ui-smoke 回归）
+
+补丁轮：v2.37.0 的 CSP 加固把自家 UI 冒烟测试打挂了，CI 判红 ——
+只有 `ui-smoke` 失败，pytest / selftest / lint / package 全部照常绿。
+
+- **根因**：新加的 `Content-Security-Policy` 故意只给 `script-src 'self'
+  'unsafe-inline'`（不给 `'unsafe-eval'`），而 playwright 的
+  `wait_for_function("字符串 predicate")` 是在页面里以 `eval` 求值该
+  predicate 的，于是被同进程发出的 CSP 拒绝（`EvalError: ... 'unsafe-eval'
+  is not an allowed source of script`），卡在"等安装 toast 出现"一步
+  60s 超时，`ui-smoke` job 以 exit 1 收场。
+- **修复**：`scripts/ui_smoke.py`（5 个 `new_page` 调用点）与
+  `scripts/record_demo.py` 的浏览器上下文改用 playwright 的
+  `bypass_csp=True`（Chromium 专属能力，只作用于测试侧）；等待语义与
+  "每页独立上下文"的原有隔离性都保持不变，**生产 CSP 一字未动**，
+  该加固不被削弱。
+- **验证**：本地 ruff 全绿、`py_compile` 通过、`pytest` 118 全过；
+  `ui_smoke` 与录制需要 headless Chromium（本机未装 playwright），
+  该 job 的结论以 CI 为准。
+- 同步：版本三处同号盯防（version / core / selftest）更新至 2.37.1。
+
 ## 2.37.0 — 2026-10-24（正确性修复 + HTTP 层加固 + 前端并行刷新）
 
 全库代码评审后的定向修复轮：三个正确性 bug、四项性能/健壮性、
