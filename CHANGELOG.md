@@ -4,6 +4,33 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.37.0 — 2026-10-24（正确性修复 + HTTP 层加固 + 前端并行刷新）
+
+全库代码评审后的定向修复轮：三个正确性 bug、四项性能/健壮性、
+三项安全加固，全部零新依赖：
+
+- **P0 修复三件**（`market_server.py`）：
+  - `/api/selfupdate` 的 600 秒缓存从不比较时间戳 —— TTL 形同虚设，
+    进程存活期内永不重查（与注释矛盾），且并发首请求各自打一次
+    GitHub。现在 TTL 真正生效，重建走 SingleFlight；
+  - `/api/state?exact=1` 用子串匹配判参 —— `?noexact=1` 也会误触发
+    精确重算。改为 `parse_qs` 精确键值对（与 `/api/registry` 同口径）；
+  - `_catalog_stop` 事件只在 `finally` 里 `set()`、从不 `clear()` ——
+    同进程第二次 `serve()` 时自动目录刷新静默失效。`serve()` 入口补
+    `clear()`。
+- **性能**：GitHub 搜索缓存由单槽升级为 20 条 LRU（交替切词不再全部
+  miss，降低匿名限流 10 次/分钟触发面）；前端 `refresh()` 三个接口
+  改 `Promise.all` 并行（旧实现串行 await，最坏叠加 30s）。
+- **安全加固**：所有响应补 `Content-Security-Policy`（外部脚本 / 对象 /
+  框架全禁，connect 只许本机 API，把「某处漏了 esc()」的后果锁死）、
+  `X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；token 比较
+  改 `hmac.compare_digest`（消除计时侧信道）。
+- **可维护性**：429 文案在 5 个路由重复抄写 → 收口 `_busy_payload()`
+  一处；`serve()` 启动时对静态白名单和磁盘双向对账（web/app 新增
+  .js 忘记登记 `_JS_MODULES` 的 404 脚踩点改为启动即告警）。
+- 同步：selftest 的 `_search_cache` 直摸内部结构的两处用例改为
+  LRU 口径；版本三处同号盯防（version / core / selftest）更新。
+
 ## 2.36.3 — 2026-10-23（设计感升级：taste-skill 六轮定向打磨）
 
 用 Leonxlnx/taste-skill（反 AI 味前端规范）按 Redesign 协议对 `web/`

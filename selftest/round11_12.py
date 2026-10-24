@@ -228,7 +228,7 @@ def round11():
             ck("★ 搜索接口接受 page 翻页参数",
                st == 200 and js.get("ok") and len(js.get("items", [])) == 3,
                f"{st} {str(js)[:80]}")
-            srv._search_cache.update(at=0.0, key=None, items=None)   # 别把缓存漏进下一用例
+            srv._search_cache.clear()   # v2.37 LRU：别把缓存漏进下一用例
 
             st, js = hit2("/api/catalog/refresh", {}, AUTHC)
             ck("POST /api/catalog/refresh 起任务", st == 200 and js.get("ok")
@@ -249,7 +249,7 @@ def round11():
                .get("stars") == 7)
         finally:
             cat._gh_request = real_gh
-            srv._search_cache.update(at=0.0, key=None, items=None)
+            srv._search_cache.clear()
     finally:
         httpd2.shutdown()
         httpd2.server_close()

@@ -79,6 +79,7 @@ v2.21 收藏（评审 #13）：
 from __future__ import annotations
 
 import collections
+import hmac
 import json
 import os
 import re
@@ -861,29 +862,40 @@ SEARCH_TTL = 120.0                 # GitHub 搜索的进程内缓存（秒）
 CATALOG_CHECK_INTERVAL = 15 * 60   # 自动刷新循环的检查间隔（秒）
 
 _search_lock = threading.Lock()
-_search_cache: dict = {"at": 0.0, "key": None, "items": None}
+# v2.37：单槽 → 小容量 LRU。旧实现只存一个 key，交替输两个词全部 miss；
+# GitHub 匿名搜索限流 10 次/分钟，快速切词很容易 403。20 条足够覆盖
+# 一次会话里的正常来回切换。
+SEARCH_CACHE_SIZE = 20
+_search_cache: "collections.OrderedDict[tuple, tuple[float, list]]" = collections.OrderedDict()
 
 
 def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT,
               page: int = 1) -> list:
-    """GitHub 搜索：TTL 缓存 + single-flight。
+    """GitHub 搜索：LRU 缓存（120 秒 TTL）+ single-flight。
 
     未登录的 search API 限流是 10 次/分钟；前端 600ms 防抖 + 这里的
     「同词同页 120 秒直返」足够把误触挡住。结果只进内存不落盘 —— 搜索是
     「现在 GitHub 上有什么」的问题，落盘就变成目录了。
 
-    v2.35 NEXT_STEPS 任务5：page 翻页（前端「加载更多」）；缓存键带上
-    limit/page，同词不同页各算一份，不互相污染。
+    v2.35 任务5：page 翻页（前端「加载更多」）；缓存键带上 limit/page，
+    同词不同页各算一份，不互相污染。
     """
     key = (query, int(limit), int(page))
     with _search_lock:
-        if (_search_cache["items"] is not None and _search_cache["key"] == key
-                and time.time() - _search_cache["at"] < SEARCH_TTL):
-            return _search_cache["items"]
+        hit = _search_cache.get(key)
+        if hit is not None:
+            at, items = hit
+            if time.time() - at < SEARCH_TTL:
+                _search_cache.move_to_end(key)
+                return items
+            _search_cache.pop(key, None)   # 过期条目就地淘汰，走下面的重取
     items = _flight.run(("ghsearch",) + key,
                         lambda: core.search_repos(query, limit, page))
     with _search_lock:
-        _search_cache.update(at=time.time(), key=key, items=items)
+        _search_cache[key] = (time.time(), items)
+        _search_cache.move_to_end(key)
+        while len(_search_cache) > SEARCH_CACHE_SIZE:
+            _search_cache.popitem(last=False)
     return items
 
 
@@ -979,6 +991,14 @@ _registry_mem: dict = {"at": 0.0, "force": None, "data": None}
 # v2.36：市场本体更新检查（/api/selfupdate）的进程内缓存 —— 同一 TTL 口径
 _selfupdate_lock = threading.Lock()
 _selfupdate_cache: dict = {"at": 0.0, "data": None}
+SELFUPDATE_TTL = 600.0             # /api/selfupdate 的进程内缓存（秒）
+
+# v2.37：429 的统一文案 —— 旧实现同一段字符串在 5 个路由里各抄一份，
+# 改文案必然漏改，收口到一处。
+def _busy_payload() -> dict:
+    return {"ok": False, "error":
+            f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
+            "请等当前任务完成或取消它"}
 
 
 def invalidate_registry_mem() -> None:
@@ -1080,6 +1100,16 @@ class Handler(BaseHTTPRequestHandler):
     # 15 秒还没发完请求就断开。否则有人慢慢发 1 MB body 就能一直占着一个线程。
     timeout = SOCKET_TIMEOUT
 
+    # v2.37：内容安全策略。前端大量 innerHTML 字符串拼接，一条 CSP 把
+    # 「某处漏了 esc()」的后果锁死：外部脚本 / 对象 / 框架全禁，连接只许
+    # 回本机 API，图片放开 https（GitHub 截图 / 头像）。script 里的
+    # 'unsafe-inline' 是给 index.html 的防闪烁内联脚本留的 —— 想去掉它
+    # 得上 nonce，与「零构建」的现状不成比例，先保住其余几道闸。
+    _CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; "
+            "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            "form-action 'none'; frame-ancestors 'none'")
+
     def log_message(self, fmt, *args):  # 静音默认日志
         return
 
@@ -1097,6 +1127,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        # v2.37：加固头 —— frame-ancestors 挡本机页面 iframe 嵌入（拖拽 /
+        # 点击劫持面），no-referrer 不向任何外域泄露本机地址。
+        self.send_header("Content-Security-Policy", self._CSP)
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         try:
             self.wfile.write(body)
@@ -1115,7 +1150,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "跨源请求被拒绝（本机服务只服务自己的页面）"}, 403)
             return False
         got = self.headers.get("X-Local-Market-Token")
-        if not TOKEN or got != TOKEN:
+        # v2.37：常量时间比较 —— 字符串 != 在首个不同字节就短路，
+        # 理论上可被计时侧信道逐字节猜 token；compare_digest 消除它。
+        if not TOKEN or not got or not hmac.compare_digest(got, TOKEN):
             core.log("warn", "api", f"拒绝无口令的请求：{self.path}")
             self._json({"ok": False,
                         "error": "缺少或错误的 X-Local-Market-Token；"
@@ -1208,16 +1245,25 @@ class Handler(BaseHTTPRequestHandler):
             if not self._guard():
                 return
             if path == "/api/state":
-                exact = "exact=1" in (urlparse(self.path).query or "")
+                # v2.37 修复：旧写法 `"exact=1" in query` 是子串匹配，
+                # `?noexact=1` 也会误触发精确重算 —— 与 /api/registry 的
+                # parse_qs 口径统一（精确键值对）。
+                exact = parse_qs(urlparse(self.path).query).get("exact") == ["1"]
                 return self._json(get_state(exact))
             if path == "/api/selfupdate":
                 # v2.36：市场本体更新检查（只读不装）。600 秒内存缓存
                 # —— 检查是网络动作，别让手快连点打穿 GitHub 匿名限额。
+                # v2.37 修复：旧实现只判断「缓存是否为 None」，从不比较
+                # 时间戳 —— TTL 形同虚设，进程存活期内永不重查，且并发
+                # 首请求会各自打一次 GitHub。现在 TTL 真正生效，重建走
+                # single-flight（并发的过期请求共享同一次在线检查）。
                 with _selfupdate_lock:
-                    data = dict(_selfupdate_cache["data"]) if _selfupdate_cache["data"] else None
+                    fresh = (_selfupdate_cache["data"] is not None
+                             and time.time() - _selfupdate_cache["at"] < SELFUPDATE_TTL)
+                    data = dict(_selfupdate_cache["data"]) if fresh else None
                 if data is None:
                     from workbuddy_market.selfupdate import check_for_update
-                    data = check_for_update()
+                    data = _flight.run("selfupdate", check_for_update)
                     with _selfupdate_lock:
                         _selfupdate_cache["at"] = time.time()
                         _selfupdate_cache["data"] = data
@@ -1361,9 +1407,7 @@ class Handler(BaseHTTPRequestHandler):
                 allow_ns = bool(body.get("allowNonSkill"))
                 jid = _remote_job(repo, "add", allow_non_skill=allow_ns)
                 if jid is None:
-                    return self._json({"ok": False, "error":
-                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
-                                       "请等当前任务完成或取消它"}, 429)
+                    return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
             if path == "/api/remote/update":
                 repo, err2 = _repo_arg(body)
@@ -1371,9 +1415,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "error": err2}, 400)
                 jid = _remote_job(repo, "update")
                 if jid is None:
-                    return self._json({"ok": False, "error":
-                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
-                                       "请等当前任务完成或取消它"}, 429)
+                    return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
             if path == "/api/remote/remove":
                 # ghpm remove（v2.35）：ghpm 源码链装的仓库经 ghpm 移除。
@@ -1384,9 +1426,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "error": err2}, 400)
                 jid = _remote_job(repo, "remove")
                 if jid is None:
-                    return self._json({"ok": False, "error":
-                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
-                                       "请等当前任务完成或取消它"}, 429)
+                    return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
             if path == "/api/registry/install":
                 # 包安装（v2.16）：注册表条目带不可变 artifact 时走这条链路 ——
@@ -1401,16 +1441,12 @@ class Handler(BaseHTTPRequestHandler):
                 jid = _registry_install_job(repo, mode=mode,
                                             force=bool(body.get("force")))
                 if jid is None:
-                    return self._json({"ok": False, "error":
-                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
-                                       "请等当前任务完成或取消它"}, 429)
+                    return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
             if path == "/api/catalog/refresh":
                 jid = _catalog_refresh_job()
                 if jid is None:
-                    return self._json({"ok": False, "error":
-                                       f"后台任务已达上限（{MAX_RUNNING_JOBS} 个），"
-                                       "请等当前任务完成或取消它"}, 429)
+                    return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
             if path == "/api/favorites":
                 # 收藏（v2.21，评审 #13）：本机持久化，Local-first。
@@ -1460,9 +1496,33 @@ def make_server(port: int = DEFAULT_PORT, host: str = HOST,
     return MarketHTTPServer((host, port), Handler)
 
 
+def _check_static_whitelist() -> None:
+    """v2.37：启动时把静态白名单和磁盘对一遍账（双向）。
+
+    「web/app 新增了 .js 但忘了登记 _JS_MODULES → 页面 404」是白名单制
+    的固定脚踩点；漏登记在开发时不易察觉（模块加载失败只白一块）。
+    只告警不拦启动 —— 缺文件时对应资源本来就是 404，不至于起不了服务。
+    """
+    try:
+        on_disk = {f"app/{p.name}" for p in (core.WEB_DIR / "app").glob("*.js")}
+    except OSError:
+        return
+    registered = {rel for rel, _ in _STATIC_FILES.values()}
+    for missing in sorted(on_disk - registered):
+        core.log("warn", "serve",
+                 f"web/app/{missing} 未登记进 _JS_MODULES，页面会 404 —— 请加白名单")
+    for extra in sorted(registered - on_disk):
+        core.log("warn", "serve", f"静态白名单里的 {extra} 在磁盘上不存在，将 404")
+
+
 def serve(port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
     port = _find_port(port)
     httpd = make_server(port)
+    # v2.37 修复：_catalog_stop 只在 finally 里 set()，从不 clear() ——
+    # 同进程第二次 serve()（selftest 连跑 / 先停再起的场景）里，自动刷新
+    # 循环的 stop.wait() 会立即返回，目录刷新静默失效。
+    _catalog_stop.clear()
+    _check_static_whitelist()
     url = f"http://{HOST}:{port}/"
     core.log("info", "serve", f"市场服务已启动 {url}")
     print(f"  市场已启动： {url}", flush=True)

@@ -99,19 +99,25 @@ function render(){
 
 /* ---------------- 主刷新 ---------------- */
 async function refresh(){
-  try{ setState(await api("/api/state")); }
-  catch(err){ toast("读取状态失败："+err.message, true); return; }
+  // v2.37：三个接口并行拉取 —— 旧实现逐个 await，最坏叠加 30s（registry
+  // 三条路线各 10s 超时）。state 失败仍挡主界面并提示；catalog / registry
+  // 失败照旧降级为空、不挡主界面。
   try{
-    const c = await api("/api/catalog");
-    setCatalog(c.catalog || {}, !!c.stale);
-  }catch(e){ setCatalog(null, false); }   // 目录缓存失败不挡主界面
-  try{
-    const g = await api("/api/registry");
-    setReg({plugins: g.plugins || [], updatedAt: g.updatedAt || "",
-            stale: !!g.stale, source: g.source || "",
-            installedRepos: g.installedRepos || {},
-            favorites: g.favorites || []});   // 社区目录失败也不挡主界面
-  }catch(e){ setReg({plugins:null, updatedAt:"", stale:false, source:"", installedRepos:{}, favorites:[]}); }
+    const [s, c, g] = await Promise.all([
+      api("/api/state"),
+      api("/api/catalog").catch(() => null),
+      api("/api/registry").catch(() => null),
+    ]);
+    setState(s);
+    if(c) setCatalog(c.catalog || {}, !!c.stale);
+    else setCatalog(null, false);
+    setReg(g ? {plugins: g.plugins || [], updatedAt: g.updatedAt || "",
+                stale: !!g.stale, source: g.source || "",
+                installedRepos: g.installedRepos || {},
+                favorites: g.favorites || []}
+             : {plugins:null, updatedAt:"", stale:false, source:"",
+                installedRepos:{}, favorites:[]});
+  }catch(err){ toast("读取状态失败："+err.message, true); return; }
   render();
 }
 
