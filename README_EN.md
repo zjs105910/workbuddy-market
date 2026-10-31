@@ -106,7 +106,7 @@ The launch scripts have Chinese filenames. You can also start from PowerShell wi
 
 <!-- registry-table:start -->
 
-> **100** listed plugins; this table is refreshed daily by CI from the human-reviewed registry.
+> **110** listed plugins; this table is refreshed daily by CI from the human-reviewed registry.
 
 | Plugin | Description | Category | Trust |
 | --- | --- | --- | --- |
@@ -210,6 +210,16 @@ The launch scripts have Chinese filenames. You can also start from PowerShell wi
 | [Stitch 官方技能库](https://github.com/google-labs-code/stitch-skills) | Agent Skills designed to work with the Stitch MCP server, following the Agent Skills open spec. | 合集 | Reviewed |
 | [Yao 全端代理工作台](https://github.com/YaoApp/yao) | All your agents and workspaces in one place, on every device you own. | 效率 | Reviewed |
 | [界面构建技能集](https://github.com/jakubkrehel/skills) | A collection of agent skills that help you build great interfaces. | 设计 | Reviewed |
+| [HyperFrames 视频框架](https://github.com/heygen-com/hyperframes) | Write HTML, render video. HeyGen's agent-native video framework with 26 official skills for captions, transitions, chart animation and final exports. | 设计 | Reviewed |
+| [编码代理剪视频](https://github.com/browser-use/video-use) | Edit videos with coding agents: a frame-level visual feedback loop lets Claude Code and friends cut, splice, caption and stylize real footage. | 设计 | Reviewed |
+| [FFmpeg 剪辑工具箱](https://github.com/kajisho5/ffmpeg-skill) | 42 FFmpeg tools with a machine-readable contract plus an MCP server: cutting, captions, reframing, loudness and platform exports — fully local, no cloud. | 设计 | Reviewed |
+| [对话式视频剪辑台](https://github.com/0xsline/OpenChatCut) | Open-source conversational AI video editor with a multi-track timeline, agent skills, MCP integration and Remotion rendering. | 设计 | Reviewed |
+| [视频解说成片](https://github.com/zenstory-ai/video-recap-skills) | Turn any video into a Chinese-narration recap: scene detection, ASR, VLM, script, TTS and ffmpeg assembly, with editable JianYing/CapCut draft export. | 设计 | Reviewed |
+| [宝玉 AI 视频剪辑台](https://github.com/JimLiu/baocut) | BaoCut: an AI video agent with an editable timeline — transcribe, subtitle, translate, dub, cut and animate in one pass. | 设计 | Reviewed |
+| [万物皆可讲解视频](https://github.com/Vincentwei1021/anything2explainer) | Topic in, narrated explainer video out: black-canvas motion graphics with TTS voiceover, subtitles and a chapter progress bar, every frame drawn in Remotion code. | 设计 | Reviewed |
+| [口播讲解视频工坊](https://github.com/Vincentwei1021/video-talkcraft) | A motion-design studio for voiceover-driven explainer videos: word-level sync, 109 motion recipe cards and an anti-slideshow camera system, rendered in Remotion. | 设计 | Reviewed |
+| [AI 短剧创作技能集](https://github.com/zenstory-ai/drama-skills) | Open-source AI short-drama skills for Claude Code & Codex: script, character assets, storyboard, image/video prompts and review. | 设计 | Reviewed |
+| [YouTube 智能切片](https://github.com/op7418/Youtube-clipper-skill) | Smart YouTube clipping by Guizang: download, minute-level AI chapters, auto-cut selected segments, bilingual subtitle translation and burn-in, plus summary copy. | 设计 | Reviewed |
 
 <!-- registry-table:end -->
 
