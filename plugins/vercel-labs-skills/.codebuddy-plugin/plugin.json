@@ -1,0 +1,19 @@
+{
+ "name": "vercel-labs-skills",
+ "version": "2026.10.30.13e4063",
+ "description": "Vercel 开源的 agent skills 管理工具（npx skills）：技能的发现、安装与发布一条命令搞定，自带 3 个实用技能。",
+ "description_en": "The open agent skills tool from Vercel - npx skills.",
+ "author": {
+  "name": "vercel-labs"
+ },
+ "keywords": [
+  "vercel",
+  "技能管理",
+  "CLI",
+  "官方"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/vercel-labs/skills",
+ "sourceCommit": "13e4063a1cf913f5606d57d42ab83a86f5001e04"
+}

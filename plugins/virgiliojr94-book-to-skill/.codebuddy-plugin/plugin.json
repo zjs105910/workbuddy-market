@@ -1,0 +1,19 @@
+{
+ "name": "virgiliojr94-book-to-skill",
+ "version": "2026.10.30.e180fc4",
+ "description": "把任何技术书 PDF 蒸馏成一个可用的智能体技能：边读边查边用，把整本书变成随身参考。",
+ "description_en": "Turn any technical book PDF into a Claude Code skill - ready to study, reference and use while you work.",
+ "author": {
+  "name": "virgiliojr94"
+ },
+ "keywords": [
+  "pdf",
+  "技术书",
+  "技能生成",
+  "学习"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/virgiliojr94/book-to-skill",
+ "sourceCommit": "e180fc46365e8c1aab0120778cc8a40b9515324b"
+}

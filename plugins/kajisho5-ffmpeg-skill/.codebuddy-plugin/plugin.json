@@ -1,0 +1,20 @@
+{
+ "name": "kajisho5-ffmpeg-skill",
+ "version": "2026.10.30.88e2f42",
+ "description": "本地视频剪辑工具箱：42 个带机器可读契约的 FFmpeg 工具与 MCP 服务器，覆盖剪切、字幕烧录、画面重构、响度归一与多平台导出，全程本地运行，不依赖云服务与 API key。",
+ "description_en": "42 FFmpeg tools with a machine-readable contract plus an MCP server: cutting, captions, reframing, loudness and platform exports — fully local, no cloud.",
+ "author": {
+  "name": "kajisho5"
+ },
+ "keywords": [
+  "ffmpeg",
+  "剪辑",
+  "字幕",
+  "mcp",
+  "本地"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/kajisho5/ffmpeg-skill",
+ "sourceCommit": "88e2f42fdf7856885b63ff8e41d652d1c64cb41e"
+}

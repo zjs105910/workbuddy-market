@@ -1,0 +1,1402 @@
+{
+ "name": "workbuddy-community-market",
+ "description": "WorkBuddy Market 精选社区市场（只读快照）：全部条目来自人工审核的 registry/plugins.json，按 sourceCommit 固定来源。想要安装前四问、所有权分级与可恢复卸载，请使用完整版 WorkBuddy Market。",
+ "owner": {
+  "name": "WorkBuddy Market"
+ },
+ "marketVersion": "2.37.1",
+ "builtAt": "2026-10-30T23:57:16Z",
+ "sourceRegistry": "registry/plugins.json",
+ "plugins": [
+  {
+   "name": "anthropics-skills",
+   "description": "Anthropic 官方 Agent Skills 仓库，含文档处理（docx/pdf/pptx/xlsx）、前端设计、MCP 构建、画布设计、品牌规范等 19 个高质量技能。",
+   "version": "2026.10.30.683bc88",
+   "source": "./plugins/anthropics-skills",
+   "category": "官方",
+   "author": {
+    "name": "anthropics"
+   },
+   "keywords": [
+    "官方",
+    "文档",
+    "office",
+    "前端",
+    "mcp"
+   ]
+  },
+  {
+   "name": "obra-superpowers",
+   "description": "一套成体系的软件开发方法论技能包：头脑风暴、写计划、TDD、系统化调试、并行派发子代理、代码审查、收尾分支等 15 个技能，彼此衔接成工作流。",
+   "version": "2026.10.30.8ca22db",
+   "source": "./plugins/obra-superpowers",
+   "category": "开发工具",
+   "author": {
+    "name": "obra"
+   },
+   "keywords": [
+    "方法论",
+    "TDD",
+    "调试",
+    "计划",
+    "代码审查",
+    "子代理"
+   ]
+  },
+  {
+   "name": "Leonxlnx-taste-skill",
+   "description": "给 AI 一双「好品味」的眼睛：阻止它生成平庸、模板化、千篇一律的输出，让界面与文案更有设计感（含安装脚本与示例）。",
+   "version": "2026.10.30.b482f7a",
+   "source": "./plugins/Leonxlnx-taste-skill",
+   "category": "设计",
+   "author": {
+    "name": "Leonxlnx"
+   },
+   "keywords": [
+    "设计",
+    "品味",
+    "UI",
+    "文案",
+    "去模板化"
+   ]
+  },
+  {
+   "name": "vercel-labs-agent-browser",
+   "description": "Vercel 出品的浏览器自动化 CLI，官方 CodeBuddy 插件同源。首次使用自动安装，提供网页交互、截图、表单填写能力。",
+   "version": "2026.10.30.0207911",
+   "source": "./plugins/vercel-labs-agent-browser",
+   "category": "自动化",
+   "author": {
+    "name": "vercel-labs"
+   },
+   "keywords": [
+    "浏览器",
+    "自动化",
+    "vercel",
+    "截图",
+    "表单"
+   ]
+  },
+  {
+   "name": "wshobson-agents",
+   "description": "体量极大的工程技能合集，184 个技能覆盖后端、前端、Python、K8s、可观测性、安全、支付、LLM 微调、量化交易、无障碍等方向，按主题分成数十个插件组。",
+   "version": "2026.10.30.46891e7",
+   "source": "./plugins/wshobson-agents",
+   "category": "合集",
+   "author": {
+    "name": "wshobson"
+   },
+   "keywords": [
+    "合集",
+    "后端",
+    "前端",
+    "k8s",
+    "安全",
+    "LLM",
+    "量化"
+   ]
+  },
+  {
+   "name": "multica-ai-andrej-karpathy-skills",
+   "description": "从 Andrej Karpathy 的观察提炼出的智能体行为改进技能：让编码智能体的工程判断更克制、更接近人类顶尖水平。内容稳定、低频更新。",
+   "version": "2026.10.30.2c60614",
+   "source": "./plugins/multica-ai-andrej-karpathy-skills",
+   "category": "开发工具",
+   "author": {
+    "name": "multica-ai"
+   },
+   "keywords": [
+    "karpathy",
+    "行为",
+    "工程判断",
+    "方法论"
+   ]
+  },
+  {
+   "name": "DietrichGebert-ponytail",
+   "description": "让智能体像「房间里最懒的高级工程师」一样思考：能不写的代码就不写，追求最小改动、最简方案与最少复杂度。",
+   "version": "2026.10.30.552acd5",
+   "source": "./plugins/DietrichGebert-ponytail",
+   "category": "开发工具",
+   "author": {
+    "name": "DietrichGebert"
+   },
+   "keywords": [
+    "最小改动",
+    "工程哲学",
+    "代码审查",
+    "方法论"
+   ]
+  },
+  {
+   "name": "tt-a1i-archify",
+   "description": "把任何想法、计划或代码库变成漂亮的交互式架构图：面向 Claude Code 等智能体的图表技能，含渲染器与配方库。",
+   "version": "2026.10.30.73aaa06",
+   "source": "./plugins/tt-a1i-archify",
+   "category": "设计",
+   "author": {
+    "name": "tt-a1i"
+   },
+   "keywords": [
+    "架构图",
+    "图表",
+    "可视化",
+    "设计"
+   ]
+  },
+  {
+   "name": "ayghri-i-have-adhd",
+   "description": "阻止编码智能体把答案埋进长篇大论的技能：ADHD 友好的直给输出结构，先说答案再谈过程。",
+   "version": "2026.10.30.723af7d",
+   "source": "./plugins/ayghri-i-have-adhd",
+   "category": "效率",
+   "author": {
+    "name": "ayghri"
+   },
+   "keywords": [
+    "输出结构",
+    "直给",
+    "adhd",
+    "效率"
+   ]
+  },
+  {
+   "name": "blader-humanizer",
+   "description": "去除文本中 AI 生成痕迹的智能体技能：去掉模板腔与机械感，让输出读起来像人写的。",
+   "version": "2026.10.30.225a6f3",
+   "source": "./plugins/blader-humanizer",
+   "category": "写作",
+   "author": {
+    "name": "blader"
+   },
+   "keywords": [
+    "去AI味",
+    "写作",
+    "人味",
+    "文案"
+   ]
+  },
+  {
+   "name": "coreyhaines31-marketingskills",
+   "description": "面向 Claude Code 与 AI 智能体的营销技能包：转化率优化（CRO）、文案、SEO、数据分析与增长工程。",
+   "version": "2026.10.30.b9ba399",
+   "source": "./plugins/coreyhaines31-marketingskills",
+   "category": "商业",
+   "author": {
+    "name": "coreyhaines31"
+   },
+   "keywords": [
+    "营销",
+    "seo",
+    "文案",
+    "增长",
+    "数据分析"
+   ]
+  },
+  {
+   "name": "cathrynlavery-diagram-design",
+   "description": "编辑级的图表设计技能：42 种图表类型与 editorial 审美，支持 Claude Code、Codex、Copilot 等多个智能体。",
+   "version": "2026.10.30.f4547ee",
+   "source": "./plugins/cathrynlavery-diagram-design",
+   "category": "设计",
+   "author": {
+    "name": "cathrynlavery"
+   },
+   "keywords": [
+    "图表",
+    "设计",
+    "编辑级",
+    "可视化"
+   ]
+  },
+  {
+   "name": "zhaoxuya520-reverse-skill",
+   "description": "逆向工程与授权渗透测试的技能路由包：CTF 沙箱编排、Burp MCP 集成、Kali 工具链等，仅面向授权安全研究与学习。",
+   "version": "2026.10.30.cab634b",
+   "source": "./plugins/zhaoxuya520-reverse-skill",
+   "category": "安全",
+   "author": {
+    "name": "zhaoxuya520"
+   },
+   "keywords": [
+    "安全",
+    "逆向",
+    "渗透测试",
+    "ctf",
+    "kali"
+   ]
+  },
+  {
+   "name": "virgiliojr94-book-to-skill",
+   "description": "把任何技术书 PDF 蒸馏成一个可用的智能体技能：边读边查边用，把整本书变成随身参考。",
+   "version": "2026.10.30.e180fc4",
+   "source": "./plugins/virgiliojr94-book-to-skill",
+   "category": "效率",
+   "author": {
+    "name": "virgiliojr94"
+   },
+   "keywords": [
+    "pdf",
+    "技术书",
+    "技能生成",
+    "学习"
+   ]
+  },
+  {
+   "name": "Nutlope-hallmark",
+   "description": "反 AI 味设计技能：阻止智能体产出千篇一律的模板化界面，让生成的设计更有个性与质感。",
+   "version": "2026.10.30.13ac0ec",
+   "source": "./plugins/Nutlope-hallmark",
+   "category": "设计",
+   "author": {
+    "name": "Nutlope"
+   },
+   "keywords": [
+    "设计",
+    "去模板化",
+    "ui",
+    "审美"
+   ]
+  },
+  {
+   "name": "OthmanAdi-planning-with-files",
+   "description": "面向长任务的持久化文件规划技能：崩溃不丢进度的 Markdown 计划，适配多个主流编码智能体（含 CodeBuddy 目录）。",
+   "version": "2026.10.30.41f60ae",
+   "source": "./plugins/OthmanAdi-planning-with-files",
+   "category": "效率",
+   "author": {
+    "name": "OthmanAdi"
+   },
+   "keywords": [
+    "规划",
+    "任务管理",
+    "断点续传",
+    "markdown"
+   ]
+  },
+  {
+   "name": "phuryn-pm-skills",
+   "description": "产品经理技能市场：100+ 智能体技能、命令与插件，覆盖从产品发现到上市推广的全生命周期。",
+   "version": "2026.10.30.8607e3b",
+   "source": "./plugins/phuryn-pm-skills",
+   "category": "商业",
+   "author": {
+    "name": "phuryn"
+   },
+   "keywords": [
+    "产品经理",
+    "pm",
+    "市场调研",
+    "增长",
+    "战略"
+   ]
+  },
+  {
+   "name": "titanwings-distilly",
+   "description": "把领域专家的思维方式蒸馏成可复用技能：让任何智能体继承「他们怎么想」（原 Colleague Skills）。",
+   "version": "2026.10.30.b830d3d",
+   "source": "./plugins/titanwings-distilly",
+   "category": "开发工具",
+   "author": {
+    "name": "titanwings"
+   },
+   "keywords": [
+    "蒸馏",
+    "思维方式",
+    "技能生成",
+    "专家"
+   ]
+  },
+  {
+   "name": "machina-sports-sports-skills",
+   "description": "面向体育场景的开源 agent 技能集：实时赛事数据获取、比赛结果预测、联赛与球员信息查询等 27 个技能，按主题分组，适合构建体育资讯与数据分析工作流。",
+   "version": "2026.10.30.5bb9d1d",
+   "source": "./plugins/machina-sports-sports-skills",
+   "category": "效率",
+   "author": {
+    "name": "machina-sports"
+   },
+   "keywords": [
+    "体育",
+    "赛事数据",
+    "预测",
+    "技能集"
+   ]
+  },
+  {
+   "name": "stefanoskarakasis-Product-Marketing-Skills",
+   "description": "产品营销（PMM）技能市场：包含定位、发布、竞争分析、客户研究、内容与销售赋能等 30+ 个代理技能与命令，覆盖产品营销全流程。",
+   "version": "2026.10.30.ec0108f",
+   "source": "./plugins/stefanoskarakasis-Product-Marketing-Skills",
+   "category": "商业",
+   "author": {
+    "name": "stefanoskarakasis"
+   },
+   "keywords": [
+    "产品营销",
+    "PMM",
+    "定位",
+    "发布",
+    "竞争分析"
+   ]
+  },
+  {
+   "name": "tackeyy-mission",
+   "description": "质量门禁驱动的自治任务闭环技能集：任务拆解、执行、验证与交付全程受质量闸约束，含 12 个技能，适合让代理在明确验收标准下长跑完成任务。",
+   "version": "2026.10.30.4274db6",
+   "source": "./plugins/tackeyy-mission",
+   "category": "开发工具",
+   "author": {
+    "name": "tackeyy"
+   },
+   "keywords": [
+    "自治任务",
+    "质量门禁",
+    "任务闭环",
+    "Claude Code"
+   ]
+  },
+  {
+   "name": "buidangminh23-spacing-skill",
+   "description": "反拥挤间距技能：一条经过打磨的 UI 间距规范，让代理生成的界面保持呼吸感与一致的视觉节奏，适合嵌入任何前端工作流。",
+   "version": "2026.10.30.ddfa2a4",
+   "source": "./plugins/buidangminh23-spacing-skill",
+   "category": "设计",
+   "author": {
+    "name": "buidangminh23"
+   },
+   "keywords": [
+    "UI",
+    "间距",
+    "设计规范",
+    "前端"
+   ]
+  },
+  {
+   "name": "beggarticksarthurtatum121-reddit-skills",
+   "description": "基于真实浏览器与账号的 Reddit 自动化技能集：浏览、检索、发帖与互动等 6 个技能，强调以用户本人身份合规操作。",
+   "version": "2026.10.30.0739c5e",
+   "source": "./plugins/beggarticksarthurtatum121-reddit-skills",
+   "category": "自动化",
+   "author": {
+    "name": "beggarticksarthurtatum121"
+   },
+   "keywords": [
+    "Reddit",
+    "浏览器自动化",
+    "社区",
+    "发帖"
+   ]
+  },
+  {
+   "name": "docsor1212-pubmed-verifier",
+   "description": "PubMed 文献引用批量核验工具：对 AI 生成的引用逐条比对 PubMed 数据库，检测编造与张冠李戴，降低科研写作中的幻觉引用。",
+   "version": "2026.10.30.ae908b7",
+   "source": "./plugins/docsor1212-pubmed-verifier",
+   "category": "科研",
+   "author": {
+    "name": "docsor1212"
+   },
+   "keywords": [
+    "PubMed",
+    "引用核验",
+    "科研诚信",
+    "幻觉检测"
+   ]
+  },
+  {
+   "name": "bsq415-research-rigor-skill",
+   "description": "人类主导、证据门控的科研全周期执行技能：从问题定义、文献综述到实验设计与结论输出，每一步都要求可验证证据支撑。",
+   "version": "2026.10.30.708718a",
+   "source": "./plugins/bsq415-research-rigor-skill",
+   "category": "科研",
+   "author": {
+    "name": "bsq415"
+   },
+   "keywords": [
+    "科研方法",
+    "证据门控",
+    "文献综述",
+    "研究执行"
+   ]
+  },
+  {
+   "name": "gal-a-qikly",
+   "description": "从验收标准生成测试套件的技能：先按验收条件生成测试用例，再驱动实现直至全部通过，覆盖单元与集成两层。",
+   "version": "2026.10.30.6bd6953",
+   "source": "./plugins/gal-a-qikly",
+   "category": "测试",
+   "author": {
+    "name": "gal-a"
+   },
+   "keywords": [
+    "测试",
+    "验收标准",
+    "TDD",
+    "测试套件"
+   ]
+  },
+  {
+   "name": "Kimeur-motion-launch-videos",
+   "description": "发布视频批量生成技能集：从简短的产品说明生成脚本、分镜与成片，循环产出可发布的宣传视频，共 12 个技能。",
+   "version": "2026.10.30.b639fc4",
+   "source": "./plugins/Kimeur-motion-launch-videos",
+   "category": "设计",
+   "author": {
+    "name": "Kimeur"
+   },
+   "keywords": [
+    "视频生成",
+    "产品发布",
+    "脚本",
+    "分镜"
+   ]
+  },
+  {
+   "name": "yschimke-compose-ai-tools",
+   "description": "面向 Jetpack Compose 的代理辅助技能：UI 组件生成、代码规范检查等 3 个技能，帮助代理写出符合 Compose 最佳实践的 Android 界面代码。",
+   "version": "2026.10.30.ddb68af",
+   "source": "./plugins/yschimke-compose-ai-tools",
+   "category": "开发工具",
+   "author": {
+    "name": "yschimke"
+   },
+   "keywords": [
+    "Android",
+    "Jetpack Compose",
+    "UI",
+    "代码生成"
+   ]
+  },
+  {
+   "name": "creedants-pstack-t3",
+   "description": "Lauren Tan 的 pstack 代理技能集向 T3 Code 的移植版：覆盖前端工程、产品思维与协作流程等 130 个技能，任何模型都能取用。",
+   "version": "2026.10.30.a70a9b8",
+   "source": "./plugins/creedants-pstack-t3",
+   "category": "合集",
+   "author": {
+    "name": "creedants"
+   },
+   "keywords": [
+    "pstack",
+    "前端",
+    "技能合集",
+    "T3 Code"
+   ]
+  },
+  {
+   "name": "theonly1me-shadowclone",
+   "description": "把个人工程品味带进每一个编码代理的技能合集：代码风格、架构取舍与评审标准等 44 个技能，来自一线工程师的实战沉淀。",
+   "version": "2026.10.30.7ad536d",
+   "source": "./plugins/theonly1me-shadowclone",
+   "category": "合集",
+   "author": {
+    "name": "theonly1me"
+   },
+   "keywords": [
+    "工程品味",
+    "代码风格",
+    "架构",
+    "技能合集"
+   ]
+  },
+  {
+   "name": "Marsjunwang-nblane",
+   "description": "人 + 代理 + 团队技能共同进化平台：以纯文本沉淀技能资产，5 个技能覆盖个人与团队层面的技能演化与复用。",
+   "version": "2026.10.30.ebe7055",
+   "source": "./plugins/Marsjunwang-nblane",
+   "category": "效率",
+   "author": {
+    "name": "Marsjunwang"
+   },
+   "keywords": [
+    "技能进化",
+    "团队协作",
+    "纯文本",
+    "知识管理"
+   ]
+  },
+  {
+   "name": "Bank848-Claude-Abo",
+   "description": "便携式 Claude Code 配置模板：66 个经过实战验证的技能开箱即用，一条命令即可在新机器上复原完整工作环境。",
+   "version": "2026.10.30.59b498d",
+   "source": "./plugins/Bank848-Claude-Abo",
+   "category": "合集",
+   "author": {
+    "name": "Bank848"
+   },
+   "keywords": [
+    "便携配置",
+    "模板",
+    "技能合集",
+    "开箱即用"
+   ]
+  },
+  {
+   "name": "morluto-rea",
+   "description": "逆向工程代理技能：从应用行为入手向下还原实现细节，2 个技能覆盖行为观测与结构还原，适合学习与兼容性分析。",
+   "version": "2026.10.30.0d89978",
+   "source": "./plugins/morluto-rea",
+   "category": "安全",
+   "author": {
+    "name": "morluto"
+   },
+   "keywords": [
+    "逆向工程",
+    "行为分析",
+    "学习",
+    "兼容性"
+   ]
+  },
+  {
+   "name": "ericrisco-rsc-harness",
+   "description": "超大体量的代理技能百科：开发、写作、测试、运维等方向 271 个技能，按需取用，适合作为团队技能弹药库。",
+   "version": "2026.10.30.f866289",
+   "source": "./plugins/ericrisco-rsc-harness",
+   "category": "合集",
+   "author": {
+    "name": "ericrisco"
+   },
+   "keywords": [
+    "技能百科",
+    "合集",
+    "多方向",
+    "团队"
+   ]
+  },
+  {
+   "name": "nextlevelbuilder-ui-ux-pro-max-skill",
+   "description": "跨平台专业级 UI/UX 设计智能 Skill：为多端界面提供设计决策、版式与交互规范，让代理产出专业水准的前端设计。",
+   "version": "2026.10.30.56ea9cf",
+   "source": "./plugins/nextlevelbuilder-ui-ux-pro-max-skill",
+   "category": "设计",
+   "author": {
+    "name": "nextlevelbuilder"
+   },
+   "keywords": [
+    "UI",
+    "UX",
+    "设计",
+    "前端",
+    "claude-code"
+   ]
+  },
+  {
+   "name": "thedotmack-claude-mem",
+   "description": "跨会话持久记忆：自动捕获代理会话中的操作与决策，向量化归档后按需取回，让每个代理都带着上下文继续工作。",
+   "version": "2026.10.30.fef3402",
+   "source": "./plugins/thedotmack-claude-mem",
+   "category": "效率",
+   "author": {
+    "name": "thedotmack"
+   },
+   "keywords": [
+    "记忆",
+    "上下文",
+    "chromadb",
+    "claude-code",
+    "效率"
+   ]
+  },
+  {
+   "name": "Egonex-AI-Understand-Anything",
+   "description": "把任意代码库转成可探索、可检索的交互式知识图谱——教学优先于炫技，快速建立对陌生代码库的结构性理解。",
+   "version": "2026.10.30.f2d0164",
+   "source": "./plugins/Egonex-AI-Understand-Anything",
+   "category": "开发工具",
+   "author": {
+    "name": "Egonex-AI"
+   },
+   "keywords": [
+    "代码理解",
+    "知识图谱",
+    "codebase",
+    "学习"
+   ]
+  },
+  {
+   "name": "career-ops-hq-career-ops",
+   "description": "开源 AI 求职代理：扫描多个职位板，按你的简历逐条 1-5 打分再决定投递，全流程可追踪。",
+   "version": "2026.10.30.7e3eabb",
+   "source": "./plugins/career-ops-hq-career-ops",
+   "category": "商业",
+   "author": {
+    "name": "career-ops-hq"
+   },
+   "keywords": [
+    "求职",
+    "简历",
+    "ATS",
+    "自动化"
+   ]
+  },
+  {
+   "name": "mvanhorn-last30days-skill",
+   "description": "研究任意话题在 Reddit、X、YouTube、Hacker News、Polymarket 与全网近 30 天的动态，并合成一份带出处的报告。",
+   "version": "2026.10.30.f4dff26",
+   "source": "./plugins/mvanhorn-last30days-skill",
+   "category": "效率",
+   "author": {
+    "name": "mvanhorn"
+   },
+   "keywords": [
+    "研究",
+    "舆情",
+    "Reddit",
+    "报告"
+   ]
+  },
+  {
+   "name": "kepano-obsidian-skills",
+   "description": "Obsidian 官方出品的代理技能：教代理正确使用 Obsidian CLI 与 Markdown、Bases、JSON Canvas 等开放格式。",
+   "version": "2026.10.30.3ccff53",
+   "source": "./plugins/kepano-obsidian-skills",
+   "category": "效率",
+   "author": {
+    "name": "kepano"
+   },
+   "keywords": [
+    "obsidian",
+    "笔记",
+    "markdown",
+    "官方"
+   ]
+  },
+  {
+   "name": "alibaba-open-code-review",
+   "description": "阿里巴巴开源的混合架构代码评审：确定性静态检查 + 仓库级上下文理解，在阿里规模久经实战。",
+   "version": "2026.10.30.ea5ced2",
+   "source": "./plugins/alibaba-open-code-review",
+   "category": "开发工具",
+   "author": {
+    "name": "alibaba"
+   },
+   "keywords": [
+    "代码评审",
+    "code-review",
+    "阿里巴巴",
+    "质量"
+   ]
+  },
+  {
+   "name": "vercel-labs-skills",
+   "description": "Vercel 开源的 agent skills 管理工具（npx skills）：技能的发现、安装与发布一条命令搞定，自带 3 个实用技能。",
+   "version": "2026.10.30.13e4063",
+   "source": "./plugins/vercel-labs-skills",
+   "category": "开发工具",
+   "author": {
+    "name": "vercel-labs"
+   },
+   "keywords": [
+    "vercel",
+    "技能管理",
+    "CLI",
+    "官方"
+   ]
+  },
+  {
+   "name": "vercel-labs-agent-skills",
+   "description": "Vercel 官方 agent skills 合集：9 个覆盖前端部署与工作流场景的技能，与 Next.js 生态同源。",
+   "version": "2026.10.30.063bee9",
+   "source": "./plugins/vercel-labs-agent-skills",
+   "category": "合集",
+   "author": {
+    "name": "vercel-labs"
+   },
+   "keywords": [
+    "vercel",
+    "官方",
+    "合集",
+    "前端"
+   ]
+  },
+  {
+   "name": "googleworkspace-cli",
+   "description": "Google Workspace 官方命令行：Drive、Gmail、Calendar、Sheets、Docs、Chat、Admin 一条命令行全覆盖（95 个 skill）。",
+   "version": "2026.10.30.a3768d0",
+   "source": "./plugins/googleworkspace-cli",
+   "category": "自动化",
+   "author": {
+    "name": "googleworkspace"
+   },
+   "keywords": [
+    "google",
+    "gmail",
+    "drive",
+    "自动化",
+    "官方"
+   ]
+  },
+  {
+   "name": "cloudflare-security-audit-skill",
+   "description": "Cloudflare 出品的多阶段安全审计 Skill：产出可独立核验的机器可读发现，让代理审计有据可查。",
+   "version": "2026.10.30.c1c8a8c",
+   "source": "./plugins/cloudflare-security-audit-skill",
+   "category": "安全",
+   "author": {
+    "name": "cloudflare"
+   },
+   "keywords": [
+    "安全",
+    "审计",
+    "cloudflare",
+    "漏洞"
+   ]
+  },
+  {
+   "name": "op7418-guizang-ppt-skill",
+   "description": "归藏出品的 HTML 幻灯片生成 Skill：杂志编辑与瑞士版式双风格，内建配图提示词，产出可直接演示的页面。",
+   "version": "2026.10.30.c91369c",
+   "source": "./plugins/op7418-guizang-ppt-skill",
+   "category": "设计",
+   "author": {
+    "name": "op7418"
+   },
+   "keywords": [
+    "PPT",
+    "幻灯片",
+    "版式",
+    "html"
+   ]
+  },
+  {
+   "name": "KKKKhazix-khazix-skills",
+   "description": "数字生命卡兹克开源的 AI Skills 合集：leader 目标定义、洁癖整理、hv-analysis 深度分析、写作等中文场景技能。",
+   "version": "2026.10.30.322346d",
+   "source": "./plugins/KKKKhazix-khazix-skills",
+   "category": "合集",
+   "author": {
+    "name": "KKKKhazix"
+   },
+   "keywords": [
+    "合集",
+    "写作",
+    "分析",
+    "中文"
+   ]
+  },
+  {
+   "name": "google-skills",
+   "description": "Google 官方 agent skills 库：覆盖 Google Cloud 与全线产品的 166 个技能，官方维护持续更新。",
+   "version": "2026.10.30.b85f257",
+   "source": "./plugins/google-skills",
+   "category": "合集",
+   "author": {
+    "name": "google"
+   },
+   "keywords": [
+    "google",
+    "官方",
+    "合集",
+    "google-cloud"
+   ]
+  },
+  {
+   "name": "microsoft-SkillOpt",
+   "description": "微软开源的文本空间优化器：通过真实执行反馈训练可复用的自然语言技能，让冻结参数的 LLM 代理越用越准。",
+   "version": "2026.10.30.343db22",
+   "source": "./plugins/microsoft-SkillOpt",
+   "category": "科研",
+   "author": {
+    "name": "microsoft"
+   },
+   "keywords": [
+    "微软",
+    "优化",
+    "自进化",
+    "研究"
+   ]
+  },
+  {
+   "name": "muratcankoylan-Agent-Skills-for-Context-Engineering",
+   "description": "上下文工程与多代理架构的技能合集：生产级模式、注意力管理、记忆分层等 24 个进阶技能。",
+   "version": "2026.10.30.9ff0c99",
+   "source": "./plugins/muratcankoylan-Agent-Skills-for-Context-Engineering",
+   "category": "开发工具",
+   "author": {
+    "name": "muratcankoylan"
+   },
+   "keywords": [
+    "上下文工程",
+    "多代理",
+    "架构",
+    "最佳实践"
+   ]
+  },
+  {
+   "name": "AgriciDaniel-claude-obsidian",
+   "description": "Obsidian + Claude Code 的自组织第二大脑：丢进任何资料，代理自动阅读、建立链接并归档入 vault（16 个 skill）。",
+   "version": "2026.10.30.32ac5a0",
+   "source": "./plugins/AgriciDaniel-claude-obsidian",
+   "category": "效率",
+   "author": {
+    "name": "AgriciDaniel"
+   },
+   "keywords": [
+    "obsidian",
+    "笔记",
+    "知识管理",
+    "第二大脑"
+   ]
+  },
+  {
+   "name": "nidhinjs-prompt-master",
+   "description": "为任意 AI 工具写准提示词的 Skill：完整上下文分析，不浪费一个 token 或额度，一次写到位。",
+   "version": "2026.10.30.769bf64",
+   "source": "./plugins/nidhinjs-prompt-master",
+   "category": "写作",
+   "author": {
+    "name": "nidhinjs"
+   },
+   "keywords": [
+    "提示词",
+    "prompt",
+    "效率",
+    "写作"
+   ]
+  },
+  {
+   "name": "Orchestra-Research-AI-Research-SKILLs",
+   "description": "面向 AI 研究与工程的开源技能库（98 个 skill）：实验、评测、文献、写作全流程，可打包给任意模型使用。",
+   "version": "2026.10.30.773a529",
+   "source": "./plugins/Orchestra-Research-AI-Research-SKILLs",
+   "category": "科研",
+   "author": {
+    "name": "Orchestra-Research"
+   },
+   "keywords": [
+    "科研",
+    "AI",
+    "评测",
+    "合集"
+   ]
+  },
+  {
+   "name": "OrchestratorInc-agent-orchestrator",
+   "description": "运行并监督成队的编码代理：从规划到合并全流程，跨 Claude Code、Codex 等 25+ harness 通用。",
+   "version": "2026.10.30.44acd07",
+   "source": "./plugins/OrchestratorInc-agent-orchestrator",
+   "category": "开发工具",
+   "author": {
+    "name": "OrchestratorInc"
+   },
+   "keywords": [
+    "编排",
+    "多代理",
+    "编码",
+    "监督"
+   ]
+  },
+  {
+   "name": "Jeffallan-claude-skills",
+   "description": "面向全栈开发者的 67 个专项技能：把 Claude Code 变成覆盖前后端的专家结对程序员。",
+   "version": "2026.10.30.1be15d8",
+   "source": "./plugins/Jeffallan-claude-skills",
+   "category": "合集",
+   "author": {
+    "name": "Jeffallan"
+   },
+   "keywords": [
+    "全栈",
+    "合集",
+    "结对编程",
+    "claude"
+   ]
+  },
+  {
+   "name": "kangarooking-cangjie-skill",
+   "description": "把书、长视频、播客等高价值内容蒸馏成可执行的 Agent Skills：读完即会用，知识沉淀自动化（36 个 skill）。",
+   "version": "2026.10.30.a28de55",
+   "source": "./plugins/kangarooking-cangjie-skill",
+   "category": "效率",
+   "author": {
+    "name": "kangarooking"
+   },
+   "keywords": [
+    "蒸馏",
+    "知识管理",
+    "播客",
+    "自动化"
+   ]
+  },
+  {
+   "name": "tigerless-labs-autoharness",
+   "description": "自学习技能层：从你的真实使用会话中蒸馏技能、持续更新阈值——越用越贴合你的工作方式。",
+   "version": "2026.10.30.6bb7ea5",
+   "source": "./plugins/tigerless-labs-autoharness",
+   "category": "效率",
+   "author": {
+    "name": "tigerless-labs"
+   },
+   "keywords": [
+    "自学习",
+    "蒸馏",
+    "个性化",
+    "claude-code"
+   ]
+  },
+  {
+   "name": "aden-hive-hive",
+   "description": "生产级多代理 Harness：自主代理团队的任务分解、执行与守护（24 个 skill），面向真实业务负载。",
+   "version": "2026.10.30.e44fdd9",
+   "source": "./plugins/aden-hive-hive",
+   "category": "开发工具",
+   "author": {
+    "name": "aden-hive"
+   },
+   "keywords": [
+    "多代理",
+    "生产",
+    "框架",
+    "自动化"
+   ]
+  },
+  {
+   "name": "wheresryan22-anatomy",
+   "description": "生成真实世界机器与复杂系统的精细等距插图：交互式 SVG，可缩放可标注，工程科普利器。",
+   "version": "2026.10.30.bc943e4",
+   "source": "./plugins/wheresryan22-anatomy",
+   "category": "设计",
+   "author": {
+    "name": "wheresryan22"
+   },
+   "keywords": [
+    "插图",
+    "等距",
+    "SVG",
+    "可视化"
+   ]
+  },
+  {
+   "name": "AgriciDaniel-claude-ads",
+   "description": "Claude 优先的付费媒体运营 Skill：覆盖 Google、Meta、YouTube、LinkedIn 等 12 个广告平台（34 个 skill）。",
+   "version": "2026.10.30.ac21644",
+   "source": "./plugins/AgriciDaniel-claude-ads",
+   "category": "商业",
+   "author": {
+    "name": "AgriciDaniel"
+   },
+   "keywords": [
+    "广告",
+    "投放",
+    "营销",
+    "商业"
+   ]
+  },
+  {
+   "name": "backnotprop-plannotator",
+   "description": "可视化批注与评审编码代理的计划和代码 diff：团队共享反馈直达代理（18 个 skill）。",
+   "version": "2026.10.30.72b6c96",
+   "source": "./plugins/backnotprop-plannotator",
+   "category": "开发工具",
+   "author": {
+    "name": "backnotprop"
+   },
+   "keywords": [
+    "评审",
+    "批注",
+    "diff",
+    "协作"
+   ]
+  },
+  {
+   "name": "nexu-io-html-anything",
+   "description": "代理式 HTML 编辑器：本地 AI 代理写页面、你来发布——75 个技能 × 9 种版面（杂志/落地页/报告等）。",
+   "version": "2026.10.30.975fb3b",
+   "source": "./plugins/nexu-io-html-anything",
+   "category": "设计",
+   "author": {
+    "name": "nexu-io"
+   },
+   "keywords": [
+    "html",
+    "编辑器",
+    "版面",
+    "agentic"
+   ]
+  },
+  {
+   "name": "google-labs-code-stitch-skills",
+   "description": "Google Labs Stitch 官方技能库：配合 Stitch MCP 服务器使用的 16 个技能，遵循 Agent Skills 开放规范。",
+   "version": "2026.10.30.0337446",
+   "source": "./plugins/google-labs-code-stitch-skills",
+   "category": "合集",
+   "author": {
+    "name": "google-labs-code"
+   },
+   "keywords": [
+    "google",
+    "stitch",
+    "官方",
+    "合集"
+   ]
+  },
+  {
+   "name": "YaoApp-yao",
+   "description": "所有代理与工作台集中一处、全设备可达：任务看板、跨端同步（15 个 skill），AI 原生架构。",
+   "version": "2026.10.30.ae75246",
+   "source": "./plugins/YaoApp-yao",
+   "category": "效率",
+   "author": {
+    "name": "YaoApp"
+   },
+   "keywords": [
+    "看板",
+    "工作台",
+    "跨端",
+    "AI-native"
+   ]
+  },
+  {
+   "name": "jakubkrehel-skills",
+   "description": "帮你构建出色界面的代理技能合集（14 个 skill）：从布局系统到交互细节的实战规范。",
+   "version": "2026.10.30.4c66b1f",
+   "source": "./plugins/jakubkrehel-skills",
+   "category": "设计",
+   "author": {
+    "name": "jakubkrehel"
+   },
+   "keywords": [
+    "界面",
+    "前端",
+    "设计",
+    "合集"
+   ]
+  },
+  {
+   "name": "browser-use-video-use",
+   "description": "browser-use 团队出品：让 Claude Code 等编码代理直接上手剪辑视频。代理通过逐帧可视化反馈回路「看着剪」，支持剪切、拼接、字幕、特效等真实剪辑操作，把剪辑软件的活交给对话完成。",
+   "version": "2026.10.30.43cfc56",
+   "source": "./plugins/browser-use-video-use",
+   "category": "设计",
+   "author": {
+    "name": "browser-use"
+   },
+   "keywords": [
+    "视频",
+    "剪辑",
+    "browser-use",
+    "逐帧",
+    "claude-code"
+   ]
+  },
+  {
+   "name": "kajisho5-ffmpeg-skill",
+   "description": "本地视频剪辑工具箱：42 个带机器可读契约的 FFmpeg 工具与 MCP 服务器，覆盖剪切、字幕烧录、画面重构、响度归一与多平台导出，全程本地运行，不依赖云服务与 API key。",
+   "version": "2026.10.30.88e2f42",
+   "source": "./plugins/kajisho5-ffmpeg-skill",
+   "category": "设计",
+   "author": {
+    "name": "kajisho5"
+   },
+   "keywords": [
+    "ffmpeg",
+    "剪辑",
+    "字幕",
+    "mcp",
+    "本地"
+   ]
+  },
+  {
+   "name": "zenstory-ai-video-recap-skills",
+   "description": "把任意视频做成中文解说成片的 Claude Code / Codex 技能集：场景切分、ASR 转写、VLM 理解画面、解说稿生成、TTS 配音、FFmpeg 合成，并支持一键导出可编辑的剪映 / CapCut 草稿，本地 FFmpeg + 单个 MiMo key 即可，无需 GPU。",
+   "version": "2026.10.30.9c88a98",
+   "source": "./plugins/zenstory-ai-video-recap-skills",
+   "category": "设计",
+   "author": {
+    "name": "zenstory-ai"
+   },
+   "keywords": [
+    "视频",
+    "解说",
+    "剪映",
+    "字幕",
+    "tts",
+    "ffmpeg"
+   ]
+  },
+  {
+   "name": "Vincentwei1021-anything2explainer",
+   "description": "输入一个主题，产出一支黑底动效讲解视频：TTS 旁白、逐句字幕与章节进度条齐备，中英文皆可，每一帧都用 Remotion 代码绘制，跨平台渲染结果一致，Claude Code / Codex 可用。",
+   "version": "2026.10.30.735c79c",
+   "source": "./plugins/Vincentwei1021-anything2explainer",
+   "category": "设计",
+   "author": {
+    "name": "Vincentwei1021"
+   },
+   "keywords": [
+    "视频",
+    "讲解",
+    "动效",
+    "remotion",
+    "tts"
+   ]
+  },
+  {
+   "name": "zenstory-ai-drama-skills",
+   "description": "开源 AI 短剧 / 漫剧创作 skill 合集：剧本、角色资产、分镜 storyboard、图片与视频提示词、内容审查全流程覆盖，适配 Claude Code 与 Codex，从设定到成片提示词一站打通。",
+   "version": "2026.10.30.fdb7b7c",
+   "source": "./plugins/zenstory-ai-drama-skills",
+   "category": "设计",
+   "author": {
+    "name": "zenstory-ai"
+   },
+   "keywords": [
+    "视频",
+    "短剧",
+    "分镜",
+    "剧本",
+    "提示词"
+   ]
+  },
+  {
+   "name": "op7418-Youtube-clipper-skill",
+   "description": "归藏出品的 YouTube 视频智能剪辑工具：下载视频与字幕、AI 生成分钟级精细章节、选定片段后自动剪辑、字幕翻译为中英双语并烧录，最后产出总结文案，六阶段工作流一步不落。",
+   "version": "2026.10.30.f31f077",
+   "source": "./plugins/op7418-Youtube-clipper-skill",
+   "category": "设计",
+   "author": {
+    "name": "op7418"
+   },
+   "keywords": [
+    "视频",
+    "剪辑",
+    "youtube",
+    "切片",
+    "字幕",
+    "双语"
+   ]
+  }
+ ],
+ "included": [
+  "anthropics-skills",
+  "obra-superpowers",
+  "Leonxlnx-taste-skill",
+  "vercel-labs-agent-browser",
+  "wshobson-agents",
+  "multica-ai-andrej-karpathy-skills",
+  "DietrichGebert-ponytail",
+  "tt-a1i-archify",
+  "ayghri-i-have-adhd",
+  "blader-humanizer",
+  "coreyhaines31-marketingskills",
+  "cathrynlavery-diagram-design",
+  "zhaoxuya520-reverse-skill",
+  "virgiliojr94-book-to-skill",
+  "Nutlope-hallmark",
+  "OthmanAdi-planning-with-files",
+  "phuryn-pm-skills",
+  "titanwings-distilly",
+  "machina-sports-sports-skills",
+  "stefanoskarakasis-Product-Marketing-Skills",
+  "tackeyy-mission",
+  "buidangminh23-spacing-skill",
+  "beggarticksarthurtatum121-reddit-skills",
+  "docsor1212-pubmed-verifier",
+  "bsq415-research-rigor-skill",
+  "gal-a-qikly",
+  "Kimeur-motion-launch-videos",
+  "yschimke-compose-ai-tools",
+  "creedants-pstack-t3",
+  "theonly1me-shadowclone",
+  "Marsjunwang-nblane",
+  "Bank848-Claude-Abo",
+  "morluto-rea",
+  "ericrisco-rsc-harness",
+  "nextlevelbuilder-ui-ux-pro-max-skill",
+  "thedotmack-claude-mem",
+  "Egonex-AI-Understand-Anything",
+  "career-ops-hq-career-ops",
+  "mvanhorn-last30days-skill",
+  "kepano-obsidian-skills",
+  "alibaba-open-code-review",
+  "vercel-labs-skills",
+  "vercel-labs-agent-skills",
+  "googleworkspace-cli",
+  "cloudflare-security-audit-skill",
+  "op7418-guizang-ppt-skill",
+  "KKKKhazix-khazix-skills",
+  "google-skills",
+  "microsoft-SkillOpt",
+  "muratcankoylan-Agent-Skills-for-Context-Engineering",
+  "AgriciDaniel-claude-obsidian",
+  "nidhinjs-prompt-master",
+  "Orchestra-Research-AI-Research-SKILLs",
+  "OrchestratorInc-agent-orchestrator",
+  "Jeffallan-claude-skills",
+  "kangarooking-cangjie-skill",
+  "tigerless-labs-autoharness",
+  "aden-hive-hive",
+  "wheresryan22-anatomy",
+  "AgriciDaniel-claude-ads",
+  "backnotprop-plannotator",
+  "nexu-io-html-anything",
+  "google-labs-code-stitch-skills",
+  "YaoApp-yao",
+  "jakubkrehel-skills",
+  "browser-use-video-use",
+  "kajisho5-ffmpeg-skill",
+  "zenstory-ai-video-recap-skills",
+  "Vincentwei1021-anything2explainer",
+  "zenstory-ai-drama-skills",
+  "op7418-Youtube-clipper-skill"
+ ],
+ "excluded": [
+  {
+   "repo": "mattpocock/skills",
+   "reason": "ConfigError: mattpocock/skills: 解包内容里找不到可打包的 skill（无 skills/、无含 SKILL.md 的子目录）"
+  },
+  {
+   "repo": "garrytan/gstack",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'connect-chrome'"
+  },
+  {
+   "repo": "addyosmani/agent-skills",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.opencode/skills'"
+  },
+  {
+   "repo": "nexu-io/open-design",
+   "reason": "ValueError: 插件体积 277MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "K-Dense-AI/scientific-agent-skills",
+   "reason": "ValueError: 插件体积 277MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "affaan-m/ECC",
+   "reason": "ValueError: 插件体积 55MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "Imbad0202/academic-research-skills",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'skills/academic-paper'"
+  },
+  {
+   "repo": "mukul975/Anthropic-Cybersecurity-Skills",
+   "reason": "ValueError: 插件体积 30MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "JimLiu/baoyu-skills",
+   "reason": "ValueError: 插件体积 31MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "alchaincyf/huashu-design",
+   "reason": "ValueError: 插件体积 31MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "victorrentea/human-review",
+   "reason": "ValueError: 插件体积 96MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "skywain/trip-planner-skill",
+   "reason": "ValueError: 插件体积 50MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "danieljustus/symaira-eraseme",
+   "reason": "ValueError: 插件体积 68MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "bks-lab/open-bridge",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.agents/skills'"
+  },
+  {
+   "repo": "kurone-kito/idd-skill",
+   "reason": "ValueError: 插件体积 32MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "frankxai/Starlight-Intelligence-System",
+   "reason": "ValueError: 插件体积 138MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "code-yeongyu/oh-my-openagent",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.claude/commands'"
+  },
+  {
+   "repo": "calesthio/OpenMontage",
+   "reason": "ValueError: 插件体积 53MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "CherryHQ/cherry-studio",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.claude/skills/cherry-electron-dev'"
+  },
+  {
+   "repo": "Yuan1z0825/nature-skills",
+   "reason": "ValueError: 插件体积 43MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "iOfficeAI/AionUi",
+   "reason": "ValueError: tarball 超过大小上限（>268435456 字节）"
+  },
+  {
+   "repo": "topoteretes/cognee",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.claude/skills'"
+  },
+  {
+   "repo": "iOfficeAI/OfficeCLI",
+   "reason": "ValueError: 插件体积 90MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "nanocoai/nanoclaw",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.agents/skills'"
+  },
+  {
+   "repo": "alirezarezvani/claude-skills",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.codex/skills/a11y-audit'"
+  },
+  {
+   "repo": "teng-lin/notebooklm-py",
+   "reason": "ValueError: 插件体积 116MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "larksuite/cli",
+   "reason": "ValueError: 插件体积 31MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "citrolabs/ego-lite",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.agents/skills/ego-browser'"
+  },
+  {
+   "repo": "latent-spaces/brag",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'.agents/skills/brag'"
+  },
+  {
+   "repo": "eigent-ai/eigent",
+   "reason": "ConfigError: eigent-ai/eigent: 解包内容里找不到可打包的 skill（无 skills/、无含 SKILL.md 的子目录）"
+  },
+  {
+   "repo": "krillinai/OpenCreator",
+   "reason": "ValueError: tarball 超过大小上限（>268435456 字节）"
+  },
+  {
+   "repo": "Vincentwei1021/video-shotcraft",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'workbench/demosrc'"
+  },
+  {
+   "repo": "nicobailon/visual-explainer",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'skills/visual-explainer'"
+  },
+  {
+   "repo": "genspark-ai/genoffice",
+   "reason": "ValueError: 插件体积 72MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "chuspeeism/dashi-ppt-skill",
+   "reason": "ValueError: 插件体积 57MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "heygen-com/hyperframes",
+   "reason": "ArtifactError: tar 符号链接指向目录或缺失目标，无法物化（fail-closed）：'packages/cli/src/audio/scripts'"
+  },
+  {
+   "repo": "0xsline/OpenChatCut",
+   "reason": "ValueError: 插件体积 84MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "JimLiu/baocut",
+   "reason": "ValueError: 插件体积 208MB 超过上限 30MB，已剔除"
+  },
+  {
+   "repo": "Vincentwei1021/video-talkcraft",
+   "reason": "ArtifactError: tar 符号链接目标不在包内（fail-closed）：'video-talkcraft-a7c29edfb2404612dde6a5a1c8aa94232e85625b/workbench/node_modules' -> '/Users/weiyihao/personal/video-"
+  }
+ ]
+}

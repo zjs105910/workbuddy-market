@@ -1,0 +1,19 @@
+{
+ "name": "backnotprop-plannotator",
+ "version": "2026.10.30.72b6c96",
+ "description": "可视化批注与评审编码代理的计划和代码 diff：团队共享反馈直达代理（18 个 skill）。",
+ "description_en": "Annotate and review coding agent plans and code diffs visually; share feedback to agents.",
+ "author": {
+  "name": "backnotprop"
+ },
+ "keywords": [
+  "评审",
+  "批注",
+  "diff",
+  "协作"
+ ],
+ "category": "开发工具",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/backnotprop/plannotator",
+ "sourceCommit": "72b6c9604879b209ec866e6b0894482861d854f7"
+}

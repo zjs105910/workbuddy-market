@@ -1,0 +1,18 @@
+{
+ "name": "creedants-pstack-t3",
+ "version": "2026.10.30.a70a9b8",
+ "description": "Lauren Tan 的 pstack 代理技能集向 T3 Code 的移植版：覆盖前端工程、产品思维与协作流程等 130 个技能，任何模型都能取用。",
+ "author": {
+  "name": "creedants"
+ },
+ "keywords": [
+  "pstack",
+  "前端",
+  "技能合集",
+  "T3 Code"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/creedants/pstack-t3",
+ "sourceCommit": "a70a9b885239db83b9a901c83c491aa1fc74f2b7"
+}

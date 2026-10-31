@@ -1,0 +1,3288 @@
+"""Unit tests for pure data transformation and internal logic."""
+
+import time
+import urllib.error
+
+import pytest
+
+from sports_skills._espn_base import (
+    ESPN_STATUS_MAP,
+    _cache_get,
+    _cache_set,
+    _is_retryable,
+    normalize_odds,
+)
+from sports_skills._response import error, success, wrap
+
+# ── normalize_odds ─────────────────────────────────────────────
+
+
+class TestNormalizeOdds:
+    """Tests for the shared ESPN odds normalizer."""
+
+    def test_empty_list_returns_none(self):
+        assert normalize_odds([]) is None
+
+    def test_none_input_returns_none(self):
+        assert normalize_odds(None) is None
+
+    def test_two_way_moneyline(self):
+        """Standard US sport odds — home/away only, no draw."""
+        odds = [
+            {
+                "provider": {"name": "Draft Kings"},
+                "details": "BOS -6.5",
+                "overUnder": 220.5,
+                "spread": 6.5,
+                "moneyline": {
+                    "home": {"close": {"odds": "-280"}},
+                    "away": {"close": {"odds": "+220"}},
+                },
+                "pointSpread": {
+                    "home": {"close": {"line": "-6.5", "odds": "-110"}},
+                    "away": {"close": {"line": "+6.5", "odds": "-110"}},
+                },
+                "total": {
+                    "over": {"close": {"line": "o220.5", "odds": "-110"}},
+                    "under": {"close": {"line": "u220.5", "odds": "-110"}},
+                },
+                "homeTeamOdds": {"favorite": True},
+                "awayTeamOdds": {},
+            }
+        ]
+        result = normalize_odds(odds)
+
+        assert result["provider"] == "Draft Kings"
+        assert result["details"] == "BOS -6.5"
+        assert result["over_under"] == 220.5
+        assert result["favorite"] == "home"
+        assert result["moneyline"]["home"] == "-280"
+        assert result["moneyline"]["away"] == "+220"
+        assert "draw" not in result["moneyline"]
+        assert result["spread_line"]["home"]["line"] == "-6.5"
+        assert result["total"]["over"]["line"] == "o220.5"
+
+    def test_three_way_moneyline_soccer(self):
+        """Soccer odds include draw in moneyline."""
+        odds = [
+            {
+                "provider": {"name": "Draft Kings"},
+                "details": "ATH -145",
+                "overUnder": 2.5,
+                "spread": "",
+                "moneyline": {
+                    "home": {"open": {"odds": "-170"}, "close": {"odds": "-145"}},
+                    "away": {"open": {"odds": "+450"}, "close": {"odds": "+425"}},
+                    "draw": {"open": {"odds": "+285"}, "close": {"odds": "+280"}},
+                },
+                "pointSpread": {},
+                "total": {},
+                "homeTeamOdds": {},
+                "awayTeamOdds": {},
+            }
+        ]
+        result = normalize_odds(odds)
+
+        assert result["moneyline"]["home"] == "-145"
+        assert result["moneyline"]["away"] == "+425"
+        assert result["moneyline"]["draw"] == "+280"
+
+    def test_opening_lines_included(self):
+        """Opening lines should populate the 'open' sub-dict."""
+        odds = [
+            {
+                "provider": {"name": "Draft Kings"},
+                "details": "",
+                "moneyline": {
+                    "home": {"open": {"odds": "-250"}, "close": {"odds": "-280"}},
+                    "away": {"open": {"odds": "+200"}, "close": {"odds": "+220"}},
+                },
+                "pointSpread": {
+                    "home": {"open": {"line": "-6.0"}, "close": {"line": "-6.5"}},
+                    "away": {"open": {"line": "+6.0"}, "close": {"line": "+6.5"}},
+                },
+                "total": {
+                    "over": {"open": {"line": "o219.5"}, "close": {"line": "o220.5"}},
+                    "under": {"close": {"line": "u220.5"}},
+                },
+                "homeTeamOdds": {},
+                "awayTeamOdds": {},
+            }
+        ]
+        result = normalize_odds(odds)
+
+        assert result["open"]["moneyline"]["home"] == "-250"
+        assert result["open"]["moneyline"]["away"] == "+200"
+        assert result["open"]["spread"]["home"] == "-6.0"
+        assert result["open"]["total"] == "o219.5"
+
+    def test_opening_draw_lines(self):
+        """Soccer opening lines should include draw when present."""
+        odds = [
+            {
+                "provider": {"name": "Draft Kings"},
+                "details": "",
+                "moneyline": {
+                    "home": {"open": {"odds": "-170"}, "close": {"odds": "-145"}},
+                    "away": {"open": {"odds": "+450"}, "close": {"odds": "+425"}},
+                    "draw": {"open": {"odds": "+285"}, "close": {"odds": "+280"}},
+                },
+                "pointSpread": {},
+                "total": {},
+                "homeTeamOdds": {},
+                "awayTeamOdds": {},
+            }
+        ]
+        result = normalize_odds(odds)
+
+        assert result["open"]["moneyline"]["draw"] == "+285"
+
+    def test_away_favorite(self):
+        odds = [
+            {
+                "provider": {"name": "DK"},
+                "details": "",
+                "moneyline": {},
+                "pointSpread": {},
+                "total": {},
+                "homeTeamOdds": {},
+                "awayTeamOdds": {"favorite": True},
+            }
+        ]
+        result = normalize_odds(odds)
+        assert result["favorite"] == "away"
+
+    def test_no_favorite(self):
+        odds = [
+            {
+                "provider": {"name": "DK"},
+                "details": "",
+                "moneyline": {},
+                "pointSpread": {},
+                "total": {},
+                "homeTeamOdds": {},
+                "awayTeamOdds": {},
+            }
+        ]
+        result = normalize_odds(odds)
+        assert result["favorite"] is None
+
+    def test_missing_nested_keys_default_empty(self):
+        """Deeply nested missing keys should not raise — they default to empty strings."""
+        odds = [{"provider": {}, "moneyline": {"home": {}}, "pointSpread": {}, "total": {}}]
+        result = normalize_odds(odds)
+        assert result["provider"] == ""
+        assert result["moneyline"]["home"] == ""
+
+
+# ── _response ──────────────────────────────────────────────────
+
+
+class TestResponse:
+    def test_success_envelope(self):
+        r = success({"key": "val"}, message="ok")
+        assert r == {"status": True, "data": {"key": "val"}, "message": "ok"}
+
+    def test_error_envelope(self):
+        r = error("broke", data={"debug": 1})
+        assert r == {"status": False, "data": {"debug": 1}, "message": "broke"}
+
+    def test_wrap_passthrough(self):
+        """Already-formatted responses pass through unchanged."""
+        envelope = {"status": True, "data": [1, 2], "message": ""}
+        assert wrap(envelope) is envelope
+
+    def test_wrap_error_dict(self):
+        r = wrap({"error": True, "message": "timeout"})
+        assert r["status"] is False
+        assert r["message"] == "timeout"
+
+    def test_wrap_plain_dict(self):
+        r = wrap({"goals": 3})
+        assert r["status"] is True
+        assert r["data"] == {"goals": 3}
+
+    def test_wrap_non_dict(self):
+        r = wrap([1, 2, 3])
+        assert r["status"] is True
+        assert r["data"] == [1, 2, 3]
+
+
+# ── Cache ──────────────────────────────────────────────────────
+
+
+class TestCache:
+    def test_set_and_get(self):
+        _cache_set("test_key_1", "hello", ttl=60)
+        assert _cache_get("test_key_1") == "hello"
+
+    def test_miss_returns_none(self):
+        assert _cache_get("nonexistent_key_xyz") is None
+
+    def test_expired_entry_returns_none(self):
+        _cache_set("test_key_expire", "val", ttl=0)
+        time.sleep(0.01)
+        assert _cache_get("test_key_expire") is None
+
+
+# ── _is_retryable ─────────────────────────────────────────────
+
+
+class TestIsRetryable:
+    def test_429_is_retryable(self):
+        exc = urllib.error.HTTPError("url", 429, "rate limited", {}, None)
+        assert _is_retryable(exc) is True
+
+    def test_500_is_retryable(self):
+        exc = urllib.error.HTTPError("url", 500, "server error", {}, None)
+        assert _is_retryable(exc) is True
+
+    def test_404_is_not_retryable(self):
+        exc = urllib.error.HTTPError("url", 404, "not found", {}, None)
+        assert _is_retryable(exc) is False
+
+    def test_timeout_is_retryable(self):
+        assert _is_retryable(TimeoutError()) is True
+
+    def test_os_error_is_retryable(self):
+        assert _is_retryable(OSError("conn reset")) is True
+
+    def test_value_error_is_not_retryable(self):
+        assert _is_retryable(ValueError("bad")) is False
+
+
+# ── ESPN_STATUS_MAP ────────────────────────────────────────────
+
+
+class TestStatusMap:
+    def test_scheduled_maps_to_not_started(self):
+        assert ESPN_STATUS_MAP["STATUS_SCHEDULED"] == "not_started"
+
+    def test_final_maps_to_closed(self):
+        assert ESPN_STATUS_MAP["STATUS_FINAL"] == "closed"
+
+    def test_in_progress_maps_to_live(self):
+        assert ESPN_STATUS_MAP["STATUS_IN_PROGRESS"] == "live"
+
+
+# ── CLI _parse_value ───────────────────────────────────────────
+
+
+class TestParseValue:
+    def test_int_param(self):
+        from sports_skills.cli import _parse_value
+
+        assert _parse_value("limit", "25") == 25
+        assert _parse_value("season", "2024") == 2024
+        assert _parse_value("week", "3") == 3
+
+    def test_bool_param_string(self):
+        from sports_skills.cli import _parse_value
+
+        assert _parse_value("active", "true") is True
+        assert _parse_value("active", "false") is False
+
+    def test_bool_param_already_bool(self):
+        from sports_skills.cli import _parse_value
+
+        assert _parse_value("active", True) is True
+
+    def test_list_param(self):
+        from sports_skills.cli import _parse_value
+
+        result = _parse_value("token_ids", "abc, def, ghi")
+        assert result == ["abc", "def", "ghi"]
+
+    def test_plain_string_passthrough(self):
+        from sports_skills.cli import _parse_value
+
+        assert _parse_value("team_id", "BOS") == "BOS"
+
+
+# ── Play-by-Play Normalizers ─────────────────────────────────
+
+
+class TestNormalizeDrives:
+    """Tests for NFL/CFB drive-based play-by-play normalizer."""
+
+    def test_empty_drives(self):
+        from sports_skills.nfl._connector import _normalize_drives
+
+        result = _normalize_drives({"drives": {"previous": []}})
+        assert result["drives"] == []
+        assert result["count"] == 0
+
+    def test_missing_drives_key(self):
+        from sports_skills.nfl._connector import _normalize_drives
+
+        result = _normalize_drives({})
+        assert result["drives"] == []
+        assert result["count"] == 0
+
+    def test_single_drive_with_plays(self):
+        from sports_skills.nfl._connector import _normalize_drives
+
+        data = {
+            "drives": {
+                "previous": [
+                    {
+                        "id": "1",
+                        "description": "3 plays, 75 yards, 1:30",
+                        "team": {"id": "1", "displayName": "Test Team", "abbreviation": "TT"},
+                        "displayResult": "Touchdown",
+                        "isScore": True,
+                        "yards": 75,
+                        "offensivePlays": 3,
+                        "timeElapsed": {"displayValue": "1:30"},
+                        "start": {
+                            "period": {"number": 1},
+                            "clock": {"displayValue": "15:00"},
+                            "yardLine": 25,
+                            "text": "TT 25",
+                        },
+                        "end": {
+                            "period": {"number": 1},
+                            "clock": {"displayValue": "13:30"},
+                            "yardLine": 0,
+                        },
+                        "plays": [
+                            {
+                                "id": "101",
+                                "text": "Rush for 10 yards",
+                                "type": {"text": "Rush"},
+                                "period": {"number": 1},
+                                "clock": {"displayValue": "14:50"},
+                                "homeScore": 0,
+                                "awayScore": 0,
+                                "scoringPlay": False,
+                                "statYardage": 10,
+                                "isTurnover": False,
+                            },
+                            {
+                                "id": "102",
+                                "text": "Pass for 65 yards, TOUCHDOWN",
+                                "type": {"text": "Pass Reception"},
+                                "period": {"number": 1},
+                                "clock": {"displayValue": "13:30"},
+                                "homeScore": 7,
+                                "awayScore": 0,
+                                "scoringPlay": True,
+                                "statYardage": 65,
+                                "isTurnover": False,
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+        result = _normalize_drives(data)
+        assert result["count"] == 1
+
+        drive = result["drives"][0]
+        assert drive["result"] == "Touchdown"
+        assert drive["is_score"] is True
+        assert drive["yards"] == 75
+        assert drive["team"]["abbreviation"] == "TT"
+        assert drive["start"]["text"] == "TT 25"
+        assert len(drive["plays"]) == 2
+        assert drive["plays"][1]["scoring_play"] is True
+        assert drive["plays"][0]["yards"] == 10
+
+
+class TestNormalizePlays:
+    """Tests for NBA/NHL/CBB flat play-by-play normalizer."""
+
+    def test_empty_plays(self):
+        from sports_skills.nba._connector import _normalize_plays
+
+        result = _normalize_plays({"plays": []})
+        assert result.get("error") is True
+
+    def test_missing_plays_key(self):
+        from sports_skills.nba._connector import _normalize_plays
+
+        result = _normalize_plays({})
+        assert result.get("error") is True
+
+    def test_basic_plays(self):
+        from sports_skills.nba._connector import _normalize_plays
+
+        data = {
+            "plays": [
+                {
+                    "id": "1",
+                    "text": "Jumpball: Player A vs Player B",
+                    "type": {"text": "Jumpball"},
+                    "period": {"number": 1},
+                    "clock": {"displayValue": "12:00"},
+                    "homeScore": 0,
+                    "awayScore": 0,
+                    "scoringPlay": False,
+                    "scoreValue": 0,
+                    "team": {"id": "5"},
+                    "shootingPlay": False,
+                },
+                {
+                    "id": "2",
+                    "text": "Player C makes 3-pointer",
+                    "type": {"text": "Three Point Jumper"},
+                    "period": {"number": 1},
+                    "clock": {"displayValue": "11:35"},
+                    "homeScore": 3,
+                    "awayScore": 0,
+                    "scoringPlay": True,
+                    "scoreValue": 3,
+                    "team": {"id": "5"},
+                    "shootingPlay": True,
+                    "coordinate": {"x": 25, "y": 40},
+                },
+            ]
+        }
+        result = _normalize_plays(data)
+        assert result["count"] == 2
+        assert result["plays"][0]["scoring_play"] is False
+        assert result["plays"][1]["scoring_play"] is True
+        assert result["plays"][1]["score_value"] == 3
+        assert result["plays"][1]["shooting_play"] is True
+        assert result["plays"][1]["coordinate"] == {"x": 25, "y": 40}
+
+    def test_play_without_coordinate(self):
+        from sports_skills.nba._connector import _normalize_plays
+
+        data = {
+            "plays": [
+                {
+                    "id": "1",
+                    "text": "Timeout",
+                    "type": {"text": "Timeout"},
+                    "period": {"number": 1},
+                    "clock": {"displayValue": "5:00"},
+                    "homeScore": 10,
+                    "awayScore": 8,
+                    "scoringPlay": False,
+                    "scoreValue": 0,
+                    "team": {},
+                    "shootingPlay": False,
+                },
+            ]
+        }
+        result = _normalize_plays(data)
+        assert "coordinate" not in result["plays"][0]
+
+
+class TestNormalizeMLBPlays:
+    """Tests for MLB play-by-play normalizer with baseball-specific fields."""
+
+    def test_mlb_play_has_outs_and_inning(self):
+        from sports_skills.mlb._connector import _normalize_plays
+
+        data = {
+            "plays": [
+                {
+                    "id": "1",
+                    "text": "Player grounds out to shortstop",
+                    "type": {"text": "At Bat"},
+                    "period": {"number": 3, "type": "Top"},
+                    "homeScore": 1,
+                    "awayScore": 2,
+                    "scoringPlay": False,
+                    "scoreValue": 0,
+                    "outs": 2,
+                    "atBatId": "abc123",
+                    "team": {"id": "9"},
+                },
+            ]
+        }
+        result = _normalize_plays(data)
+        assert result["count"] == 1
+        play = result["plays"][0]
+        assert play["inning"] == 3
+        assert play["inning_half"] == "Top"
+        assert play["outs"] == 2
+        assert play["at_bat_id"] == "abc123"
+
+
+class TestNormalizeWinProbability:
+    """Tests for win probability normalizer."""
+
+    def test_empty_returns_error(self):
+        from sports_skills.nfl._connector import _normalize_win_probability
+
+        result = _normalize_win_probability({})
+        assert result.get("error") is True
+
+    def test_percentages_converted(self):
+        from sports_skills.nfl._connector import _normalize_win_probability
+
+        data = {
+            "winprobability": [
+                {"playId": "100", "homeWinPercentage": 0.4227, "tiePercentage": 0.0},
+                {"playId": "101", "homeWinPercentage": 0.65, "tiePercentage": 0.0},
+            ]
+        }
+        result = _normalize_win_probability(data)
+        assert result["count"] == 2
+        assert result["timeline"][0]["home_win_pct"] == 42.3
+        assert result["timeline"][0]["play_id"] == "100"
+        assert result["timeline"][1]["home_win_pct"] == 65.0
+
+    def test_cfb_matches_nfl(self):
+        """CFB serves the same three fields, so it normalizes identically."""
+        from sports_skills.cfb._connector import (
+            _normalize_win_probability as cfb_normalize,
+        )
+        from sports_skills.nfl._connector import (
+            _normalize_win_probability as nfl_normalize,
+        )
+
+        data = {
+            "winprobability": [
+                {"playId": "4018644942", "homeWinPercentage": 0.59, "tiePercentage": 0.0},
+            ]
+        }
+        assert cfb_normalize(data) == nfl_normalize(data)
+        assert cfb_normalize({}).get("error") is True
+
+
+# ── Golf: _normalize_player_overview ─────────────────────────
+
+
+class TestNormalizePlayerOverview:
+    """Tests for golf player overview normalizer."""
+
+    def test_empty_data(self):
+        from sports_skills.golf._connector import _normalize_player_overview
+
+        result = _normalize_player_overview({})
+        assert result["season_stats"]["splits"] == []
+        assert result["rankings"] == []
+        assert result["recent_tournaments"] == []
+
+    def test_season_stats_parsed(self):
+        from sports_skills.golf._connector import _normalize_player_overview
+
+        data = {
+            "statistics": {
+                "displayName": "2026 Season Overview",
+                "labels": ["EVENTS", "CUTS", "TOP10", "WINS", "AVG", "EARNINGS"],
+                "names": ["Tournaments Played", "Cuts Made", "Top Ten", "Wins", "Scoring Average", "Earnings"],
+                "splits": [
+                    {
+                        "displayName": "PGA TOUR",
+                        "stats": ["3", "4", "0", "0", "68.1", "$475,327"],
+                    }
+                ],
+            }
+        }
+        result = _normalize_player_overview(data)
+        assert result["season_stats"]["display_name"] == "2026 Season Overview"
+        assert len(result["season_stats"]["splits"]) == 1
+        split = result["season_stats"]["splits"][0]
+        assert split["name"] == "PGA TOUR"
+        assert split["Tournaments Played"] == "3"
+        assert split["Earnings"] == "$475,327"
+
+    def test_rankings_parsed(self):
+        from sports_skills.golf._connector import _normalize_player_overview
+
+        data = {
+            "seasonRankings": {
+                "categories": [
+                    {
+                        "displayName": "Earnings",
+                        "abbreviation": "amount",
+                        "displayValue": "$475,327",
+                        "rank": 36,
+                        "rankDisplayValue": "36th",
+                    },
+                    {
+                        "displayName": "Driving Distance",
+                        "name": "yardsPerDrive",
+                        "abbreviation": "yardsPerDrive",
+                        "value": 312.7,
+                        "displayValue": "312.7",
+                        "rank": 41,
+                    },
+                ]
+            }
+        }
+        result = _normalize_player_overview(data)
+        assert len(result["rankings"]) == 2
+        assert result["rankings"][0]["name"] == "Earnings"
+        assert result["rankings"][0]["rank"] == 36
+        assert result["rankings"][1]["abbreviation"] == "yardsPerDrive"
+
+
+# ── Golf: _normalize_scorecard ───────────────────────────────
+
+
+class TestNormalizeScorecard:
+    """Tests for golf scorecard normalizer."""
+
+    def test_empty_linescores(self):
+        from sports_skills.golf._connector import _normalize_scorecard
+
+        result = _normalize_scorecard({"athlete": {}, "linescores": []})
+        assert result["rounds"] == []
+
+    def test_hole_by_hole_parsed(self):
+        from sports_skills.golf._connector import _normalize_scorecard
+
+        competitor = {
+            "id": "4686",
+            "athlete": {"displayName": "Scottie Scheffler", "flag": {"alt": "USA"}},
+            "score": "-6",
+            "linescores": [
+                {
+                    "period": 1,
+                    "value": 65.0,
+                    "displayValue": "-6",
+                    "linescores": [
+                        {"period": 1, "value": 3.0, "scoreType": {"displayValue": "-2"}},
+                        {"period": 2, "value": 4.0, "scoreType": {"displayValue": "E"}},
+                        {"period": 3, "value": 5.0, "scoreType": {"displayValue": "+1"}},
+                    ],
+                }
+            ],
+        }
+        result = _normalize_scorecard(competitor, "The Genesis Invitational")
+        assert result["player"]["name"] == "Scottie Scheffler"
+        assert result["player"]["country"] == "USA"
+        assert result["tournament"] == "The Genesis Invitational"
+        assert result["overall_score"] == "-6"
+        assert len(result["rounds"]) == 1
+        r1 = result["rounds"][0]
+        assert r1["round"] == 1
+        assert r1["total_strokes"] == 65
+        assert r1["total_score"] == "-6"
+        assert len(r1["holes"]) == 3
+        assert r1["holes"][0] == {"hole": 1, "strokes": 3, "score": "-2"}
+        assert r1["holes"][1] == {"hole": 2, "strokes": 4, "score": "E"}
+        assert r1["holes"][2] == {"hole": 3, "strokes": 5, "score": "+1"}
+
+    def test_skips_invalid_periods(self):
+        from sports_skills.golf._connector import _normalize_scorecard
+
+        competitor = {
+            "athlete": {},
+            "linescores": [
+                {"period": 0, "value": 0, "linescores": []},
+                {"period": 5, "value": 0, "linescores": []},
+            ],
+        }
+        result = _normalize_scorecard(competitor)
+        assert result["rounds"] == []
+
+
+# ── Football: get_player_season_stats normalizer ─────────────
+
+
+class TestFootballPlayerSeasonStats:
+    """Tests for football player season stats overview parsing."""
+
+    def test_empty_gamelog(self):
+        """Simulate overview response with no game log stats."""
+        from sports_skills.football._connector import get_player_season_stats
+
+        # Patch would be needed for real HTTP, but we test the shape check
+        # by verifying the function signature exists and handles empty params
+        result = get_player_season_stats({})
+        assert result.get("error") is True
+        assert "player_id" in result.get("message", "")
+
+
+# ── Cross-sport normalizers (injuries, transactions, stats, futures, depth charts) ──
+
+
+class TestNormalizeInjuries:
+    """Tests for normalize_injuries shared normalizer."""
+
+    def test_basic(self):
+        from sports_skills._espn_base import normalize_injuries
+
+        data = {
+            "injuries": [
+                {
+                    "displayName": "Kansas City Chiefs",
+                    "id": 12,
+                    "injuries": [
+                        {
+                            "athlete": {
+                                "displayName": "Patrick Mahomes",
+                                "position": {"abbreviation": "QB"},
+                            },
+                            "status": "Questionable",
+                            "type": {"description": "Ankle"},
+                            "details": {
+                                "detail": "Right ankle sprain",
+                                "side": "Right",
+                                "returnDate": "2026-01-15",
+                            },
+                        },
+                        {
+                            "athlete": {
+                                "displayName": "Travis Kelce",
+                                "position": {"abbreviation": "TE"},
+                            },
+                            "status": "Out",
+                            "type": {"name": "Knee"},
+                            "details": {"detail": "Knee surgery"},
+                        },
+                    ],
+                },
+            ]
+        }
+        result = normalize_injuries(data)
+        assert result["count"] == 1
+        team = result["teams"][0]
+        assert team["team"] == "Kansas City Chiefs"
+        assert team["team_id"] == "12"
+        assert team["count"] == 2
+        assert team["injuries"][0]["name"] == "Patrick Mahomes"
+        assert team["injuries"][0]["position"] == "QB"
+        assert team["injuries"][0]["status"] == "Questionable"
+        assert team["injuries"][0]["type"] == "Ankle"
+        assert team["injuries"][0]["detail"] == "Right ankle sprain"
+        assert team["injuries"][0]["side"] == "Right"
+        assert team["injuries"][0]["return_date"] == "2026-01-15"
+        assert team["injuries"][1]["name"] == "Travis Kelce"
+        assert team["injuries"][1]["type"] == "Knee"
+        assert team["injuries"][1]["side"] == ""
+
+    def test_empty(self):
+        from sports_skills._espn_base import normalize_injuries
+
+        result = normalize_injuries({})
+        assert result["teams"] == []
+        assert result["count"] == 0
+        assert result["identity_summary"] == {"records": 0, "provider_native": 0, "unresolved": 0}
+        assert any("healthy" in caveat for caveat in result["caveats"])
+
+    def test_team_with_no_injuries(self):
+        from sports_skills._espn_base import normalize_injuries
+
+        data = {"injuries": [{"displayName": "Empty Team", "id": 99, "injuries": []}]}
+        result = normalize_injuries(data)
+        assert result["teams"][0]["count"] == 0
+        assert result["teams"][0]["injuries"] == []
+
+
+class TestNormalizeTransactions:
+    """Tests for normalize_transactions shared normalizer."""
+
+    def test_basic(self):
+        from sports_skills._espn_base import normalize_transactions
+
+        data = {
+            "transactions": [
+                {
+                    "date": "2026-02-18T12:00Z",
+                    "team": {
+                        "displayName": "Los Angeles Lakers",
+                        "abbreviation": "LAL",
+                    },
+                    "description": "Signed G John Doe to a 10-day contract.",
+                },
+                {
+                    "date": "2026-02-17T08:00Z",
+                    "team": {
+                        "displayName": "Boston Celtics",
+                        "abbreviation": "BOS",
+                    },
+                    "description": "Waived F Jane Smith.",
+                },
+            ]
+        }
+        result = normalize_transactions(data)
+        assert result["count"] == 2
+        assert result["transactions"][0]["date"] == "2026-02-18T12:00Z"
+        assert result["transactions"][0]["team"] == "Los Angeles Lakers"
+        assert result["transactions"][0]["team_abbreviation"] == "LAL"
+        assert "John Doe" in result["transactions"][0]["description"]
+        assert result["transactions"][1]["team_abbreviation"] == "BOS"
+
+    def test_empty(self):
+        from sports_skills._espn_base import normalize_transactions
+
+        result = normalize_transactions({})
+        assert result == {"transactions": [], "count": 0}
+
+
+class TestNormalizeCoreStats:
+    """Tests for normalize_core_stats shared normalizer."""
+
+    def test_basic(self):
+        from sports_skills._espn_base import normalize_core_stats
+
+        data = {
+            "splits": {
+                "categories": [
+                    {
+                        "displayName": "Passing",
+                        "stats": [
+                            {
+                                "name": "completions",
+                                "displayName": "Completions",
+                                "abbreviation": "CMP",
+                                "value": 401,
+                                "displayValue": "401",
+                                "rank": 3,
+                                "rankDisplayValue": "3rd",
+                                "perGameValue": 25.1,
+                                "perGameDisplayValue": "25.1",
+                            },
+                            {
+                                "name": "passingYards",
+                                "displayName": "Passing Yards",
+                                "abbreviation": "YDS",
+                                "value": 4839,
+                                "displayValue": "4,839",
+                            },
+                        ],
+                    },
+                    {
+                        "displayName": "Rushing",
+                        "stats": [
+                            {
+                                "name": "rushingAttempts",
+                                "displayName": "Rushing Attempts",
+                                "abbreviation": "ATT",
+                                "value": 66,
+                                "displayValue": "66",
+                            },
+                        ],
+                    },
+                ]
+            }
+        }
+        result = normalize_core_stats(data)
+        assert result["count"] == 2
+        passing = result["categories"][0]
+        assert passing["name"] == "Passing"
+        assert len(passing["stats"]) == 2
+        cmp_stat = passing["stats"][0]
+        assert cmp_stat["name"] == "completions"
+        assert cmp_stat["display_name"] == "Completions"
+        assert cmp_stat["abbreviation"] == "CMP"
+        assert cmp_stat["value"] == 401
+        assert cmp_stat["rank"] == 3
+        assert cmp_stat["rank_display"] == "3rd"
+        assert cmp_stat["per_game"] == 25.1
+        assert cmp_stat["per_game_display"] == "25.1"
+        yds_stat = passing["stats"][1]
+        assert "rank" not in yds_stat
+        assert "per_game" not in yds_stat
+
+    def test_empty_splits(self):
+        from sports_skills._espn_base import normalize_core_stats
+
+        result = normalize_core_stats({})
+        assert result == {"categories": [], "count": 0}
+
+    def test_category_fallback_name(self):
+        from sports_skills._espn_base import normalize_core_stats
+
+        data = {"splits": {"categories": [{"name": "general", "stats": []}]}}
+        result = normalize_core_stats(data)
+        assert result["categories"][0]["name"] == "general"
+
+
+class TestNormalizeFutures:
+    """Tests for normalize_futures shared normalizer."""
+
+    def test_basic_inline_names(self):
+        """Test futures with pre-resolved names (no $ref resolution needed)."""
+        from sports_skills._espn_base import normalize_futures
+
+        data = {
+            "items": [
+                {
+                    "id": "101",
+                    "displayName": "Super Bowl Winner",
+                    "futures": [
+                        {
+                            "books": [
+                                {"athlete": {}, "team": {}, "value": "+450"},
+                                {"athlete": {}, "team": {}, "value": "+600"},
+                            ]
+                        }
+                    ],
+                },
+            ]
+        }
+        result = normalize_futures(data, limit=10)
+        assert result["count"] == 1
+        sb = result["futures"][0]
+        assert sb["id"] == "101"
+        assert sb["name"] == "Super Bowl Winner"
+        assert sb["count"] == 2
+        assert sb["entries"][0]["value"] == "+450"
+        assert sb["entries"][0]["name"] == ""  # no $ref to resolve
+        assert sb["entries"][1]["value"] == "+600"
+
+    def test_empty(self):
+        from sports_skills._espn_base import normalize_futures
+
+        result = normalize_futures({})
+        assert result == {"futures": [], "count": 0}
+
+    def test_limit(self):
+        from sports_skills._espn_base import normalize_futures
+
+        books = [{"athlete": {}, "team": {}, "value": f"+{i}"} for i in range(20)]
+        data = {"items": [{"id": "1", "name": "MVP", "futures": [{"books": books}]}]}
+        result = normalize_futures(data, limit=5)
+        assert result["futures"][0]["count"] == 5
+
+    def _two_provider_market(self):
+        """One market priced by two sportsbooks, as ESPN returns it."""
+        return {
+            "items": [
+                {
+                    "id": "1",
+                    "name": "Winner",
+                    "futures": [
+                        {
+                            "provider": {"id": "58", "name": "ESPN BET", "priority": 0},
+                            "books": [
+                                {"athlete": {}, "team": {}, "value": "+250"},
+                                {"athlete": {}, "team": {}, "value": "+290"},
+                            ],
+                        },
+                        {
+                            "provider": {"id": "100", "name": "DraftKings", "priority": 1},
+                            "books": [{"athlete": {}, "team": {}, "value": "-110"}],
+                        },
+                    ],
+                }
+            ]
+        }
+
+    def test_one_sportsbook_per_market(self):
+        """Two providers used to be flattened into one list, so every
+        competitor appeared twice at contradictory prices."""
+        from sports_skills._espn_base import normalize_futures
+
+        market = normalize_futures(self._two_provider_market())["futures"][0]
+        assert [e["value"] for e in market["entries"]] == ["+250", "+290"]
+        assert market["count"] == 2
+        assert market["provider"] == "ESPN BET"
+
+    def test_limit_counts_entries_not_books_per_provider(self):
+        from sports_skills._espn_base import normalize_futures
+
+        market = normalize_futures(self._two_provider_market(), limit=2)["futures"][0]
+        assert market["count"] == 2
+
+    def test_lowest_priority_present_wins(self):
+        """NFL and college football publish only DraftKings at priority 1, so
+        a literal `priority == 0` would empty those markets."""
+        from sports_skills._espn_base import normalize_futures
+
+        data = {
+            "items": [
+                {
+                    "id": "1",
+                    "name": "Winner",
+                    "futures": [
+                        {
+                            "provider": {"id": "100", "name": "DraftKings", "priority": 1},
+                            "books": [{"athlete": {}, "team": {}, "value": "+700"}],
+                        }
+                    ],
+                }
+            ]
+        }
+        market = normalize_futures(data)["futures"][0]
+        assert market["count"] == 1
+        assert market["provider"] == "DraftKings"
+
+    def test_null_provider_with_entries_still_normalizes(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = {
+            "items": [
+                {
+                    "id": "1",
+                    "name": "Winner",
+                    "futures": [
+                        {
+                            "provider": None,
+                            "books": [{"athlete": {}, "team": {}, "value": "+400"}],
+                        }
+                    ],
+                }
+            ]
+        }
+        market = normalize_futures(data)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["+400"]
+        assert "provider" not in market
+
+    def test_null_priority_sorts_after_numeric_priority(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = self._two_provider_market()
+        groups = data["items"][0]["futures"]
+        groups[0]["provider"]["priority"] = None
+        market = normalize_futures(data)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["-110"]
+        assert market["provider"] == "DraftKings"
+
+    def test_numeric_string_and_number_priorities_compare_numerically(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = self._two_provider_market()
+        groups = data["items"][0]["futures"]
+        groups[0]["provider"]["priority"] = "10"
+        groups[1]["provider"]["priority"] = 2
+        market = normalize_futures(data)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["-110"]
+        assert market["provider"] == "DraftKings"
+
+    def test_empty_preferred_group_falls_back_to_usable_provider(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = self._two_provider_market()
+        groups = data["items"][0]["futures"]
+        groups[0]["books"] = []
+        groups[1]["books"] = [
+            {"athlete": {}, "team": {}, "value": "+100"},
+            {"athlete": {}, "team": {}, "value": "+200"},
+            {"athlete": {}, "team": {}, "value": "+300"},
+        ]
+        market = normalize_futures(data, limit=2)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["+100", "+200"]
+        assert market["provider"] == "DraftKings"
+
+    def test_tied_priorities_use_response_order(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = self._two_provider_market()
+        groups = data["items"][0]["futures"]
+        groups[1]["provider"]["priority"] = 0
+        market = normalize_futures(data)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["+250", "+290"]
+        assert market["provider"] == "ESPN BET"
+
+    def test_missing_priorities_use_response_order(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = self._two_provider_market()
+        groups = data["items"][0]["futures"]
+        del groups[0]["provider"]["priority"]
+        del groups[1]["provider"]["priority"]
+        market = normalize_futures(data)["futures"][0]
+        assert [entry["value"] for entry in market["entries"]] == ["+250", "+290"]
+        assert market["provider"] == "ESPN BET"
+
+    def test_market_without_a_provider_still_normalizes(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = {"items": [{"id": "1", "name": "MVP", "futures": [{"books": []}]}]}
+        market = normalize_futures(data)["futures"][0]
+        assert market["count"] == 0
+        assert "provider" not in market
+
+    def test_name_fallback(self):
+        from sports_skills._espn_base import normalize_futures
+
+        data = {
+            "items": [
+                {"id": "2", "name": "Cy Young", "futures": [{"books": []}]},
+            ]
+        }
+        result = normalize_futures(data)
+        assert result["futures"][0]["name"] == "Cy Young"
+
+
+class TestMlbFutures:
+    """MLB was the only one of the four major pro leagues without get_futures."""
+
+    def test_requests_mlb_futures_and_normalizes(self, monkeypatch):
+        from sports_skills.mlb import _connector as mc
+
+        calls = []
+        books = [{"athlete": {}, "team": {"displayName": "Dodgers"}, "value": "+350"}]
+        payload = {"items": [{"id": "1", "name": "World Series Winner", "futures": [{"books": books}]}]}
+
+        def fake(sport, path, *a, **k):
+            calls.append((sport, path))
+            return payload
+
+        monkeypatch.setattr(mc, "espn_core_request", fake)
+        out = mc.get_futures({"params": {"season_year": 2026}})
+
+        assert calls == [("baseball/mlb", "seasons/2026/futures")]
+        assert out["season_year"] == 2026
+        assert out["futures"][0]["name"] == "World Series Winner"
+        assert out["futures"][0]["entries"][0]["value"] == "+350"
+
+
+class TestNormalizeDepthChart:
+    """Tests for normalize_depth_chart shared normalizer."""
+
+    def test_basic(self):
+        from sports_skills._espn_base import normalize_depth_chart
+
+        data = {
+            "depthchart": [
+                {
+                    "name": "Offense",
+                    "positions": {
+                        "qb": {
+                            "position": {
+                                "displayName": "Quarterback",
+                                "abbreviation": "QB",
+                            },
+                            "athletes": [
+                                {"id": 4040715, "displayName": "Patrick Mahomes"},
+                                {"id": 3139477, "displayName": "Carson Wentz"},
+                            ],
+                        },
+                        "rb": {
+                            "position": {
+                                "displayName": "Running Back",
+                                "abbreviation": "RB",
+                            },
+                            "athletes": [
+                                {"id": 4241457, "displayName": "Isiah Pacheco"},
+                            ],
+                        },
+                    },
+                },
+            ]
+        }
+        result = normalize_depth_chart(data)
+        assert result["count"] == 1
+        chart = result["charts"][0]
+        assert chart["name"] == "Offense"
+        assert chart["count"] == 2
+        qb = chart["positions"][0]
+        assert qb["key"] == "qb"
+        assert qb["name"] == "Quarterback"
+        assert qb["abbreviation"] == "QB"
+        assert len(qb["athletes"]) == 2
+        assert qb["athletes"][0]["depth"] == 1
+        assert qb["athletes"][0]["name"] == "Patrick Mahomes"
+        assert qb["athletes"][0]["id"] == "4040715"
+        assert qb["athletes"][1]["depth"] == 2
+        assert qb["athletes"][1]["name"] == "Carson Wentz"
+        rb = chart["positions"][1]
+        assert rb["key"] == "rb"
+        assert len(rb["athletes"]) == 1
+
+    def test_empty(self):
+        from sports_skills._espn_base import normalize_depth_chart
+
+        result = normalize_depth_chart({})
+        assert result == {"charts": [], "count": 0}
+
+    def test_position_fallback_name(self):
+        from sports_skills._espn_base import normalize_depth_chart
+
+        data = {
+            "depthchart": [
+                {
+                    "name": "Defense",
+                    "positions": {
+                        "lt": {
+                            "position": {},
+                            "athletes": [],
+                        },
+                    },
+                },
+            ]
+        }
+        result = normalize_depth_chart(data)
+        pos = result["charts"][0]["positions"][0]
+        assert pos["name"] == "lt"
+        assert pos["abbreviation"] == "LT"
+
+
+# ── Schema generation ────────────────────────────────────────────
+
+
+class TestParamType:
+    """Tests for _param_type helper."""
+
+    def test_bool_param(self):
+        from sports_skills.cli import _param_type
+
+        assert _param_type("google_news") == "boolean"
+        assert _param_type("active") == "boolean"
+
+    def test_int_param(self):
+        from sports_skills.cli import _param_type
+
+        assert _param_type("limit") == "integer"
+        assert _param_type("season") == "integer"
+
+    def test_string_param(self):
+        from sports_skills.cli import _param_type
+
+        assert _param_type("team_id") == "string"
+        assert _param_type("query") == "string"
+
+    def test_list_param(self):
+        from sports_skills.cli import _param_type
+
+        assert _param_type("tm_player_ids") == "array"
+        assert _param_type("token_ids") == "array"
+
+
+class TestGenerateSchema:
+    """Tests for _generate_schema Anthropic tool schema generator."""
+
+    def test_schema_top_level_keys(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        assert schema["sport"] == "nfl"
+        assert "tools" in schema
+        assert isinstance(schema["tools"], list)
+
+    def test_tool_name_format(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        for tool in schema["tools"]:
+            assert tool["name"].startswith("nfl_")
+
+    def test_tool_has_required_fields(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        for tool in schema["tools"]:
+            assert "name" in tool
+            assert "command" in tool
+            assert "description" in tool
+            assert "parameters" in tool
+            assert tool["parameters"]["type"] == "object"
+            assert "properties" in tool["parameters"]
+            assert "required" in tool["parameters"]
+
+    def test_required_params_listed(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        roster_tool = next(t for t in schema["tools"] if t["name"] == "nfl_get_team_roster")
+        assert "team_id" in roster_tool["parameters"]["required"]
+        assert "team_id" in roster_tool["parameters"]["properties"]
+
+    def test_optional_params_not_in_required(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        scoreboard = next(t for t in schema["tools"] if t["name"] == "nfl_get_scoreboard")
+        assert scoreboard["parameters"]["required"] == []
+        assert "date" in scoreboard["parameters"]["properties"]
+
+    def test_param_types_inferred(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        standings = next(t for t in schema["tools"] if t["name"] == "nfl_get_standings")
+        assert standings["parameters"]["properties"]["season"]["type"] == "integer"
+
+    def test_bool_param_type(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("polymarket")
+        markets = next(t for t in schema["tools"] if t["name"] == "polymarket_get_sports_markets")
+        assert markets["parameters"]["properties"]["active"]["type"] == "boolean"
+
+    def test_docstrings_used_as_descriptions(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        teams = next(t for t in schema["tools"] if t["name"] == "nfl_get_teams")
+        assert teams["description"] == "Get all 32 NFL teams."
+
+    def test_all_registry_modules_generate_schema(self):
+        from sports_skills.cli import _REGISTRY, _generate_schema
+
+        for module_name in _REGISTRY:
+            schema = _generate_schema(module_name)
+            assert schema["sport"] == module_name
+            assert len(schema["tools"]) == len(_REGISTRY[module_name])
+
+    def test_no_params_command(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        injuries = next(t for t in schema["tools"] if t["name"] == "nfl_get_injuries")
+        assert injuries["parameters"]["properties"] == {}
+        assert injuries["parameters"]["required"] == []
+
+    def test_list_param_has_array_type_and_items(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("polymarket")
+        market_prices = next(
+            t for t in schema["tools"] if t["name"] == "polymarket_get_market_prices"
+        )
+        prop = market_prices["parameters"]["properties"]["token_ids"]
+        assert prop["type"] == "array"
+        assert prop["items"] == {"type": "string"}
+
+    def test_param_descriptions_from_docstrings(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("nfl")
+        roster = next(t for t in schema["tools"] if t["name"] == "nfl_get_team_roster")
+        team_id_prop = roster["parameters"]["properties"]["team_id"]
+        assert "description" in team_id_prop
+        assert len(team_id_prop["description"]) > 0
+
+
+class TestParseDocstringArgs:
+    """Tests for _parse_docstring_args helper."""
+
+    def test_simple_args(self):
+        from sports_skills.cli import _parse_docstring_args
+
+        doc = """Get team roster.
+
+        Args:
+            team_id: ESPN team ID.
+        """
+        result = _parse_docstring_args(doc)
+        assert result["team_id"] == "ESPN team ID."
+
+    def test_multiline_description(self):
+        from sports_skills.cli import _parse_docstring_args
+
+        doc = """Get player stats.
+
+        Args:
+            player_id: ESPN athlete ID.
+            league_slug: ESPN league slug (e.g. "eng.1" for Premier League,
+                "esp.1" for La Liga). Defaults to "eng.1".
+        """
+        result = _parse_docstring_args(doc)
+        assert result["player_id"] == "ESPN athlete ID."
+        assert "eng.1" in result["league_slug"]
+        assert "La Liga" in result["league_slug"]
+
+    def test_no_args_section(self):
+        from sports_skills.cli import _parse_docstring_args
+
+        doc = """Get all teams."""
+        result = _parse_docstring_args(doc)
+        assert result == {}
+
+    def test_empty_docstring(self):
+        from sports_skills.cli import _parse_docstring_args
+
+        assert _parse_docstring_args("") == {}
+        assert _parse_docstring_args(None) == {}
+
+
+class TestLoadModuleRaisesExceptions:
+    """Tests that _load_module raises clean exceptions instead of sys.exit."""
+
+    def test_unknown_module_raises_value_error(self):
+        import pytest
+
+        from sports_skills.cli import _load_module
+
+        with pytest.raises(ValueError, match="Unknown module"):
+            _load_module("nonexistent_sport")
+
+
+class TestCliOptionalDependencyErrors:
+    """Structured errors for missing optional deps should be machine-readable."""
+
+    def test_cli_error_includes_optional_dependency_fields(self, capsys):
+        import json
+
+        import pytest
+
+        from sports_skills.cli import _cli_error
+
+        with pytest.raises(SystemExit) as exc:
+            _cli_error(
+                "F1 module dependencies are unavailable in this environment.",
+                error_code="MISSING_OPTIONAL_DEPENDENCY",
+                hint="python3 -m pip install --upgrade sports-skills",
+                dependency="fastf1",
+                extra="f1",
+            )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        assert exc.value.code == 1
+        assert payload["status"] is False
+        assert payload["error_code"] == "MISSING_OPTIONAL_DEPENDENCY"
+        assert payload["dependency"] == "fastf1"
+        assert payload["extra"] == "f1"
+        assert "sports-skills" in payload["hint"]
+        assert "Error:" in captured.err
+
+    def test_load_module_f1_raises_structured_optional_dependency(self, monkeypatch):
+        import pytest
+
+        import sports_skills
+        from sports_skills.cli import OptionalDependencyError, _load_module
+
+        monkeypatch.setattr(sports_skills, "f1", None, raising=False)
+
+        with pytest.raises(OptionalDependencyError) as exc:
+            _load_module("f1")
+
+        err = exc.value
+        assert err.dependency == "fastf1"
+        assert err.extra == "f1"
+        assert "sports-skills" in err.hint
+
+
+class TestNewsQueryDefaults:
+    """Query-only news calls should route to Google News automatically."""
+
+    @staticmethod
+    def _fake_feed():
+        class _Feed:
+            status = 200
+            bozo = False
+            feed = {"title": "Demo Feed"}
+            entries = [
+                {
+                    "title": "Test Item",
+                    "link": "https://example.com/item",
+                    "published": "Wed, 25 Feb 2026 12:00:00 GMT",
+                    "summary": "Summary",
+                }
+            ]
+
+        return _Feed()
+
+    def test_fetch_items_query_without_url_uses_google_news(self, monkeypatch):
+        from sports_skills.news import fetch_items
+
+        captured = {}
+
+        def _fake_parse(url):
+            captured["url"] = url
+            return self._fake_feed()
+
+        monkeypatch.setattr("sports_skills._feeds.feedparser.parse", _fake_parse)
+
+        result = fetch_items(query="Corinthians", limit=1)
+        assert result["status"] is True
+        assert "news.google.com/rss/search" in captured["url"]
+        assert result["data"]["url"] == captured["url"]
+        assert result["data"]["count"] == 1
+
+    def test_fetch_feed_query_without_url_uses_google_news(self, monkeypatch):
+        from sports_skills.news import fetch_feed
+
+        captured = {}
+
+        def _fake_parse(url):
+            captured["url"] = url
+            return self._fake_feed()
+
+        monkeypatch.setattr("sports_skills._feeds.feedparser.parse", _fake_parse)
+
+        result = fetch_feed(query="NBA")
+        assert result["status"] is True
+        assert "news.google.com/rss/search" in captured["url"]
+        assert result["data"]["title"] == "Demo Feed"
+
+    def test_fetch_items_without_query_or_url_returns_clear_validation(self):
+        from sports_skills.news import fetch_items
+
+        result = fetch_items()
+        assert result["status"] is False
+        assert "Provide url or use a query for Google News" in result["message"]
+
+
+class TestNFLverseNormalizers:
+    """Tests for pure nflverse normalizers."""
+
+    def test_normalize_schedule_row(self):
+        from sports_skills.nfl._nflverse import _normalize_schedule_row
+
+        row = {
+            "game_id": "2024_01_KC_BAL",
+            "season": 2024,
+            "week": 1,
+            "game_type": "REG",
+            "gameday": "2024-09-05",
+            "away_team": "BAL",
+            "home_team": "KC",
+            "away_score": 20,
+            "home_score": 27,
+            "location": "GEHA Field",
+            "spread_line": -2.5,
+        }
+        result = _normalize_schedule_row(row)
+        assert result["game_id"] == "2024_01_KC_BAL"
+        assert result["home_team"] == "KC"
+        assert result["away_score"] == 20
+        assert result["spread_line"] == -2.5
+
+    def test_normalize_player_stats_row(self):
+        from sports_skills.nfl._nflverse import _normalize_player_stats_row
+
+        row = {
+            "player_id": "00-0033873",
+            "player_name": "Patrick Mahomes",
+            "position": "QB",
+            "recent_team": "KC",
+            "season": 2024,
+            "season_type": "REG",
+            "passing_yards": 4183,
+            "passing_tds": 31,
+        }
+        result = _normalize_player_stats_row(row)
+        assert result["player_id"] == "00-0033873"
+        assert result["team"] == "KC"
+        assert result["stats"]["passing_yards"] == 4183
+        assert result["stats"]["passing_tds"] == 31
+
+    def test_normalize_pbp_row(self):
+        from sports_skills.nfl._nflverse import _normalize_pbp_row
+
+        row = {
+            "play_id": 55,
+            "game_id": "2024_03_BUF_MIA",
+            "season": 2024,
+            "week": 3,
+            "qtr": 4,
+            "time": "02:31",
+            "posteam": "BUF",
+            "defteam": "MIA",
+            "down": 3,
+            "ydstogo": 7,
+            "desc": "(2:31) J.Allen pass short middle to S.Diggs for 9 yards.",
+            "epa": 1.21,
+            "wpa": 0.08,
+        }
+        result = _normalize_pbp_row(row)
+        assert result["play_id"] == "55"
+        assert result["game_id"] == "2024_03_BUF_MIA"
+        assert result["quarter"] == 4
+        assert result["posteam"] == "BUF"
+        assert result["epa"] == 1.21
+
+
+class TestNFLverseOptionalDependency:
+    """Missing nflverse backends should raise a clear install hint."""
+
+    def test_load_provider_error_message(self, monkeypatch):
+        import builtins
+
+        from sports_skills.nfl._nflverse import _load_provider
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name in {"nflreadpy", "nfl_data_py"}:
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        import pytest
+
+        with pytest.raises(ImportError, match=r"sports-skills\[nfl\]"):
+            _load_provider()
+
+
+class TestNFLverseFrameCoercion:
+    """``_coerce_frame`` converts nflreadpy's polars frames to pandas.
+
+    nflreadpy returns polars DataFrames; ``_coerce_frame`` calls ``.to_pandas()``,
+    which needs pyarrow. pyarrow was undeclared, so every ``get_nflverse_*`` call
+    raised ``ModuleNotFoundError: No module named 'pyarrow'`` on Python >=3.10 —
+    while 3.9 worked, because the nfl_data_py fallback returns pandas natively.
+
+    No test caught it: the suite only exercised the pure row normalizers, never
+    ``_coerce_frame`` with a real polars frame, and CI's ``dev`` extra installs
+    neither polars nor nflreadpy. The declaration test below is therefore the
+    load-bearing one — it runs everywhere and fails if the pairing ever drifts.
+    """
+
+    def test_pyarrow_declared_wherever_nflreadpy_is(self):
+        # nflreadpy without pyarrow is a broken install: the frames it returns
+        # cannot be converted. Any extra shipping one must ship the other, under
+        # the same marker.
+        import pathlib
+        import re
+
+        text = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        for extra in re.findall(r"^(nfl|all) = \[(.*?)\]$", text, re.M | re.S):
+            name, body = extra
+            if "nflreadpy" in body:
+                assert "pyarrow" in body, f"extra '{name}' ships nflreadpy without pyarrow"
+
+    def test_coerce_frame_converts_a_polars_frame(self):
+        # Real round-trip when the nfl extra is actually installed; skipped in
+        # the dev-only environment CI uses.
+        import pytest
+
+        pl = pytest.importorskip("polars", reason="polars only present with the nfl extra")
+        pytest.importorskip("pyarrow", reason="pyarrow only present with the nfl extra")
+
+        from sports_skills.nfl._nflverse import _coerce_frame
+
+        out = _coerce_frame(pl.DataFrame({"game_id": ["2024_01_ARI_BUF"], "week": [1]}))
+        assert list(out.columns) == ["game_id", "week"]
+        assert out.to_dict(orient="records") == [{"game_id": "2024_01_ARI_BUF", "week": 1}]
+
+    def test_coerce_frame_passes_through_a_pandas_frame(self):
+        # The nfl_data_py path (3.9) has no to_pandas(); the frame is returned as-is.
+        import pytest
+
+        pd = pytest.importorskip("pandas")
+
+        from sports_skills.nfl._nflverse import _coerce_frame
+
+        df = pd.DataFrame({"week": [1]})
+        assert _coerce_frame(df) is df
+
+    def test_coerce_frame_names_the_extra_when_pandas_is_missing(self):
+        # polars' to_pandas() raises a bare ModuleNotFoundError naming only
+        # 'pandas'. Agents get that string verbatim, so it has to say how to fix
+        # the install rather than leaving them to guess the extra.
+        import pytest
+
+        from sports_skills.nfl._nflverse import _coerce_frame
+
+        class _FrameWithoutPandas:
+            def to_pandas(self):
+                raise ModuleNotFoundError("No module named 'pandas'")
+
+        with pytest.raises(ImportError, match=r"sports-skills\[nfl\]"):
+            _coerce_frame(_FrameWithoutPandas())
+
+
+class TestNFLExtraDependencyClosure:
+    """``[nfl]`` must install everything ``_coerce_frame`` needs, on its own.
+
+    ``_coerce_frame`` calls ``.to_pandas()``, which needs pandas — declared
+    nowhere in the nfl extra, so ``pip install sports-skills[nfl]`` produced an
+    install where every ``get_nflverse_*`` call raised ModuleNotFoundError. The
+    dev extra ships pandas, which is exactly why no CI run saw it: these
+    assertions read the extra in isolation.
+    """
+
+    @staticmethod
+    def _extras():
+        import pathlib
+        import re
+
+        text = (pathlib.Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        return dict(re.findall(r"^([a-z0-9-]+) = \[(.*?)\]$", text, re.M | re.S))
+
+    def test_nfl_extra_declares_conversion_dependency_and_preserves_legacy_provider(self):
+        body = self._extras()["nfl"]
+        assert "pandas" in body, "the nfl extra ships no pandas; .to_pandas() cannot run"
+        # Declare nflreadpy's missing conversion dependency on 3.10+.
+        # Python 3.9 retains nfl-data-py's existing transitive pandas constraints;
+        # adding a project-wide pandas<2 marker conflicts with the other extras.
+        assert "\"pandas>=2.0; python_version >= '3.10'\"" in body
+        assert "\"nfl-data-py>=0.3; python_version < '3.10'\"" in body
+        assert "\"pandas<2; python_version < '3.10'\"" not in body
+
+    def test_nfl_extra_does_not_depend_on_dev_to_be_installable(self):
+        extras = self._extras()
+        assert "pandas" in extras["dev"]  # the masking source, still fine for CI
+        nfl_only = extras["nfl"]
+        for requirement in ("nflreadpy", "pyarrow", "pandas"):
+            assert requirement in nfl_only, f"{requirement} only reachable through another extra"
+
+
+class TestParamsContract:
+    """Verify _params() returns a wrapped dict in all modules.
+
+    All modules use {"params": {...}} so the Machina connector contract
+    is consistent and new modules can copy any pattern safely.
+    """
+
+    def test_nfl_params_is_wrapped(self):
+        from sports_skills.nfl import _params
+
+        result = _params(date="2026-02-24", week=1)
+        assert "params" in result
+        assert result["params"]["date"] == "2026-02-24"
+        assert result["params"]["week"] == 1
+
+    def test_nba_params_is_wrapped(self):
+        from sports_skills.nba import _params
+
+        result = _params(date="2026-02-24")
+        assert "params" in result
+        assert result["params"]["date"] == "2026-02-24"
+
+    def test_nhl_params_is_wrapped(self):
+        from sports_skills.nhl import _params
+
+        result = _params(team_id="1")
+        assert "params" in result
+        assert result["params"]["team_id"] == "1"
+
+    def test_mlb_params_is_wrapped(self):
+        from sports_skills.mlb import _params
+
+        result = _params(season=2025)
+        assert "params" in result
+        assert result["params"]["season"] == 2025
+
+    def test_wnba_params_is_wrapped(self):
+        from sports_skills.wnba import _params
+
+        result = _params(date="2026-02-24")
+        assert "params" in result
+        assert result["params"]["date"] == "2026-02-24"
+
+    def test_cfb_params_is_wrapped(self):
+        from sports_skills.cfb import _params
+
+        result = _params(season=2025, week=8)
+        assert "params" in result
+        assert result["params"]["season"] == 2025
+
+    def test_cbb_params_is_wrapped(self):
+        from sports_skills.cbb import _params
+
+        result = _params(season=2025)
+        assert "params" in result
+        assert result["params"]["season"] == 2025
+
+    def test_none_values_are_filtered(self):
+        """None values should be dropped regardless of module."""
+        from sports_skills.nfl import _params
+
+        result = _params(date="2026-02-24", week=None)
+        assert "week" not in result["params"]
+        assert "date" in result["params"]
+
+    def test_football_and_nfl_params_match_shape(self):
+        """football and nfl must return the same shape — the whole point of this fix."""
+        from sports_skills.football import _params as football_params
+        from sports_skills.nfl import _params as nfl_params
+
+        nfl_result = nfl_params(date="2026-02-24")
+        football_result = football_params(date="2026-02-24")
+        assert "params" in nfl_result
+        assert "params" in football_result
+        assert nfl_result["params"]["date"] == "2026-02-24"
+        assert football_result["params"]["date"] == "2026-02-24"
+
+
+class TestXctfParseMeetTable:
+    """Tests for the meet result table parser."""
+
+    def test_parses_meet_name_date_and_results(self):
+        from sports_skills.xctf._connector import _parse_meet_table
+
+        html = """
+        <table>
+          <tr><td>Stanford Invitational Mar 15, 2026</td></tr>
+          <tr><td>1500</td><td>4:31.80</td><td>1st (F)</td></tr>
+          <tr><td>800</td><td>2:10.30</td></tr>
+        </table>
+        """
+        result = _parse_meet_table(html)
+        assert result is not None
+        assert "Stanford" in result["meet"]
+        assert "2026" in result["date"]
+        assert len(result["results"]) == 2
+        assert result["results"][0]["event"] == "1500"
+        assert result["results"][0]["mark"] == "4:31.80"
+        assert result["results"][0]["place"] == "1st (F)"
+
+    def test_returns_none_when_no_date_in_header(self):
+        from sports_skills.xctf._connector import _parse_meet_table
+
+        html = """
+        <table>
+          <tr><td>Season Best</td></tr>
+          <tr><td>1500</td><td>4:31.80</td></tr>
+        </table>
+        """
+        assert _parse_meet_table(html) is None
+
+    def test_returns_none_for_empty_table(self):
+        from sports_skills.xctf._connector import _parse_meet_table
+
+        assert _parse_meet_table("<table></table>") is None
+
+
+class TestXctfGetNews:
+    """Tests for get_news using a mocked feedparser."""
+
+    @staticmethod
+    def _fake_feed(entries=None):
+        class _Feed:
+            bozo = False
+            bozo_exception = None
+
+        feed = _Feed()
+        feed.entries = entries or [
+            {
+                "title": "McFarland Runs 3:33",
+                "link": "https://www.thestridereport.com/post/mcfarland",
+                "published": "Sun, 19 Apr 2026 00:27:30 GMT",
+                "summary": "Big performance this weekend.",
+                "tags": [{"term": "D1"}, {"term": "OUTDOORS"}],
+                "author": "Admin (Garrett Zatlin)",
+                "enclosures": [{"href": "https://example.com/image.jpg"}],
+            }
+        ]
+        return feed
+
+    def test_returns_articles_with_correct_fields(self, monkeypatch):
+        from sports_skills.xctf._connector import get_news
+
+        monkeypatch.setattr(
+            "sports_skills._feeds.feedparser.parse",
+            lambda url: self._fake_feed(),
+        )
+
+        result = get_news()
+        assert result["source"] == "The Stride Report"
+        assert result["count"] == 1
+        article = result["articles"][0]
+        assert article["title"] == "McFarland Runs 3:33"
+        assert article["categories"] == ["D1", "OUTDOORS"]
+        assert article["image"] == "https://example.com/image.jpg"
+
+    def test_limit_is_respected(self, monkeypatch):
+        entries = [
+            {
+                "title": f"Article {i}",
+                "link": f"https://example.com/{i}",
+                "published": "Sun, 19 Apr 2026 00:00:00 GMT",
+                "summary": "Summary.",
+                "tags": [],
+                "author": "",
+                "enclosures": [],
+            }
+            for i in range(10)
+        ]
+        from sports_skills.xctf._connector import get_news
+
+        monkeypatch.setattr(
+            "sports_skills._feeds.feedparser.parse",
+            lambda url: self._fake_feed(entries=entries),
+        )
+
+        result = get_news(limit=3)
+        assert result["count"] == 3
+        assert len(result["articles"]) == 3
+
+    def test_feed_error_returns_error_dict(self, monkeypatch):
+        class _BrokenFeed:
+            bozo = True
+            bozo_exception = Exception("connection refused")
+            entries = []
+
+        from sports_skills.xctf._connector import get_news
+
+        monkeypatch.setattr(
+            "sports_skills._feeds.feedparser.parse",
+            lambda url: _BrokenFeed(),
+        )
+
+        result = get_news()
+        assert result["error"] is True
+        assert "Stride Report" in result["message"]
+
+    def test_html_entities_unescaped(self, monkeypatch):
+        entries = [
+            {
+                "title": "Elbadra &#38; Engelhardt Clash",
+                "link": "https://example.com/1",
+                "published": "Sun, 19 Apr 2026 00:00:00 GMT",
+                "summary": "A &#38; B",
+                "tags": [],
+                "author": "",
+                "enclosures": [],
+            }
+        ]
+        from sports_skills.xctf._connector import get_news
+
+        monkeypatch.setattr(
+            "sports_skills._feeds.feedparser.parse",
+            lambda url: self._fake_feed(entries=entries),
+        )
+
+        result = get_news()
+        assert result["articles"][0]["title"] == "Elbadra & Engelhardt Clash"
+        assert result["articles"][0]["summary"] == "A & B"
+
+
+class TestPolymarketOrderBook:
+    """get_order_book must not assume CLOB price-level ordering.
+
+    The CLOB /book endpoint returns the BEST price at the END of each array
+    (bids ascending, asks descending). Taking index 0 reported best_bid=0.01 /
+    best_ask=0.99 (spread 0.98) for a deeply liquid 0.23/0.24 book.
+    """
+
+    CLOB_BOOK = {
+        "bids": [
+            {"price": "0.01", "size": "5000"},
+            {"price": "0.21", "size": "61443.8"},
+            {"price": "0.22", "size": "120844.02"},
+            {"price": "0.23", "size": "618483.98"},
+        ],
+        "asks": [
+            {"price": "0.99", "size": "4000"},
+            {"price": "0.26", "size": "346741.24"},
+            {"price": "0.25", "size": "1193340.58"},
+            {"price": "0.24", "size": "49661.37"},
+        ],
+    }
+
+    def test_best_prices_from_unsorted_levels(self, monkeypatch):
+        from sports_skills.polymarket import _connector
+
+        monkeypatch.setattr(
+            "sports_skills.polymarket._connector._clob_request",
+            lambda *a, **k: self.CLOB_BOOK,
+        )
+        result = _connector.get_order_book({"params": {"token_id": "tok"}})
+        data = result["data"]
+        assert data["best_bid"] == 0.23
+        assert data["best_ask"] == 0.24
+        assert data["spread"] == 0.01
+        # arrays come back best-first so consumers reading [0] get the touch
+        assert data["bids"][0] == {"price": 0.23, "size": 618483.98}
+        assert data["asks"][0] == {"price": 0.24, "size": 49661.37}
+        assert data["bid_depth"] == 4 and data["ask_depth"] == 4
+
+    def test_empty_book(self, monkeypatch):
+        from sports_skills.polymarket import _connector
+
+        monkeypatch.setattr(
+            "sports_skills.polymarket._connector._clob_request",
+            lambda *a, **k: {"bids": [], "asks": []},
+        )
+        result = _connector.get_order_book({"params": {"token_id": "tok"}})
+        data = result["data"]
+        assert data["best_bid"] == 0 and data["best_ask"] == 0
+        assert data["spread"] is None
+
+
+# ── Football head-to-head (football-data.co.uk) ──────────────
+
+
+class TestFootballNameNormalization:
+    """Apostrophe handling in the shared football name normalizer."""
+
+    def test_apostrophe_stripped(self):
+        from sports_skills.football._connector import _normalize_name
+
+        assert _normalize_name("Nott'm Forest") == "nottm forest"
+
+    def test_curly_apostrophe_stripped(self):
+        from sports_skills.football._connector import _normalize_name
+
+        assert _normalize_name("Nott’m Forest") == "nottm forest"
+
+    def test_short_label_matches_full_name(self):
+        from sports_skills.football._connector import _teams_match
+
+        # football-data.co.uk short labels vs ESPN full names
+        assert _teams_match("Nott'm Forest", "Nottingham Forest")
+        assert _teams_match("Man City", "Manchester City")
+        assert _teams_match("Wolves", "Wolverhampton Wanderers")
+        # Distinct clubs sharing a token must NOT collide
+        assert not _teams_match("Man City", "Manchester United")
+
+
+class TestFootballSummaryNullBoxscore:
+    """Defensive guard: a null ``boxscore`` must degrade to empty, not raise.
+
+    Live-verified (2026-07, 22 scheduled games across 10 leagues) that ESPN's
+    soccer summary ships a stub ``boxscore: {"teams": [...]}`` pre-game and does
+    NOT send ``boxscore: null`` the way the American-sports endpoints do. This
+    is therefore a theoretical/defensive guard, not a fix for observed ESPN
+    behavior — ``summary.get("boxscore", {})`` would return ``None`` and raise
+    on ``.get`` only if ESPN ever sent an explicit null. On the pre-guard code
+    both normalizers raised ``AttributeError`` on this payload.
+    """
+
+    def test_statistics_tolerates_null_boxscore(self):
+        from sports_skills.football._connector import (
+            _normalize_espn_summary_statistics,
+        )
+
+        summary = {"boxscore": None, "header": {"competitions": [{"competitors": []}]}}
+        assert _normalize_espn_summary_statistics(summary) == []
+
+    def test_lineups_tolerates_null_boxscore(self):
+        from sports_skills.football._connector import (
+            _normalize_espn_summary_lineups,
+        )
+
+        # Null boxscore (form lives under it) with no rosters → empty lineups.
+        summary = {"boxscore": None, "rosters": []}
+        assert _normalize_espn_summary_lineups(summary) == []
+
+
+class TestFdukSeasonCodes:
+    """Season-code generation for the mmz4281 URL scheme."""
+
+    def test_codes_are_newest_first_and_current_flagged(self):
+        from sports_skills.football._connector import _fduk_season_codes
+
+        codes = _fduk_season_codes(3)
+        assert len(codes) == 3
+        # newest first, first entry flagged current
+        assert codes[0][1] is True
+        assert all(is_cur is False for _, is_cur in codes[1:])
+        # each code is 4 digits like "2526"
+        assert all(len(c) == 4 and c.isdigit() for c, _ in codes)
+
+    def test_min_one_season(self):
+        from sports_skills.football._connector import _fduk_season_codes
+
+        assert len(_fduk_season_codes(0)) == 1
+
+
+class TestFdukMeetingsFromCsv:
+    """Pure CSV parsing/filtering for head-to-head."""
+
+    CSV = (
+        "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HS,AS,HST,AST,HC,AC\r\n"
+        "E0,22/09/2024,Man City,Arsenal,2,2,D,33,5,11,3,9,2\r\n"
+        "E0,02/02/2025,Arsenal,Man City,5,1,H,12,7,7,4,3,6\r\n"
+        "E0,15/03/2025,Chelsea,Everton,1,0,H,14,6,5,2,7,3\r\n"
+        "E0,20/05/2025,Arsenal,Man City,,,,,,,,,\r\n"
+    )
+
+    def test_filters_to_the_pair_both_directions(self):
+        from sports_skills.football._connector import _fduk_meetings_from_csv
+
+        meetings = _fduk_meetings_from_csv(
+            self.CSV, "Manchester City", "Arsenal", "premier-league"
+        )
+        # two played meetings; void row and unrelated match dropped
+        assert len(meetings) == 2
+
+    def test_scores_dates_and_stats(self):
+        from sports_skills.football._connector import _fduk_meetings_from_csv
+
+        meetings = _fduk_meetings_from_csv(self.CSV, "Arsenal", "Manchester City")
+        by_date = {m["date"]: m for m in meetings}
+        g = by_date["2024-09-22"]
+        assert g["home_team"]["name"] == "Man City"
+        assert (g["home_score"], g["away_score"], g["result"]) == (2, 2, "D")
+        assert g["stats"]["home_shots"] == 33 and g["stats"]["away_shots_on_target"] == 3
+
+    def test_empty_text_returns_empty(self):
+        from sports_skills.football._connector import _fduk_meetings_from_csv
+
+        assert _fduk_meetings_from_csv("", "Arsenal", "Man City") == []
+
+    def test_same_city_pair_is_not_conflated(self):
+        from sports_skills.football._connector import _fduk_meetings_from_csv
+
+        csv_text = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "F1,01/09/2025,Paris SG,Marseille,2,0,H\r\n"
+            "F1,08/09/2025,Paris FC,Marseille,0,1,A\r\n"
+        )
+        meetings = _fduk_meetings_from_csv(csv_text, "Paris FC", "Marseille", "ligue-1")
+        assert [m["home_team"]["name"] for m in meetings] == ["Paris FC"]
+
+    def test_preserves_history_across_provider_label_rename(self, monkeypatch):
+        from sports_skills.football import _connector
+
+        seasons = {
+            "2627": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "B1,01/08/2026,Beveren,Anderlecht,2,0,H\r\n"
+            ),
+            "2021": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "B1,01/08/2020,Waasland-Beveren,Anderlecht,1,0,H\r\n"
+            ),
+        }
+        monkeypatch.setattr(_connector, "_fduk_season_codes", lambda _n: [("2627", True), ("2021", False)])
+        monkeypatch.setattr(
+            _connector,
+            "_fduk_fetch_season",
+            lambda _div, code, _current: seasons[code],
+        )
+
+        meetings, resolution = _connector._fduk_head_to_head(
+            "B1", "Waasland-Beveren", "Anderlecht", 2, "belgian-pro-league"
+        )
+
+        assert [m["date"] for m in meetings] == ["2026-08-01", "2020-08-01"]
+        assert resolution[0]["matched_as"] == "Waasland-Beveren"
+        assert resolution[0]["labels"] == {"Beveren", "Waasland-Beveren"}
+
+    def test_rename_aliases_feed_summary_for_both_home_directions(self, monkeypatch):
+        from sports_skills.football import _connector
+
+        seasons = {
+            "2627": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "B1,01/08/2026,Beveren,Anderlecht,2,0,H\r\n"
+            ),
+            "2021": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "B1,01/08/2020,Anderlecht,Waasland-Beveren,0,1,A\r\n"
+            ),
+        }
+        monkeypatch.setattr(_connector, "_fduk_season_codes", lambda _n: [("2627", True), ("2021", False)])
+        monkeypatch.setattr(
+            _connector,
+            "_fduk_fetch_season",
+            lambda _div, code, _current: seasons[code],
+        )
+        metas = {
+            "13450": {"name": "Waasland-Beveren", "slug": "belgian-pro-league"},
+            "441": {"name": "Anderlecht", "slug": "belgian-pro-league"},
+        }
+        monkeypatch.setattr(_connector, "_resolve_espn_team_meta", lambda tid, _slug=None: metas[tid])
+
+        result = _connector.get_head_to_head(
+            {
+                "params": {
+                    "team_id": "13450",
+                    "team_id_2": "441",
+                    "league_slug": "belgian-pro-league",
+                    "max_seasons": 2,
+                }
+            }
+        )
+
+        assert result["summary"]["team1"]["wins"] == 2
+        assert result["summary"]["team1"]["goals"] == 3
+        assert result["summary"]["team2"]["goals"] == 0
+
+    def test_does_not_merge_same_city_clubs_across_seasons(self, monkeypatch):
+        from sports_skills.football import _connector
+
+        seasons = {
+            "2627": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "SC0,01/08/2026,Dundee United,Celtic,2,0,H\r\n"
+            ),
+            "2021": (
+                "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+                "SC0,01/08/2020,Dundee,Celtic,1,0,H\r\n"
+            ),
+        }
+        monkeypatch.setattr(_connector, "_fduk_season_codes", lambda _n: [("2627", True), ("2021", False)])
+        monkeypatch.setattr(
+            _connector,
+            "_fduk_fetch_season",
+            lambda _div, code, _current: seasons[code],
+        )
+
+        meetings, resolution = _connector._fduk_head_to_head(
+            "SC0", "Dundee United", "Celtic", 2, "scottish-premiership"
+        )
+
+        assert [m["home_team"]["name"] for m in meetings] == ["Dundee United"]
+        assert resolution[0]["matched_as"] == "Dundee United"
+
+
+class TestFdukResolveLabel:
+    """ESPN display name -> one exact football-data.co.uk label."""
+
+    LABELS = {"Arsenal", "Man City", "Nott'm Forest", "Paris SG", "Paris FC", "FC Koln"}
+
+    def test_fuzzy_single_candidate(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        assert _fduk_resolve_label("Manchester City", self.LABELS) == ("Man City", "fuzzy")
+
+    def test_override_bridges_an_exonym(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        assert _fduk_resolve_label("FC Cologne", self.LABELS) == ("FC Koln", "override")
+        assert _fduk_resolve_label("Paris Saint-Germain", self.LABELS) == ("Paris SG", "override")
+
+    def test_exact_tie_break_splits_the_same_city_pair(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        # "Paris FC" fuzzy-matches "Paris SG" too; the exact rule settles it.
+        assert _fduk_resolve_label("Paris FC", self.LABELS) == ("Paris FC", "exact")
+
+    def test_collision_prone_name_fails_closed_when_exact_label_is_absent(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        assert _fduk_resolve_label("Paris FC", {"Paris SG", "Marseille"}) == (None, "not_found")
+        assert _fduk_resolve_label("Dundee United", {"Dundee", "Celtic"}) == (None, "not_found")
+        assert _fduk_resolve_label("Dundee", {"Dundee United", "Celtic"}) == (None, "not_found")
+
+    def test_override_target_absent_is_not_found(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        # PSG did not play in this label set; falling back to fuzzy matching
+        # would hand back the city rival instead of admitting the miss.
+        assert _fduk_resolve_label("Paris Saint-Germain", {"Paris FC", "Lyon"}) == (
+            None,
+            "not_found",
+        )
+
+    def test_not_found(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        assert _fduk_resolve_label("Bromley", self.LABELS) == (None, "not_found")
+
+    def test_ambiguous_is_reported_not_guessed(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        label, method = _fduk_resolve_label("Sporting", {"Sporting Gijon", "Sporting KC"})
+        assert label is None and method.startswith("ambiguous:")
+
+
+# ── Football team strength (ClubElo) ─────────────────────────
+
+
+class TestClubEloResolve:
+    """Country-scoped, reserve-aware ClubElo name resolution."""
+
+    ROWS = [
+        {"Rank": "1", "Club": "Arsenal", "Country": "ENG", "Level": "1", "Elo": "2063.7", "From": "2026-02-27"},
+        {"Rank": "2", "Club": "Man City", "Country": "ENG", "Level": "1", "Elo": "1991.7", "From": "2026-03-01"},
+        {"Rank": "30", "Club": "Forest", "Country": "ENG", "Level": "1", "Elo": "1788.2", "From": "2026-03-01"},
+        {"Rank": "5", "Club": "Sociedad", "Country": "ESP", "Level": "1", "Elo": "1850.0", "From": "2026-03-01"},
+        {"Rank": "180", "Club": "Sociedad B", "Country": "ESP", "Level": "2", "Elo": "1400.0", "From": "2026-03-01"},
+        {"Rank": "8", "Club": "Paris SG", "Country": "FRA", "Level": "1", "Elo": "1980.0", "From": "2026-03-01"},
+        {"Rank": "60", "Club": "Paris FC", "Country": "FRA", "Level": "1", "Elo": "1650.0", "From": "2026-03-01"},
+    ]
+
+    def test_fuzzy_short_label(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        row, method = _clubelo_resolve("Manchester City", "ENG", self.ROWS)
+        assert row["Club"] == "Man City" and method == "fuzzy"
+
+    def test_country_filter_and_substring(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        row, _ = _clubelo_resolve("Nottingham Forest", "ENG", self.ROWS)
+        assert row["Club"] == "Forest"
+
+    def test_reserve_team_dropped(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        row, _ = _clubelo_resolve("Real Sociedad", "ESP", self.ROWS)
+        assert row["Club"] == "Sociedad"
+
+    def test_override_breaks_senior_collision(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        row, method = _clubelo_resolve("Paris Saint-Germain", "FRA", self.ROWS)
+        assert row["Club"] == "Paris SG" and method == "override"
+        row2, _ = _clubelo_resolve("Paris FC", "FRA", self.ROWS)
+        assert row2["Club"] == "Paris FC"
+
+    def test_not_found(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        row, method = _clubelo_resolve("Athletic Club", "ESP", self.ROWS)
+        assert row is None and method == "not_found"
+
+
+class TestClubEloEntry:
+    """Strength entry mapping incl. uncovered leagues."""
+
+    def test_uncovered_league(self):
+        from sports_skills.football._connector import _clubelo_entry
+
+        entry = _clubelo_entry({"name": "LA Galaxy", "slug": "mls"}, [])
+        assert entry["resolved"] is False and entry["reason"] == "league_not_covered"
+
+    def test_resolved_entry_fields(self):
+        from sports_skills.football._connector import _clubelo_entry
+
+        rows = TestClubEloResolve.ROWS
+        entry = _clubelo_entry({"name": "Arsenal", "slug": "premier-league"}, rows)
+        assert entry["resolved"] is True
+        assert entry["matched_as"] == "Arsenal"
+        assert entry["elo"] == 2063.7 and entry["rank"] == 1 and entry["level"] == 1
+
+
+class TestClubEloFixtureProbs:
+    """W/D/L + scoreline derivation from a ClubElo fixtures row."""
+
+    ROW = {
+        "GD>5": "0.05", "GD=5": "0.05", "GD=4": "0.05", "GD=3": "0.05",
+        "GD=2": "0.05", "GD=1": "0.10", "GD=0": "0.20",
+        "GD=-1": "0.10", "GD=-2": "0.05", "GD=-3": "0.05", "GD=-4": "0.05",
+        "GD=-5": "0.05", "GD<-5": "0.10",
+        "R:1-0": "0.15", "R:2-1": "0.10", "R:0-0": "0.20", "R:1-1": "0.12",
+    }
+
+    def test_probabilities(self):
+        from sports_skills.football._connector import _clubelo_fixture_probs
+
+        p_home, p_draw, p_away, scls = _clubelo_fixture_probs(self.ROW)
+        assert p_home == 0.35 and p_draw == 0.20 and p_away == 0.40
+
+    def test_top_scorelines_sorted(self):
+        from sports_skills.football._connector import _clubelo_fixture_probs
+
+        _, _, _, scls = _clubelo_fixture_probs(self.ROW)
+        assert scls[0]["score"] == "0-0" and scls[0]["prob"] == 0.20
+        assert len(scls) == 3  # top 3 only
+        assert [s["prob"] for s in scls] == sorted(
+            (s["prob"] for s in scls), reverse=True
+        )
+
+
+class TestRussianLeagueConfig:
+    """Guards the Russian Premier League registration (ESPN + ClubElo, no Understat)."""
+
+    def test_registered_with_expected_sources(self):
+        from sports_skills.football._connector import LEAGUES
+
+        rpl = LEAGUES["russian-premier-league"]
+        assert rpl["espn"] == "rus.1"
+        assert rpl["clubelo"] == "RUS"
+        # Understat dropped RFPL — xG is unavailable, so this must stay None
+        assert rpl["understat"] is None
+        # football-data.co.uk has no Russia coverage → no H2H
+        assert "fduk" not in rpl
+
+
+class TestClubEloDriftGuard:
+    """Offline drift guard: known clubs across covered leagues must keep resolving
+    to their exact ClubElo label via _clubelo_resolve, using a committed real
+    snapshot fixture. Fails loudly if _normalize_name/_ABBREV/_teams_match, the
+    reserve-drop rule, or the override map regresses. (Live source drift — e.g.
+    ClubElo renaming a club — is covered by the SKILL gotchas + manual battery.)"""
+
+    @staticmethod
+    def _rows():
+        import csv
+        from pathlib import Path
+
+        path = Path(__file__).parent / "fixtures" / "clubelo_snapshot_sample.csv"
+        with open(path) as f:
+            return list(csv.DictReader(f))
+
+    # (ESPN team name, ClubElo country, expected ClubElo label)
+    CASES = [
+        ("Manchester City", "ENG", "Man City"),      # abbrev man->manchester
+        ("Nottingham Forest", "ENG", "Forest"),      # substring + nottm abbrev
+        ("Wolverhampton Wanderers", "ENG", "Wolves"),  # abbrev
+        ("Tottenham Hotspur", "ENG", "Tottenham"),   # substring
+        ("Real Madrid", "ESP", "Real Madrid"),
+        ("Atletico Madrid", "ESP", "Atletico"),
+        ("Real Sociedad", "ESP", "Sociedad"),        # reserve "Sociedad B" dropped
+        ("Internazionale", "ITA", "Inter"),          # not "Milan"
+        ("AC Milan", "ITA", "Milan"),                # not "Inter"
+        ("Bayern Munich", "GER", "Bayern"),          # substring
+        ("Paris Saint-Germain", "FRA", "Paris SG"),  # override, not "Paris FC"
+        ("Paris FC", "FRA", "Paris FC"),             # override, not "Paris SG"
+        ("Ajax", "NED", "Ajax"),
+        ("Benfica", "POR", "Benfica"),
+        ("Celtic", "SCO", "Celtic"),
+        ("Club Brugge", "BEL", "Brugge"),            # not "Cercle Brugge"
+        ("Galatasaray", "TUR", "Galatasaray"),
+        ("Zenit St Petersburg", "RUS", "Zenit"),     # Russian league
+    ]
+
+    def test_known_clubs_resolve(self):
+        from sports_skills.football._connector import _clubelo_resolve
+
+        rows = self._rows()
+        failures = []
+        for espn_name, country, expected in self.CASES:
+            row, method = _clubelo_resolve(espn_name, country, rows)
+            got = row.get("Club") if row else f"UNRESOLVED({method})"
+            if got != expected:
+                failures.append(f"{espn_name} [{country}] -> {got!r}, expected {expected!r}")
+        assert not failures, "ClubElo resolution drift:\n  " + "\n  ".join(failures)
+
+    def test_override_map_has_no_dead_entries(self):
+        # Every override target must be a real label present in the fixture's country,
+        # so stale overrides (e.g. after a ClubElo rename) surface here.
+        from sports_skills.football._connector import _PROVIDER_NAME_OVERRIDES
+
+        labels = {r["Club"] for r in self._rows()}
+        # Only assert for targets that the fixture is expected to contain.
+        for target in ("Paris SG", "Paris FC"):
+            assert target in labels, f"override target {target!r} missing from fixture"
+        assert "clubelo" in _PROVIDER_NAME_OVERRIDES
+
+
+class TestFdukDriftGuard:
+    """Offline drift guard: known clubs across the covered divisions must keep
+    resolving to their exact football-data.co.uk label via _fduk_resolve_label,
+    using a committed real label set (10 seasons per division). Fails loudly if
+    _normalize_name/_ABBREV/_teams_match, the exact tie-break, or the "fduk"
+    override map regresses. (Live source drift — football-data.co.uk renaming a
+    club — is covered by the SKILL gotchas + manual battery.)"""
+
+    @staticmethod
+    def _labels():
+        import json
+        from pathlib import Path
+
+        path = Path(__file__).parent / "fixtures" / "fduk_team_labels.json"
+        with open(path, encoding="utf-8") as f:
+            return {div: set(labels) for div, labels in json.load(f).items()}
+
+    # (ESPN display name, football-data.co.uk division, expected label)
+    CASES = [
+        ("Manchester City", "E0", "Man City"),                 # abbrev man->manchester
+        ("Nottingham Forest", "E0", "Nott'm Forest"),          # nottm abbrev
+        ("Queens Park Rangers", "E1", "QPR"),                  # override: initialism
+        ("Sheffield Wednesday", "E1", "Sheffield Weds"),       # override: abbreviation
+        ("Sheffield United", "E1", "Sheffield United"),        # not "Sheffield Weds"
+        ("Athletic Club", "SP1", "Ath Bilbao"),                # override: city label
+        ("Atletico Madrid", "SP1", "Ath Madrid"),              # override, not "Ath Bilbao"
+        ("Espanyol", "SP1", "Espanol"),                        # override: spelling
+        ("Deportivo", "SP1", "La Coruna"),                     # override: city label
+        ("Real Sociedad", "SP1", "Sociedad"),
+        ("Borussia Monchengladbach", "D1", "M'gladbach"),      # override: abbreviation
+        ("FC Cologne", "D1", "FC Koln"),                       # override: exonym
+        ("Eintracht Frankfurt", "D1", "Ein Frankfurt"),        # override: abbreviation
+        ("1. FC Union Berlin", "D1", "Union Berlin"),
+        ("TSG Hoffenheim", "D1", "Hoffenheim"),
+        ("RB Leipzig", "D1", "RB Leipzig"),
+        ("Internazionale", "I1", "Inter"),                     # not "Milan"
+        ("AC Milan", "I1", "Milan"),                           # not "Inter"
+        ("Paris Saint-Germain", "F1", "Paris SG"),             # override, not "Paris FC"
+        ("Paris FC", "F1", "Paris FC"),                        # exact, not "Paris SG"
+        ("Stade Rennais", "F1", "Rennes"),                     # override: city label
+        ("Fortuna Sittard", "N1", "For Sittard"),              # override: abbreviation
+        ("PSV Eindhoven", "N1", "PSV Eindhoven"),
+        ("Sporting CP", "P1", "Sp Lisbon"),                    # override: exonym
+        ("Braga", "P1", "Sp Braga"),
+        ("Heart of Midlothian", "SC0", "Hearts"),              # override: nickname
+        ("Dundee", "SC0", "Dundee"),                           # not "Dundee United"
+        ("Dundee United", "SC0", "Dundee United"),             # not "Dundee"
+        ("Sint-Truidense", "B1", "St Truiden"),                # override: exonym
+        ("Union St.-Gilloise", "B1", "St. Gilloise"),
+        ("Club Brugge", "B1", "Club Brugge"),                  # not "Cercle Brugge"
+        ("Amed SFK", "T1", "Amedspor"),                        # override: club-name suffix
+        ("Istanbul Basaksehir", "T1", "Buyuksehyr"),           # override: exonym
+        ("Goztepe", "T1", "Goztep"),
+    ]
+
+    def test_known_clubs_resolve(self):
+        from sports_skills.football._connector import _fduk_resolve_label
+
+        labels = self._labels()
+        failures = []
+        for espn_name, div, expected in self.CASES:
+            label, method = _fduk_resolve_label(espn_name, labels[div])
+            got = label or f"UNRESOLVED({method})"
+            if got != expected:
+                failures.append(f"{espn_name} [{div}] -> {got!r}, expected {expected!r}")
+        assert not failures, "fduk resolution drift:\n  " + "\n  ".join(failures)
+
+    def test_override_targets_are_real_labels(self):
+        # Every override target must exist in some covered division, so a stale
+        # override (e.g. after a football-data.co.uk rename) surfaces here.
+        from sports_skills.football._connector import _PROVIDER_NAME_OVERRIDES
+
+        known = set().union(*self._labels().values())
+        dead = sorted(t for t in _PROVIDER_NAME_OVERRIDES["fduk"].values() if t not in known)
+        assert not dead, f"override targets missing from every division: {dead}"
+
+
+class TestProviderOverrideKeys:
+    """Override keys must be `_normalize_name` output for any lookup to hit —
+    e.g. "Paris FC" normalizes to "paris", so "paris fc" as a key is dead."""
+
+    def test_keys_are_normalized(self):
+        from sports_skills.football._connector import (
+            _PROVIDER_NAME_OVERRIDES,
+            _normalize_name,
+        )
+
+        unreachable = [
+            f"{provider}:{key!r}"
+            for provider, overrides in _PROVIDER_NAME_OVERRIDES.items()
+            for key in overrides
+            if _normalize_name(key) != key
+        ]
+        assert not unreachable, f"override keys that can never match: {unreachable}"
+
+
+class TestPublicEndpointAssembly:
+    """Hermetic tests of the three new public functions' assembly, mocking the
+    network boundary (_resolve_espn_team_meta + the source fetch). Covers the
+    wiring the live battery exercises, but in CI. Complements the pure-function
+    tests above."""
+
+    def _patch_meta(self, monkeypatch, mapping):
+        # mapping: espn_id -> {"name":..., "slug":...}
+        from sports_skills.football import _connector as c
+
+        monkeypatch.setattr(c, "_resolve_espn_team_meta", lambda tid, hint=None: mapping.get(str(tid)))
+
+    def test_head_to_head_assembly(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "359": {"name": "Arsenal", "slug": "premier-league"},
+            "382": {"name": "Manchester City", "slug": "premier-league"},
+        })
+        csv_text = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HS,AS\r\n"
+            "E0,22/09/2024,Man City,Arsenal,2,2,D,33,5\r\n"
+            "E0,02/02/2025,Arsenal,Man City,5,1,H,12,7\r\n"
+        )
+        monkeypatch.setattr(c, "_fduk_fetch_season", lambda div, code, cur: csv_text)
+        out = c.get_head_to_head({"params": {"team_id": "359", "team_id_2": "382", "max_seasons": 1}})
+        s = out["summary"]
+        assert out["source"] == "football-data.co.uk"
+        assert s["total_meetings"] == 2
+        assert s["team1"]["wins"] + s["team2"]["wins"] + s["draws"] == 2
+        # Arsenal won 5-1, drew 2-2 → 1 win, 0 losses, 1 draw
+        assert s["team1"]["name"] == "Arsenal" and s["team1"]["wins"] == 1 and s["draws"] == 1
+
+    def test_head_to_head_matches_german_exonym_labels(self, monkeypatch):
+        # The reported bug: ESPN "FC Cologne" vs the source's "FC Koln" shares no
+        # word, so every meeting was dropped and H2H reported zero.
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "124": {"name": "FC Cologne", "slug": "bundesliga"},
+            "125": {"name": "TSG Hoffenheim", "slug": "bundesliga"},
+        })
+        csv_text = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "D1,20/09/2025,FC Koln,Hoffenheim,1,0,H\r\n"
+            "D1,14/02/2026,Hoffenheim,FC Koln,2,2,D\r\n"
+        )
+        monkeypatch.setattr(c, "_fduk_fetch_season", lambda div, code, cur: csv_text)
+        out = c.get_head_to_head({"params": {"team_id": "124", "team_id_2": "125", "max_seasons": 1}})
+        assert out["summary"]["total_meetings"] == 2
+        assert [t["matched_as"] for t in out["teams"]] == ["FC Koln", "Hoffenheim"]
+        assert all(t["resolved"] for t in out["teams"])
+        assert "message" not in out
+        # FC Koln won one and drew one
+        assert out["summary"]["team1"]["wins"] == 1 and out["summary"]["draws"] == 1
+
+    def test_head_to_head_reports_an_unresolvable_club(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "359": {"name": "Arsenal", "slug": "premier-league"},
+            "3129": {"name": "Bromley", "slug": "premier-league"},
+        })
+        csv_text = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "E0,22/09/2024,Man City,Arsenal,2,2,D\r\n"
+        )
+        monkeypatch.setattr(c, "_fduk_fetch_season", lambda div, code, cur: csv_text)
+        out = c.get_head_to_head({"params": {"team_id": "359", "team_id_2": "3129", "max_seasons": 1}})
+        arsenal, bromley = out["teams"]
+        assert arsenal["resolved"] is True and arsenal["matched_as"] == "Arsenal"
+        assert bromley["resolved"] is False and bromley["reason"] == "not_found"
+        assert out["events"] == []
+        # "we could not resolve the club" must not read as "they never met"
+        assert "Bromley (not_found)" in out["message"]
+        assert "name-resolution gap" in out["message"]
+        assert "may not have shared a division" not in out["message"]
+
+    def test_head_to_head_message_when_both_resolve_but_never_met(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "359": {"name": "Arsenal", "slug": "premier-league"},
+            "382": {"name": "Manchester City", "slug": "premier-league"},
+        })
+        csv_text = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "E0,22/09/2024,Man City,Everton,2,0,H\r\n"
+            "E0,02/02/2025,Arsenal,Everton,1,0,H\r\n"
+        )
+        monkeypatch.setattr(c, "_fduk_fetch_season", lambda div, code, cur: csv_text)
+        out = c.get_head_to_head({"params": {"team_id": "359", "team_id_2": "382", "max_seasons": 1}})
+        assert all(t["resolved"] for t in out["teams"])
+        assert out["events"] == [] and "may not have shared a division" in out["message"]
+
+    def test_team_strength_assembly(self, monkeypatch):
+        from pathlib import Path
+
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "359": {"name": "Arsenal", "slug": "premier-league"},
+            "382": {"name": "Manchester City", "slug": "premier-league"},
+        })
+        fixture = (Path(__file__).parent / "fixtures" / "clubelo_snapshot_sample.csv").read_text()
+        monkeypatch.setattr(c, "_clubelo_fetch_snapshot", lambda date: fixture)
+        out = c.get_team_strength({"params": {"team_id": "359", "team_id_2": "382", "date": "2026-03-01"}})
+        a, b = out["teams"]
+        assert a["resolved"] and a["matched_as"] == "Arsenal" and isinstance(a["elo"], float)
+        assert b["resolved"] and b["matched_as"] == "Man City"
+        assert out["favorite"] == "Arsenal"  # Arsenal Elo > Man City in the fixture
+        assert out["elo_difference"] == round(a["elo"] - b["elo"], 1)
+
+    def test_match_forecast_assembly(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {"359": {"name": "Arsenal", "slug": "premier-league"}})
+        feed = (
+            "Date,Country,Home,Away,GD<-5,GD=-5,GD=-4,GD=-3,GD=-2,GD=-1,GD=0,"
+            "GD=1,GD=2,GD=3,GD=4,GD=5,GD>5,R:1-0,R:0-0,R:2-1\r\n"
+            "2026-08-16,ENG,Arsenal,Chelsea,0.02,0.02,0.03,0.05,0.08,0.10,0.20,"
+            "0.15,0.10,0.08,0.05,0.03,0.09,0.18,0.16,0.10\r\n"
+        )
+        monkeypatch.setattr(c, "_clubelo_fetch_fixtures", lambda: feed)
+        out = c.get_match_forecast({"params": {"team_id": "359"}})
+        assert len(out["fixtures"]) == 1
+        fx = out["fixtures"][0]
+        assert fx["team_side"] == "home" and fx["home_team"]["name"] == "Arsenal"
+        # win = GD>0 sum = .15+.10+.08+.05+.03+.09 = .50 ; draw = .20 ; loss = .30
+        assert fx["win_prob"] == 0.5 and fx["draw_prob"] == 0.2 and fx["loss_prob"] == 0.3
+        assert fx["likely_scorelines"][0]["score"] == "1-0"  # 0.18 highest
+
+    def test_match_forecast_unresolved_opponent_is_reported(self, monkeypatch):
+        # An opponent that can't be resolved must NOT silently return all fixtures.
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {"359": {"name": "Arsenal", "slug": "premier-league"}})
+        monkeypatch.setattr(c, "_clubelo_fetch_fixtures", lambda: "")
+        out = c.get_match_forecast({"params": {"team_id": "359", "team_id_2": "99999"}})
+        assert out["fixtures"] == []
+        assert "team_id_2" in out["message"]
+
+    def test_team_strength_invalid_date(self):
+        from sports_skills.football import _connector as c
+
+        out = c.get_team_strength({"params": {"team_id": "359", "date": "03/01/2026"}})
+        assert out.get("error") and "YYYY-MM-DD" in out["message"]
+
+    def test_team_strength_unparseable_elo_does_not_crash(self, monkeypatch):
+        # resolved teams with a malformed Elo cell must degrade, not TypeError
+        from sports_skills.football import _connector as c
+
+        self._patch_meta(monkeypatch, {
+            "359": {"name": "Arsenal", "slug": "premier-league"},
+            "382": {"name": "Manchester City", "slug": "premier-league"},
+        })
+        snapshot = (
+            "Rank,Club,Country,Level,Elo,From,To\r\n"
+            "1,Arsenal,ENG,1,not-a-number,2026-03-01,2026-03-08\r\n"
+            "2,Man City,ENG,1,1991.7,2026-03-01,2026-03-04\r\n"
+        )
+        monkeypatch.setattr(c, "_clubelo_fetch_snapshot", lambda date: snapshot)
+        out = c.get_team_strength({"params": {"team_id": "359", "team_id_2": "382", "date": "2026-03-01"}})
+        assert out["teams"][0]["elo"] is None
+        assert "elo_difference" not in out and "favorite" not in out
+
+
+class TestOpenfootballScoreShapes:
+    """openfootball ships `score` as {"ft": [h, a]}, a bare [h, a] list, or not
+    at all (en.1 2025-26 mixes 353 dicts with 27 bare lists). Both the match
+    normalizer and the standings builder read it through one helper."""
+
+    def test_dict_shape(self):
+        from sports_skills.football._connector import _openfootball_ft
+
+        assert _openfootball_ft({"score": {"ft": [2, 1]}}) == [2, 1]
+
+    def test_bare_list_shape(self):
+        from sports_skills.football._connector import _openfootball_ft
+
+        assert _openfootball_ft({"score": [0, 0]}) == [0, 0]
+
+    def test_missing_and_junk_shapes(self):
+        from sports_skills.football._connector import _openfootball_ft
+
+        assert _openfootball_ft({}) == []
+        assert _openfootball_ft({"score": None}) == []
+        assert _openfootball_ft({"score": "2-1"}) == []
+        assert _openfootball_ft({"score": {"ht": [1, 0]}}) == []
+
+    def test_normalizer_handles_bare_list(self):
+        from sports_skills.football._connector import _normalize_openfootball_match
+
+        ev = _normalize_openfootball_match(
+            {"date": "2025-08-16", "team1": "Aston Villa FC", "team2": "Newcastle United FC", "score": [0, 0]},
+            "premier-league",
+            "2025",
+        )
+        assert ev["status"] == "closed"
+        scores = [c["score"] for c in ev["competitors"]]
+        assert scores == [0, 0]
+
+    def test_normalizer_unplayed_match(self):
+        from sports_skills.football._connector import _normalize_openfootball_match
+
+        ev = _normalize_openfootball_match(
+            {"date": "2026-05-24", "team1": "A", "team2": "B"}, "premier-league", "2025"
+        )
+        assert ev["status"] == "not_started"
+
+    def test_standings_survive_mixed_shapes(self):
+        from unittest.mock import patch
+
+        from sports_skills.football import _connector as fc
+
+        data = {
+            "matches": [
+                {"team1": "A", "team2": "B", "score": {"ft": [2, 0]}},
+                {"team1": "A", "team2": "B", "score": [1, 1]},   # bare list — crashed before
+                {"team1": "A", "team2": "B"},                     # unplayed
+            ]
+        }
+        with patch.object(fc, "_openfootball_fetch", return_value=data):
+            table = fc._openfootball_get_standings("premier-league", "2025")
+        a = next(t for t in table if t["team"]["name"] == "A")
+        assert a["played"] == 2
+        assert a["points"] == 4  # one win, one draw
+
+
+class TestOpenfootballKickoffUtc:
+    """openfootball times are the league's local time with no offset (#152)."""
+
+    @staticmethod
+    def _start(slug, date, time):
+        from sports_skills.football._connector import _normalize_openfootball_match
+
+        ev = _normalize_openfootball_match({"date": date, "time": time, "team1": "A", "team2": "B"}, slug, "2025")
+        return ev["start_time"], ev["start_ts"]
+
+    def test_bst_kickoff_is_converted_to_utc(self):
+        """Liverpool v Bournemouth, 2025-08-15 20:00 BST (en.1 2025-26, matchday 1)."""
+        assert self._start("premier-league", "2025-08-15", "20:00") == ("2025-08-15T19:00:00Z", 1755284400)
+
+    def test_gmt_kickoff_is_already_utc(self):
+        assert self._start("premier-league", "2025-12-20", "15:00") == ("2025-12-20T15:00:00Z", 1766242800)
+
+    def test_mls_times_are_us_eastern(self):
+        """LAFC v Minnesota, 2025-02-22 16:45 in the file; ESPN has 21:45Z."""
+        assert self._start("mls", "2025-02-22", "16:45") == ("2025-02-22T21:45:00Z", 1740260700)
+
+    def test_every_openfootball_league_has_a_zone(self):
+        from zoneinfo import ZoneInfo
+
+        from sports_skills.football._connector import LEAGUES
+
+        for slug, league in LEAGUES.items():
+            if league.get("openfootball"):
+                assert ZoneInfo(league["openfootball"]["timezone"]), slug
+
+    def test_unknown_zone_is_not_labelled_utc(self, monkeypatch):
+        from sports_skills.football import _connector as fc
+
+        league = dict(fc.LEAGUES["premier-league"], openfootball={"file": "en.1", "season_format": "aug"})
+        monkeypatch.setitem(fc.LEAGUES, "premier-league", league)
+        assert self._start("premier-league", "2025-08-15", "20:00") == ("2025-08-15T20:00:00", None)
+
+    def test_date_only_match_has_no_timestamp(self):
+        assert self._start("premier-league", "2025-08-16", "") == ("2025-08-16", None)
+
+
+class TestSeasonEmptyExplained:
+    """A season neither source can serve must say so, not return a bare
+    empty success indistinguishable from an empty table."""
+
+    def _patch_empty(self, monkeypatch):
+        from sports_skills.football import _connector as fc
+
+        monkeypatch.setattr(fc, "_espn_request", lambda *a, **k: {"error": True, "message": "x"})
+        monkeypatch.setattr(fc, "_espn_web_request", lambda *a, **k: {"error": True, "message": "x"})
+        monkeypatch.setattr(fc, "_openfootball_fetch", lambda *a, **k: None)
+        monkeypatch.setattr(fc, "_detect_current_season", lambda *a, **k: "2024", raising=False)
+        return fc
+
+    def test_schedule_empty_carries_message(self, monkeypatch):
+        fc = self._patch_empty(monkeypatch)
+        out = fc.get_season_schedule({"params": {"season_id": "premier-league-1888"}})
+        assert out["schedules"] == []
+        assert "openfootball" in out.get("message", "")
+
+    def test_standings_empty_carries_message(self, monkeypatch):
+        fc = self._patch_empty(monkeypatch)
+        out = fc.get_season_standings({"params": {"season_id": "premier-league-1888"}})
+        assert out["standings"] == []
+        assert "No standings found" in out.get("message", "")
+
+
+# ── local Elo fallback ─────────────────────────────────────────
+
+
+class TestEloPrimitives:
+    """Margin weighting and expected score."""
+
+    def test_goal_multiplier_steps_with_margin(self):
+        from sports_skills.football._connector import _elo_goal_multiplier
+
+        assert _elo_goal_multiplier(0) == 1.0
+        assert _elo_goal_multiplier(-1) == 1.0
+        assert _elo_goal_multiplier(2) == 1.5
+        assert _elo_goal_multiplier(-2) == 1.5
+        # 3+ goals grows, never shrinks
+        assert _elo_goal_multiplier(3) == pytest.approx(14 / 8)
+        assert _elo_goal_multiplier(6) > _elo_goal_multiplier(3)
+
+    def test_expected_score_is_symmetric_and_bounded(self):
+        from sports_skills.football._connector import _elo_expected
+
+        assert _elo_expected(1500, 1500) == pytest.approx(0.5)
+        assert _elo_expected(1900, 1500) + _elo_expected(1500, 1900) == pytest.approx(1.0)
+        assert 0.0 < _elo_expected(1000, 2000) < 0.5
+
+
+class TestFdukResultsFromCsv:
+    """Result extraction feeding the Elo walk."""
+
+    CSV = (
+        "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+        "D1,29/08/2026,Bayern Munich,Stuttgart,5,1,H\r\n"
+        "D1,22/08/2026,FC Koln,Hoffenheim,3,2,H\r\n"
+        "D1,05/09/2026,Schalke 04,Bayern Munich,,,\r\n"
+        "D1,,,,,,\r\n"
+    )
+
+    def test_skips_unplayed_and_blank_rows(self):
+        from sports_skills.football._connector import _fduk_results_from_csv
+
+        rows = _fduk_results_from_csv(self.CSV)
+        assert len(rows) == 2
+
+    def test_sorted_oldest_first_so_elo_carries_forward(self):
+        from sports_skills.football._connector import _fduk_results_from_csv
+
+        rows = _fduk_results_from_csv(self.CSV)
+        assert [r[0] for r in rows] == ["2026-08-22", "2026-08-29"]
+
+    def test_empty_text_is_empty_not_an_error(self):
+        from sports_skills.football._connector import _fduk_results_from_csv
+
+        assert _fduk_results_from_csv("") == []
+
+
+class TestLocalEloTable:
+    """The Elo walk over a synthetic division."""
+
+    @staticmethod
+    def _season(rows):
+        head = "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+        return head + "".join(rows)
+
+    def _table(self, monkeypatch, seasons):
+        """Run _local_elo_table over canned season CSVs (newest code first)."""
+        from sports_skills.football import _connector as c
+
+        c._cache.clear()
+        codes = [(f"{20 + i}{21 + i}", i == 0) for i in range(len(seasons))]
+        monkeypatch.setattr(c, "_fduk_season_codes", lambda n, as_of=None: codes)
+        by_code = dict(zip([code for code, _ in codes], seasons))
+        monkeypatch.setattr(
+            c, "_fduk_fetch_season", lambda div, code, is_cur: by_code.get(code, "")
+        )
+        # Horizon past every canned fixture: these tests are about the walk,
+        # not about the as-of cutoff (which TestLocalEloAsOf covers).
+        return c._local_elo_table("D1", len(seasons), "2099-12-31")
+
+    def test_winner_gains_exactly_what_the_loser_drops(self, monkeypatch):
+        table = self._table(
+            monkeypatch,
+            [self._season(["D1,10/08/2026,Alpha,Beta,1,0,H\r\n"])],
+        )
+        from sports_skills.football._connector import _ELO_NEWCOMER
+
+        alpha = table["ratings"]["Alpha"] - _ELO_NEWCOMER
+        beta = table["ratings"]["Beta"] - _ELO_NEWCOMER
+        assert alpha > 0
+        assert alpha == pytest.approx(-beta)
+
+    def test_bigger_margin_moves_the_rating_further(self, monkeypatch):
+        narrow = self._table(
+            monkeypatch, [self._season(["D1,10/08/2026,Alpha,Beta,1,0,H\r\n"])]
+        )
+        rout = self._table(
+            monkeypatch, [self._season(["D1,10/08/2026,Alpha,Beta,5,0,H\r\n"])]
+        )
+        assert rout["ratings"]["Alpha"] > narrow["ratings"]["Alpha"]
+
+    def test_home_advantage_makes_an_away_win_worth_more(self, monkeypatch):
+        home = self._table(
+            monkeypatch, [self._season(["D1,10/08/2026,Alpha,Beta,1,0,H\r\n"])]
+        )
+        away = self._table(
+            monkeypatch, [self._season(["D1,10/08/2026,Beta,Alpha,0,1,A\r\n"])]
+        )
+        # Same 1-0 win for Alpha, but away it beats a stiffer expectation.
+        assert away["ratings"]["Alpha"] > home["ratings"]["Alpha"]
+
+    def test_season_boundary_regresses_toward_the_mean(self, monkeypatch):
+        from sports_skills.football._connector import _ELO_START
+
+        # Alpha thrashes a different opponent each week, climbing clear of the mean.
+        season_one = self._season(
+            [
+                f"D1,{day:02d}/08/2026,Alpha,Club{day},4,0,H\r\n"
+                for day in range(10, 22)
+            ]
+        )
+        one = self._table(monkeypatch, [season_one])
+        assert one["ratings"]["Alpha"] > _ELO_START, "setup: Alpha must be above the mean"
+        # A later season Alpha does not play in: the only change is the boundary pull.
+        two = self._table(
+            monkeypatch,
+            [self._season(["D1,10/08/2027,Beta,Gamma,0,0,D\r\n"]), season_one],
+        )
+        assert abs(two["ratings"]["Alpha"] - _ELO_START) < abs(
+            one["ratings"]["Alpha"] - _ELO_START
+        )
+
+    def test_current_labels_come_from_the_newest_season_only(self, monkeypatch):
+        table = self._table(
+            monkeypatch,
+            [
+                self._season(["D1,10/08/2027,Alpha,Beta,1,1,D\r\n"]),
+                self._season(["D1,10/08/2026,Gamma,Delta,1,0,H\r\n"]),
+            ],
+        )
+        assert set(table["current_labels"]) == {"Alpha", "Beta"}
+        # Relegated clubs stay rated, they just are not current.
+        assert "Gamma" in table["ratings"]
+
+    def test_outcome_buckets_tally_the_actual_results(self, monkeypatch):
+        table = self._table(
+            monkeypatch,
+            [
+                self._season(
+                    [
+                        "D1,10/08/2026,Alpha,Beta,1,0,H\r\n",
+                        "D1,17/08/2026,Gamma,Delta,0,0,D\r\n",
+                        "D1,24/08/2026,Epsilon,Zeta,0,2,A\r\n",
+                    ]
+                )
+            ],
+        )
+        totals = [sum(v[i] for v in table["outcomes"].values()) for i in range(3)]
+        assert totals == [1, 1, 1]
+
+
+class TestLocalEloOutcomeProbs:
+    """Empirical win/draw/loss read-off."""
+
+    def test_returns_none_when_history_is_too_thin(self):
+        from sports_skills.football._connector import _local_elo_outcome_probs
+
+        assert _local_elo_outcome_probs(0, {"outcomes": {0: [1, 1, 1]}}) is None
+
+    def test_probabilities_sum_to_one(self):
+        from sports_skills.football._connector import _local_elo_outcome_probs
+
+        probs = _local_elo_outcome_probs(0, {"outcomes": {0: [50, 30, 20]}})
+        assert probs["sample"] == 100
+        assert probs["home_win"] + probs["draw"] + probs["away_win"] == pytest.approx(1.0)
+
+    def test_pools_neighbouring_buckets_to_reach_the_sample_floor(self):
+        from sports_skills.football._connector import _local_elo_outcome_probs
+
+        outcomes = {0: [5, 0, 0], 50: [0, 0, 0], -50: [20, 10, 10]}
+        probs = _local_elo_outcome_probs(10, outcomes and {"outcomes": outcomes})
+        assert probs["sample"] == 45
+
+    def test_no_history_returns_none(self):
+        from sports_skills.football._connector import _local_elo_outcome_probs
+
+        assert _local_elo_outcome_probs(0, {}) is None
+
+
+class TestLocalEloEntry:
+    """ESPN team -> local Elo entry."""
+
+    TABLE = {
+        "ratings": {"Bayern Munich": 1780.0, "Schalke 04": 1420.0, "Hannover": 1440.0},
+        "games": {"Bayern Munich": 300, "Schalke 04": 170, "Hannover": 60},
+        "outcomes": {},
+        "matches": 300,
+        "seasons": 10,
+        "as_of": "2026-08-30",
+        "div": "D1",
+        "current_labels": ["Bayern Munich", "Schalke 04"],
+    }
+
+    def test_uncovered_league_is_reported_not_guessed(self):
+        from sports_skills.football._connector import _local_elo_entry
+
+        entry, _ = _local_elo_entry({"name": "LA Galaxy", "slug": "mls"})
+        assert entry["resolved"] is False
+        assert entry["reason"] == "league_not_covered"
+
+    def test_rank_counts_current_members_only(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        monkeypatch.setattr(c, "_local_elo_table", lambda div, n, as_of=None: self.TABLE)
+        entry, _ = c._local_elo_entry({"name": "Bayern Munich", "slug": "bundesliga"})
+        assert (entry["division_rank"], entry["division_size"]) == (1, 2)
+
+    def test_relegated_club_is_rated_but_unranked(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        monkeypatch.setattr(c, "_local_elo_table", lambda div, n, as_of=None: self.TABLE)
+        entry, _ = c._local_elo_entry({"name": "Hannover", "slug": "bundesliga"})
+        assert entry["resolved"] is True
+        assert entry["elo"] == 1440.0
+        assert entry["division_rank"] is None
+
+
+class TestLocalEloStrength:
+    """The get_team_strength fallback response."""
+
+    TABLE_D1 = dict(TestLocalEloEntry.TABLE, outcomes={0: [40, 30, 30]})
+
+    def test_source_is_never_labelled_clubelo(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        monkeypatch.setattr(c, "_local_elo_table", lambda div, n, as_of=None: self.TABLE_D1)
+        out = c._local_elo_strength(
+            [{"name": "Bayern Munich", "slug": "bundesliga"}], "2026-09-04", 10
+        )
+        assert out["source"] == "local-elo"
+        assert "clubelo" not in out["method"].lower()
+        assert "NOT comparable to ClubElo" in out["message"]
+
+    def test_cross_division_comparison_is_refused(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        tables = {
+            "D1": self.TABLE_D1,
+            "E0": dict(
+                self.TABLE_D1,
+                div="E0",
+                ratings={"Arsenal": 1800.0},
+                games={"Arsenal": 300},
+                current_labels=["Arsenal"],
+            ),
+        }
+        monkeypatch.setattr(c, "_local_elo_table", lambda div, n, as_of=None: tables[div])
+        out = c._local_elo_strength(
+            [
+                {"name": "Bayern Munich", "slug": "bundesliga"},
+                {"name": "Arsenal", "slug": "premier-league"},
+            ],
+            "2026-09-04",
+            10,
+        )
+        assert "favorite" not in out
+        assert "elo_difference" not in out
+        assert "different divisions" in out["message"]
+
+    def test_same_division_reports_favourite_and_probabilities(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        monkeypatch.setattr(c, "_local_elo_table", lambda div, n, as_of=None: self.TABLE_D1)
+        out = c._local_elo_strength(
+            [
+                {"name": "Schalke 04", "slug": "bundesliga"},
+                {"name": "Bayern Munich", "slug": "bundesliga"},
+            ],
+            "2026-09-04",
+            10,
+        )
+        assert out["favorite"] == "Bayern Munich"
+        assert out["elo_difference"] == pytest.approx(-360.0)
+        probs = out["outcome_probabilities"]
+        assert probs["home_win"] + probs["draw"] + probs["away_win"] == pytest.approx(1.0)
+        assert "Schalke 04 at home" in probs["note"]
+
+
+class TestLocalEloPublicSurface:
+    """max_seasons must exist on every layer that documents it."""
+
+    def test_wrapper_accepts_max_seasons(self, monkeypatch):
+        from sports_skills import football
+
+        seen = {}
+        monkeypatch.setattr(
+            football, "_get_team_strength", lambda rd: seen.update(rd["params"]) or {}
+        )
+        football.get_team_strength(team_id="132", max_seasons=5)
+        assert seen["max_seasons"] == 5
+
+    def test_cli_registry_advertises_max_seasons(self):
+        from sports_skills.cli import _REGISTRY
+
+        entry = _REGISTRY["football"]["get_team_strength"]
+        assert "max_seasons" in entry["optional"]
+
+    def test_generated_schema_types_max_seasons_as_integer(self):
+        from sports_skills.cli import _generate_schema
+
+        schema = _generate_schema("football")
+        tool = next(
+            t for t in schema["tools"] if t["name"] == "football_get_team_strength"
+        )
+        assert tool["parameters"]["properties"]["max_seasons"]["type"] == "integer"
+
+    def test_documented_optionals_are_all_accepted_by_the_wrapper(self):
+        import inspect
+
+        from sports_skills import football
+        from sports_skills.cli import _REGISTRY
+
+        entry = _REGISTRY["football"]["get_team_strength"]
+        params = set(inspect.signature(football.get_team_strength).parameters)
+        assert set(entry["required"]) | set(entry["optional"]) <= params
+
+
+class TestLocalEloAsOf:
+    """A historical request must be rated as of that date, not today."""
+
+    SEASONS = {
+        "1920": (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "D1,10/08/2019,Alpha,Beta,3,0,H\r\n"
+        ),
+        "2627": (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "D1,10/08/2026,Beta,Alpha,4,0,H\r\n"
+            "D1,20/09/2026,Beta,Alpha,4,0,H\r\n"
+        ),
+    }
+
+    def _patch(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        c._cache.clear()
+        monkeypatch.setattr(
+            c,
+            "_fduk_season_codes",
+            lambda n, as_of=None: (
+                [("1920", True)]
+                if as_of and as_of.year < 2026
+                else [("2627", True), ("1920", False)]
+            ),
+        )
+        monkeypatch.setattr(
+            c, "_fduk_fetch_season", lambda div, code, cur: self.SEASONS.get(code, "")
+        )
+        return c
+
+    def test_historical_date_ignores_later_seasons(self, monkeypatch):
+        c = self._patch(monkeypatch)
+        past = c._local_elo_table("D1", 10, "2020-01-01")
+        now = c._local_elo_table("D1", 10, "2026-12-31")
+        # Alpha won in 2019 and lost twice in 2026: the two views must differ.
+        assert past["ratings"]["Alpha"] > past["ratings"]["Beta"]
+        assert now["ratings"]["Alpha"] < now["ratings"]["Beta"]
+        assert set(past["current_labels"]) == {"Alpha", "Beta"}
+
+    def test_as_of_never_reports_a_match_after_the_requested_date(self, monkeypatch):
+        c = self._patch(monkeypatch)
+        table = c._local_elo_table("D1", 10, "2026-09-01")
+        assert table["as_of"] <= "2026-09-01"
+        # The 20/09 fixture is beyond the horizon and must not be counted.
+        assert table["matches"] == 2
+
+    def test_historical_and_live_tables_are_cached_apart(self, monkeypatch):
+        c = self._patch(monkeypatch)
+        past = c._local_elo_table("D1", 10, "2020-01-01")
+        now = c._local_elo_table("D1", 10, "2026-12-31")
+        assert past["as_of"] != now["as_of"]
+
+    def test_strength_entry_carries_the_dated_as_of(self, monkeypatch):
+        c = self._patch(monkeypatch)
+        monkeypatch.setitem(c.LEAGUES, "bundesliga", dict(c.LEAGUES["bundesliga"]))
+        out = c._local_elo_strength(
+            [{"name": "Alpha", "slug": "bundesliga"}], "2020-01-01", 10
+        )
+        assert out["teams"][0]["as_of"] == "2019-08-10"
+        assert out["teams"][0]["division_rank"] == 1
+        assert "2020-01-01" in out["method"]
+
+    def test_live_missing_current_season_keeps_prior_rating_unranked(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        today = c.datetime.now().strftime("%Y-%m-%d")
+        prior_date = f"{c.datetime.now().year - 1}-09-01"
+        prior_csv_date = c.datetime.strptime(prior_date, "%Y-%m-%d").strftime(
+            "%d/%m/%Y"
+        )
+        prior_csv = (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            f"D1,{prior_csv_date},Alpha,Beta,3,0,H\r\n"
+        )
+        c._cache.clear()
+        monkeypatch.setattr(
+            c,
+            "_fduk_season_codes",
+            lambda n, as_of=None: [("current", True), ("prior", False)],
+        )
+        monkeypatch.setattr(
+            c,
+            "_fduk_fetch_season",
+            lambda div, code, cur: "" if code == "current" else prior_csv,
+        )
+
+        table = c._local_elo_table("D1", 10, today)
+        assert table["ratings"]["Alpha"] > table["ratings"]["Beta"]
+        assert table["as_of"] == prior_date
+        assert table["current_labels"] == []
+
+        out = c._local_elo_strength(
+            [{"name": "Alpha", "slug": "bundesliga"}], today, 10
+        )
+        assert out["teams"][0]["elo"] == table["ratings"]["Alpha"]
+        assert out["teams"][0]["as_of"] == prior_date
+        assert out["teams"][0]["division_rank"] is None
+        assert "current-season results are unavailable" in out["message"].lower()
+        assert "stale" in out["message"].lower()
+
+
+class TestLocalEloHistoricalAliases:
+    """A provider rename must not split one club's history in two."""
+
+    SEASONS = {
+        "old": (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "B1,10/08/2019,Beveren,Rival,3,0,H\r\n"
+        ),
+        "new": (
+            "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\r\n"
+            "B1,10/08/2020,Waasland-Beveren,Rival,3,0,H\r\n"
+        ),
+    }
+
+    def _table(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        c._cache.clear()
+        monkeypatch.setattr(
+            c, "_fduk_season_codes", lambda n, as_of=None: [("new", True), ("old", False)]
+        )
+        monkeypatch.setattr(
+            c, "_fduk_fetch_season", lambda div, code, cur: self.SEASONS.get(code, "")
+        )
+        return c._local_elo_table("B1", 10, "2026-12-31")
+
+    def test_both_labels_fold_onto_one_rating(self, monkeypatch):
+        table = self._table(monkeypatch)
+        assert "Beveren" not in table["ratings"]
+        assert table["games"]["Waasland-Beveren"] == 2
+
+    def test_canonical_map_only_covers_declared_renames(self):
+        from sports_skills.football._connector import _fduk_canonical_labels
+
+        canonical = _fduk_canonical_labels()
+        assert canonical["Beveren"] == canonical["Waasland-Beveren"]
+        # Same-city rivals are never folded together.
+        assert "Dundee" not in canonical
+        assert "Paris FC" not in canonical
+
+
+class TestLocalEloOutageMessage:
+    """An outage must not be reported as a name-resolution gap."""
+
+    def test_unfetchable_results_say_so(self, monkeypatch):
+        from sports_skills.football import _connector as c
+
+        c._cache.clear()
+        monkeypatch.setattr(c, "_fduk_fetch_season", lambda div, code, cur: "")
+        out = c._local_elo_strength(
+            [{"name": "Bayern Munich", "slug": "bundesliga"}], "2026-09-07", 10
+        )
+        assert out["teams"][0]["reason"] == "no_results_available"
+        assert "Both sources are unreachable" in out["message"]
+        assert "name-resolution" not in out["message"]

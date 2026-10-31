@@ -1,0 +1,19 @@
+{
+ "name": "Egonex-AI-Understand-Anything",
+ "version": "2026.10.30.f2d0164",
+ "description": "把任意代码库转成可探索、可检索的交互式知识图谱——教学优先于炫技，快速建立对陌生代码库的结构性理解。",
+ "description_en": "Turn any codebase into an interactive knowledge graph you can explore and search.",
+ "author": {
+  "name": "Egonex-AI"
+ },
+ "keywords": [
+  "代码理解",
+  "知识图谱",
+  "codebase",
+  "学习"
+ ],
+ "category": "开发工具",
+ "license": "MIT",
+ "homepage": "https://github.com/Egonex-AI/Understand-Anything",
+ "sourceCommit": "f2d0164f72fe678805c34245a6df36acededfebd"
+}

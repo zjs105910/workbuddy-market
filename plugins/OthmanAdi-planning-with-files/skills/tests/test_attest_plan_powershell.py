@@ -1,0 +1,466 @@
+"""Windows containment tests for the PowerShell attestation path."""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ATTEST = REPO_ROOT / "skills" / "planning-with-files" / "scripts" / "attest-plan.ps1"
+RESOLVER = REPO_ROOT / "skills" / "planning-with-files" / "scripts" / "resolve-plan-dir.ps1"
+SHELL = shutil.which("pwsh") or shutil.which("powershell")
+
+
+class PowerShellAttestationStaticSecurityTests(unittest.TestCase):
+    def test_unix_fallback_is_explicitly_fail_closed(self) -> None:
+        source = ATTEST.read_text(encoding="utf-8")
+        refusal = (
+            "Safe no-follow descriptor operations are unavailable in this "
+            "PowerShell script on Unix. Use scripts/attest-plan.sh instead."
+        )
+        self.assertGreaterEqual(source.count(refusal), 3)
+        self.assertLess(
+            source.index("if (-not $script:IsWindowsHost)"),
+            source.index('if ($script:IsWindowsHost -and'),
+        )
+        self.assertNotIn("[IO.File]::Open($item.FullName", source)
+        self.assertNotIn("[IO.File]::WriteAllBytes($Path", source)
+        self.assertNotIn("Remove-Item -LiteralPath $Path -Force", source)
+
+    def test_directory_identity_is_frozen_before_each_target_open(self) -> None:
+        source = ATTEST.read_text(encoding="utf-8")
+        contracts = (
+            ("function Open-SafeReadStream", "::OpenRead($Path"),
+            ("function Write-SafeAscii", "::OpenAttestationWrite($Path)"),
+            ("function Remove-SafeFile", "::OpenDelete($Path)"),
+        )
+        for function_name, target_open in contracts:
+            with self.subTest(function=function_name):
+                start = source.index(function_name)
+                end = source.find("\nfunction ", start + len(function_name))
+                body = source[start : end if end != -1 else len(source)]
+                self.assertLess(
+                    body.index("Open-TrustedDirectory"), body.index(target_open)
+                )
+                self.assertIn("-ExpectedDirectoryFinal $directory.FinalPath", body)
+                self.assertIn(
+                    "-ExpectedDirectoryIdentity $directory.Identity", body
+                )
+
+
+@unittest.skipUnless(SHELL and os.name != "nt", "Unix PowerShell is unavailable")
+class UnixPowerShellAttestationFailClosedTests(unittest.TestCase):
+    def test_attestation_refuses_without_no_follow_descriptor_support(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PLAN_ID"] = "safe-plan"
+            env.pop("PWF_PLAN_ROOT", None)
+
+            result = subprocess.run(
+                [SHELL, "-NoProfile", "-File", str(ATTEST)],
+                cwd=root,
+                env=env,
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Use scripts/attest-plan.sh instead", result.stderr)
+            self.assertFalse((plan_dir / ".attestation").exists())
+
+
+@unittest.skipUnless(SHELL and os.name == "nt", "Windows PowerShell is unavailable")
+class PowerShellAttestationContainmentTests(unittest.TestCase):
+    def _run(
+        self,
+        root: Path,
+        env_extra: dict[str, str] | None = None,
+        *script_args: str,
+        script: Path = ATTEST,
+    ):
+        env = os.environ.copy()
+        for key in ("PLAN_ID", "PWF_PLAN_ROOT"):
+            env.pop(key, None)
+        if env_extra:
+            env.update(env_extra)
+        return subprocess.run(
+            [
+                SHELL,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                *script_args,
+            ],
+            cwd=root,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+
+    def _make_link(self, item_type: str, link: Path, target: Path) -> bool:
+        command = (
+            "& { param($link, $target, $kind) "
+            "New-Item -ItemType $kind -Path $link -Target $target "
+            "-ErrorAction Stop | Out-Null }"
+        )
+        created = subprocess.run(
+            [
+                SHELL,
+                "-NoProfile",
+                "-Command",
+                command,
+                str(link),
+                str(target),
+                item_type,
+            ],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        if created.returncode != 0 or not link.exists():
+            return False
+        item = subprocess.run(
+            [
+                SHELL,
+                "-NoProfile",
+                "-Command",
+                "& { param($path) "
+                "if (((Get-Item -LiteralPath $path -Force).Attributes "
+                "-band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 0 } "
+                "else { exit 1 } }",
+                str(link),
+            ],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        return item.returncode == 0
+
+    def _make_hardlink(self, link: Path, target: Path) -> bool:
+        command = (
+            "& { param($link, $target) "
+            "New-Item -ItemType HardLink -Path $link -Target $target "
+            "-ErrorAction Stop | Out-Null }"
+        )
+        created = subprocess.run(
+            [SHELL, "-NoProfile", "-Command", command, str(link), str(target)],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+        return created.returncode == 0 and link.exists()
+
+    def test_valid_scoped_plan_is_attested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            result = self._run(root, {"PLAN_ID": "safe-plan"})
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertTrue((plan_dir / ".attestation").is_file())
+
+            shown = self._run(root, {"PLAN_ID": "safe-plan"}, "-Show")
+            self.assertEqual(0, shown.returncode, shown.stderr)
+            self.assertIn("SHA-256:", shown.stdout)
+
+            cleared = self._run(root, {"PLAN_ID": "safe-plan"}, "-Clear")
+            self.assertEqual(0, cleared.returncode, cleared.stderr)
+            self.assertFalse((plan_dir / ".attestation").exists())
+
+    def test_attest_from_inside_plan_dir_uses_slug_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            plan = plan_dir / "task_plan.md"
+            plan.write_text("# First\n", encoding="utf-8")
+            (root / ".planning" / ".active_plan").write_text(
+                "safe-plan\n", encoding="utf-8"
+            )
+
+            initial = self._run(root)
+            self.assertEqual(0, initial.returncode, initial.stderr)
+            attestation = plan_dir / ".attestation"
+            initial_hash = attestation.read_text(encoding="ascii").strip()
+
+            plan.write_text("# Second\n", encoding="utf-8")
+            nested = self._run(plan_dir)
+
+            self.assertEqual(0, nested.returncode, nested.stderr)
+            self.assertNotEqual(
+                initial_hash, attestation.read_text(encoding="ascii").strip()
+            )
+            self.assertFalse((plan_dir / ".plan-attestation").exists())
+
+            shown = self._run(plan_dir, None, "-Show")
+            self.assertEqual(0, shown.returncode, shown.stderr)
+            self.assertIn("SHA-256:", shown.stdout)
+
+            cleared = self._run(plan_dir, None, "-Clear")
+            self.assertEqual(0, cleared.returncode, cleared.stderr)
+            self.assertFalse(attestation.exists())
+
+    def test_traversal_plan_id_cannot_attest_legacy_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "task_plan.md").write_text("# Legacy decoy\n", encoding="utf-8")
+            result = self._run(root, {"PLAN_ID": "..\\outside"})
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / ".plan-attestation").exists())
+
+    def test_malformed_active_pointer_cannot_attest_legacy_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planning = root / ".planning"
+            planning.mkdir()
+            (planning / ".active_plan").write_text("../../outside\n", encoding="utf-8")
+            (root / "task_plan.md").write_text("# Legacy decoy\n", encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / ".plan-attestation").exists())
+
+    def test_drive_relative_and_unc_pins_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "task_plan.md").write_text("# Legacy decoy\n", encoding="utf-8")
+            for pin in ("C:relative", r"\\server\share"):
+                with self.subTest(pin=pin):
+                    result = self._run(root, {"PWF_PLAN_ROOT": pin})
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertFalse((root / ".plan-attestation").exists())
+
+    def test_junction_escape_is_rejected_when_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            outside = Path(outside_tmp)
+            (root / ".planning").mkdir()
+            (outside / "task_plan.md").write_text("# Outside\n", encoding="utf-8")
+            junction = root / ".planning" / "escape"
+            if not self._make_link("Junction", junction, outside):
+                self.skipTest("junction creation is unavailable on this host")
+            result = self._run(root, {"PLAN_ID": "escape"})
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((outside / ".attestation").exists())
+
+    def test_stale_resolver_junction_swap_refuses_attest_show_and_clear(self) -> None:
+        """A resolver result must not become trusted after its directory swaps.
+
+        The local resolver stub models a valid selection returned just before
+        an attacker replaces that path with an external junction. The
+        attestation script must independently bind the selected directory to
+        the root handle frozen before resolution.
+        """
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            planning = root / ".planning"
+            planning.mkdir()
+            outside = Path(outside_tmp)
+            (outside / "task_plan.md").write_text("# Outside\n", encoding="utf-8")
+            external_marker = outside / ".attestation"
+            external_marker.write_text("EXTERNAL-MARKER", encoding="utf-8")
+            junction = planning / "safe-plan"
+            if not self._make_link("Junction", junction, outside):
+                self.skipTest("junction creation is unavailable on this host")
+
+            script_dir = root / "script-copy"
+            script_dir.mkdir()
+            copied_attest = script_dir / "attest-plan.ps1"
+            shutil.copy2(ATTEST, copied_attest)
+            (script_dir / "resolve-plan-dir.ps1").write_text(
+                "Write-Output (Join-Path (Get-Location) '.planning\\safe-plan')\n",
+                encoding="utf-8",
+            )
+
+            for args in ((), ("-Show",), ("-Clear",)):
+                with self.subTest(args=args):
+                    result = self._run(
+                        root,
+                        {"PLAN_ID": "safe-plan"},
+                        *args,
+                        script=copied_attest,
+                    )
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual(
+                        "EXTERNAL-MARKER",
+                        external_marker.read_text(encoding="utf-8"),
+                    )
+
+    def test_symlink_plan_file_is_rejected_when_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            outside = Path(outside_tmp) / "task_plan.md"
+            outside.write_text("# Outside\n", encoding="utf-8")
+            link = root / "task_plan.md"
+            if not self._make_link("SymbolicLink", link, outside):
+                self.skipTest("file symlink creation is unavailable on this host")
+            result = self._run(root)
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / ".plan-attestation").exists())
+
+    def test_precreated_attestation_directory_is_never_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            marker = plan_dir / ".attestation"
+            marker.mkdir()
+            sentinel = marker / "keep.txt"
+            sentinel.write_text("KEEP", encoding="utf-8")
+
+            result = self._run(root, {"PLAN_ID": "safe-plan"})
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertTrue(marker.is_dir())
+            self.assertEqual("KEEP", sentinel.read_text(encoding="utf-8"))
+
+    def test_precreated_attestation_symlink_is_safe_for_attest_show_and_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            outside = Path(outside_tmp) / "external.txt"
+            outside.write_text("EXTERNAL-SENTINEL", encoding="utf-8")
+            marker = plan_dir / ".attestation"
+            if not self._make_link("SymbolicLink", marker, outside):
+                self.skipTest("file symlink creation is unavailable on this host")
+
+            for args in ((), ("-Show",), ("-Clear",)):
+                with self.subTest(args=args):
+                    result = self._run(root, {"PLAN_ID": "safe-plan"}, *args)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual(
+                        "EXTERNAL-SENTINEL", outside.read_text(encoding="utf-8")
+                    )
+                    self.assertTrue(marker.exists())
+
+    def test_precreated_attestation_junction_is_never_followed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            outside = Path(outside_tmp)
+            sentinel = outside / "keep.txt"
+            sentinel.write_text("KEEP", encoding="utf-8")
+            marker = plan_dir / ".attestation"
+            if not self._make_link("Junction", marker, outside):
+                self.skipTest("junction creation is unavailable on this host")
+
+            result = self._run(root, {"PLAN_ID": "safe-plan"})
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertEqual("KEEP", sentinel.read_text(encoding="utf-8"))
+
+    def test_precreated_attestation_hardlink_is_safe_for_attest_show_and_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            outside = root / "external.txt"
+            outside.write_text("EXTERNAL-HARDLINK-SENTINEL", encoding="utf-8")
+            marker = plan_dir / ".attestation"
+            if not self._make_hardlink(marker, outside):
+                self.skipTest("hardlink creation is unavailable on this host")
+
+            for args in ((), ("-Show",), ("-Clear",)):
+                with self.subTest(args=args):
+                    result = self._run(root, {"PLAN_ID": "safe-plan"}, *args)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertNotIn(
+                        "EXTERNAL-HARDLINK-SENTINEL",
+                        result.stdout + result.stderr,
+                    )
+                    self.assertEqual(
+                        "EXTERNAL-HARDLINK-SENTINEL",
+                        outside.read_text(encoding="utf-8"),
+                    )
+                    self.assertTrue(marker.exists())
+
+    def test_show_rejects_linked_nonce_without_leaking_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            plan_dir = root / ".planning" / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            initial = self._run(root, {"PLAN_ID": "safe-plan"})
+            self.assertEqual(0, initial.returncode, initial.stderr)
+            secret = Path(outside_tmp) / "secret.txt"
+            secret.write_text("DO-NOT-LEAK-THIS", encoding="utf-8")
+            nonce = plan_dir / ".nonce"
+            if not self._make_link("SymbolicLink", nonce, secret):
+                self.skipTest("file symlink creation is unavailable on this host")
+
+            result = self._run(root, {"PLAN_ID": "safe-plan"}, "-Show")
+
+            self.assertNotEqual(0, result.returncode)
+            self.assertNotIn("DO-NOT-LEAK-THIS", result.stdout + result.stderr)
+
+    def test_active_pointer_symlink_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            planning = root / ".planning"
+            plan_dir = planning / "safe-plan"
+            plan_dir.mkdir(parents=True)
+            (plan_dir / "task_plan.md").write_text("# Safe\n", encoding="utf-8")
+            external_pointer = Path(outside_tmp) / "pointer.txt"
+            external_pointer.write_text("safe-plan\n", encoding="utf-8")
+            if not self._make_link(
+                "SymbolicLink", planning / ".active_plan", external_pointer
+            ):
+                self.skipTest("file symlink creation is unavailable on this host")
+
+            resolved = self._run(root, script=RESOLVER)
+            result = self._run(root)
+
+            self.assertEqual(0, resolved.returncode, resolved.stderr)
+            self.assertEqual("", resolved.stdout.strip())
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((plan_dir / ".attestation").exists())
+
+    def test_dangling_active_pointer_cannot_attest_legacy_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside_tmp:
+            root = Path(tmp)
+            planning = root / ".planning"
+            planning.mkdir()
+            (root / "task_plan.md").write_text("# Legacy decoy\n", encoding="utf-8")
+            external_pointer = Path(outside_tmp) / "pointer.txt"
+            external_pointer.write_text("safe-plan\n", encoding="utf-8")
+            active_pointer = planning / ".active_plan"
+            if not self._make_link("SymbolicLink", active_pointer, external_pointer):
+                self.skipTest("file symlink creation is unavailable on this host")
+            external_pointer.unlink()
+
+            resolved = self._run(root, script=RESOLVER)
+            result = self._run(root)
+
+            self.assertEqual(0, resolved.returncode, resolved.stderr)
+            self.assertEqual("", resolved.stdout.strip())
+            self.assertNotEqual(0, result.returncode)
+            self.assertFalse((root / ".plan-attestation").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

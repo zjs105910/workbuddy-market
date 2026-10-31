@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.DS_Store
+.omc/
+.omx/
+tests/local-terms.txt
+# Impeccable design tooling, reinstalled on demand with `npx impeccable install`.
+# It reviews the dashboard; it is not part of the published skill suite.
+.github/agents/
+.github/hooks/
+.github/skills/
+maintainers/evals/
+.coverage
+# Scratch space for local showcase workspaces: real creator projects, opened in
+# the dashboard, carrying generated media and provider responses. Nothing here
+# ships. The published excerpt chain lives in examples/excerpt-chain/.
+/demo/
+
+# 项目锁是运行时产物，不随参考运行分发。
+**/.short-drama/project.lock
+
+# render 的分段中间文件可随时由 剪辑单.md 重跑生成，不入库
+**/剧集/*/制作成果/成片/分段/
+**/剧集/*/制作成果/成片/成片-未混音.mp4
+**/剧集/*/制作成果/成片/字幕叠层.webm
+**/剧集/*/制作成果/成片/字幕.props.json
+
+# Local reruns and provider-generated artifacts; keep curated regression fixtures separate.
+/evaluations/让你管账号/reference-run-0.6.6/
+/evaluations/local-runs/

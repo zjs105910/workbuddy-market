@@ -1,0 +1,33 @@
+{
+  "parentThreadId": "fixture",
+  "inheritedProviderInstanceId": "claudeAgent",
+  "inheritedModel": "claude-opus-5-5",
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "providers": [
+    {"providerInstanceId": "codex", "driverKind": "codex", "displayName": "Codex", "canRunChildTask": true, "canRunCrossProviderChildTask": true, "constraints": [],
+     "models": [
+      {"id": "gpt-6.1-sol", "label": "GPT-6.1-Sol", "options": [
+        {"id": "reasoningEffort", "label": "Reasoning", "type": "select", "options": [{"id": "low", "isDefault": true}, {"id": "medium"}, {"id": "high"}, {"id": "xhigh"}, {"id": "max"}, {"id": "ultra"}]},
+        {"id": "serviceTier", "label": "Service Tier", "type": "select", "options": [{"id": "default", "isDefault": true}, {"id": "priority"}]}]},
+      {"id": "gpt-6-luna", "label": "GPT-6-Luna", "options": [
+        {"id": "reasoningEffort", "label": "Reasoning", "type": "select", "options": [{"id": "low"}, {"id": "medium", "isDefault": true}, {"id": "high"}, {"id": "xhigh"}, {"id": "max"}]}]}]},
+    {"providerInstanceId": "claudeAgent", "driverKind": "claudeAgent", "displayName": "Claude", "canRunChildTask": true, "canRunCrossProviderChildTask": true, "constraints": [],
+     "models": [
+      {"id": "claude-opus-5-5", "label": "Claude Opus 5.5", "options": [
+        {"id": "effort", "label": "Reasoning", "type": "select", "options": [{"id": "low"}, {"id": "medium", "isDefault": true}, {"id": "high"}, {"id": "xhigh"}, {"id": "max"}, {"id": "ultracode"}, {"id": "ultrathink"}]},
+        {"id": "fastMode", "label": "Fast Mode", "type": "boolean"}]},
+      {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "options": [{"id": "thinking", "label": "Thinking", "type": "boolean"}]},
+      {"id": "claude-haiku-5-5", "label": "Claude Haiku 5.5", "options": [{"id": "effort", "label": "Reasoning", "type": "select", "options": [{"id": "low"}, {"id": "medium", "isDefault": true}, {"id": "high"}, {"id": "xhigh"}, {"id": "max"}, {"id": "ultrathink"}]}]}]},
+    {"providerInstanceId": "cursor", "driverKind": "cursor", "displayName": "Cursor", "canRunChildTask": false, "canRunCrossProviderChildTask": false,
+     "constraints": ["Provider is not authenticated."],
+     "models": [{"id": "default", "label": "Auto", "options": []}]},
+    {"providerInstanceId": "grok", "driverKind": "grok", "displayName": "Grok", "canRunChildTask": true, "canRunCrossProviderChildTask": true, "constraints": [],
+     "models": [
+      {"id": "grok-4.7", "label": "Grok 4.7", "options": [
+        {"id": "reasoningEffort", "label": "Reasoning", "type": "select", "options": [{"id": "xhigh"}, {"id": "high", "isDefault": true}, {"id": "medium"}, {"id": "low"}]}]}]},
+    {"providerInstanceId": "opencode", "driverKind": "opencode", "displayName": "OpenCode", "canRunChildTask": false, "canRunCrossProviderChildTask": false,
+     "constraints": ["Provider instance is disabled."], "models": []}
+  ],
+  "features": {"appOwnedSubagents": true, "asyncPolling": true, "cancellation": true, "batchThreadCreation": true, "threadManagement": true, "incrementalThreadRead": true, "scheduledTasks": true, "maxBatchThreads": 20}
+}

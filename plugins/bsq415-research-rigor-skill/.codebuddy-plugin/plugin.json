@@ -1,0 +1,18 @@
+{
+ "name": "bsq415-research-rigor-skill",
+ "version": "2026.10.30.708718a",
+ "description": "人类主导、证据门控的科研全周期执行技能：从问题定义、文献综述到实验设计与结论输出，每一步都要求可验证证据支撑。",
+ "author": {
+  "name": "bsq415"
+ },
+ "keywords": [
+  "科研方法",
+  "证据门控",
+  "文献综述",
+  "研究执行"
+ ],
+ "category": "科研",
+ "license": "MIT",
+ "homepage": "https://github.com/bsq415/research-rigor-skill",
+ "sourceCommit": "708718adacbcc4e8ff8fb8066690a98f8c955fca"
+}

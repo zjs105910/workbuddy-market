@@ -1,0 +1,18 @@
+{
+ "name": "gal-a-qikly",
+ "version": "2026.10.30.6bd6953",
+ "description": "从验收标准生成测试套件的技能：先按验收条件生成测试用例，再驱动实现直至全部通过，覆盖单元与集成两层。",
+ "author": {
+  "name": "gal-a"
+ },
+ "keywords": [
+  "测试",
+  "验收标准",
+  "TDD",
+  "测试套件"
+ ],
+ "category": "测试",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/gal-a/qikly",
+ "sourceCommit": "6bd695387d37105d31eb653d855941cdf19d8f02"
+}

@@ -1,0 +1,20 @@
+{
+ "name": "Vincentwei1021-anything2explainer",
+ "version": "2026.10.30.735c79c",
+ "description": "输入一个主题，产出一支黑底动效讲解视频：TTS 旁白、逐句字幕与章节进度条齐备，中英文皆可，每一帧都用 Remotion 代码绘制，跨平台渲染结果一致，Claude Code / Codex 可用。",
+ "description_en": "Topic in, narrated explainer video out: black-canvas motion graphics with TTS voiceover, subtitles and a chapter progress bar, every frame drawn in Remotion code.",
+ "author": {
+  "name": "Vincentwei1021"
+ },
+ "keywords": [
+  "视频",
+  "讲解",
+  "动效",
+  "remotion",
+  "tts"
+ ],
+ "category": "设计",
+ "license": "NOASSERTION",
+ "homepage": "https://github.com/Vincentwei1021/anything2explainer",
+ "sourceCommit": "735c79c8724e897e8971cd59dde7e5aa11e4d6ce"
+}

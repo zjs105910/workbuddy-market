@@ -1,0 +1,71 @@
+.bot-dialog {
+  width: min(48rem, calc(100vw - 3rem));
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+}
+
+.bot-dialog .field {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1rem 0;
+}
+
+.bot-dialog details {
+  margin: 0.7rem 0;
+}
+
+.bot-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bot-dialog .bot-consent {
+  display: block;
+  margin: 1.3rem 0;
+}
+
+.bot-dialog .bot-actions {
+  display: block;
+  margin: 1rem 0;
+}
+
+.voice-dialog {
+  width: min(48rem, calc(100vw - 3rem));
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+}
+
+.voice-dialog .voice-consent {
+  display: block;
+  margin: 1rem 0;
+}
+
+.voice-dialog .voice-file,
+.voice-dialog .voice-source {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.voice-dialog fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.voice-dialog legend {
+  padding: 0 6px;
+  color: #cebaf5;
+  font-size: 12px;
+}
+
+.voice-dialog pre {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border-radius: 8px;
+  background: #141824;
+}

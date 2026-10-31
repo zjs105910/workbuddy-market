@@ -1,0 +1,381 @@
+"""TheSportsDB metadata connector — team logos, player photos, and search.
+
+Wraps the TheSportsDB free API (key=3) for metadata enrichment.
+Uses stdlib only (urllib, json, threading). No API key purchase required.
+"""
+
+import json
+import logging
+import re
+import threading
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from sports_skills import _replay
+
+logger = logging.getLogger("sports_skills.metadata")
+
+# ============================================================
+# Configuration
+# ============================================================
+
+BASE_URL = "https://www.thesportsdb.com/api/v1/json/3"
+_USER_AGENT = "sports-skills/1.0"
+
+# ============================================================
+# Module-Level Cache (TTL-based)
+# ============================================================
+
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_get(key):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry is None:
+            return None
+        value, expiry = entry
+        if time.monotonic() > expiry:
+            del _cache[key]
+            return None
+        return value
+
+
+def _cache_set(key, value, ttl=300):
+    with _cache_lock:
+        if len(_cache) > 500:
+            now = time.monotonic()
+            expired = [k for k, (_, exp) in _cache.items() if now > exp]
+            for k in expired:
+                del _cache[k]
+        _cache[key] = (value, time.monotonic() + ttl)
+
+
+# ============================================================
+# Rate Limiter (Token Bucket)
+# ============================================================
+
+
+class _RateLimiter:
+    def __init__(self, max_tokens=5, refill_rate=5.0):
+        self.max_tokens = max_tokens
+        self.tokens = max_tokens
+        self.refill_rate = refill_rate
+        self.last_refill = time.monotonic()
+        self.lock = threading.Lock()
+
+    def acquire(self, timeout=10.0):
+        deadline = time.monotonic() + timeout
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                elapsed = now - self.last_refill
+                self.tokens = min(self.max_tokens, self.tokens + elapsed * self.refill_rate)
+                self.last_refill = now
+                if self.tokens >= 1:
+                    self.tokens -= 1
+                    return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
+
+
+# The free key allows 30 requests per minute (the 31st gets HTTP 429 and a
+# ~2 minute Retry-After). Burst + one minute of refill stays at 30.
+_limiter = _RateLimiter(max_tokens=5, refill_rate=25 / 60)
+
+_RATE_LIMIT_MESSAGE = (
+    "TheSportsDB rate limit: the free API key allows 30 requests per minute. {detail} "
+    "Repeated lookups are cached, so reuse earlier results where possible."
+)
+
+# ============================================================
+# HTTP Fetching
+# ============================================================
+
+
+def _http_fetch(url, retries=2):
+    """Fetch JSON from a URL with retry logic, honouring ``SPORTS_SKILLS_REPLAY``.
+
+    In replay mode no network call, rate-limit wait, or retry happens.
+    """
+    cached = _cache_get(url)
+    if cached is not None:
+        return cached
+
+    if _replay.mode() != _replay.REPLAY and not _limiter.acquire():
+        return {
+            "error": True,
+            "status_code": 429,
+            "message": _RATE_LIMIT_MESSAGE.format(detail="Too many lookups in a row; wait a few seconds and retry."),
+        }
+
+    raw, err = _replay.fetch(url, lambda: _live_http_fetch(url, retries))
+    if err is not None:
+        # This module's error shape has no status_code, except 429, which the
+        # response wrapper turns into a rate-limit upgrade hint. Keep the replay flags.
+        error = {"error": True, "message": err.get("message", "")}
+        if err.get("status_code") == 429:
+            error["status_code"] = 429
+        for flag in ("replay_miss", "replay_error"):
+            if err.get(flag):
+                error[flag] = True
+        return error
+    data = json.loads(raw.decode("utf-8"))
+    _cache_set(url, data)
+    return data
+
+
+def _live_http_fetch(url, retries):
+    """Live GET for ``_replay.fetch``: (data_bytes, None) or (None, error_dict)."""
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.read(), None
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                # The lockout lasts minutes; retrying after a second only burns quota.
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                detail = f"Retry after {retry_after} seconds." if retry_after else "Wait a minute and retry."
+                return None, {"error": True, "status_code": 429, "message": _RATE_LIMIT_MESSAGE.format(detail=detail)}
+            if e.code >= 500:
+                last_err = e
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            # status_code lets _replay record the 4xx; _http_fetch drops it again.
+            return None, {"error": True, "status_code": e.code, "message": f"HTTP {e.code}: {e.reason}"}
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+
+    return None, {"error": True, "message": f"Request failed after {retries + 1} attempts: {last_err}"}
+
+
+# ============================================================
+# API Functions
+# ============================================================
+
+
+def search_teams(request_data):
+    """Search teams by name.
+
+    Params:
+        query: Team name or partial name to search for.
+    """
+    params = request_data.get("params", {})
+    query = params.get("query", "")
+    if not query:
+        return {"error": True, "message": "query parameter is required"}
+
+    url = f"{BASE_URL}/searchteams.php?t={urllib.parse.quote(query)}"
+    data = _http_fetch(url)
+    if data.get("error"):
+        return data
+
+    teams_raw = data.get("teams") or []
+    teams = []
+    for t in teams_raw:
+        teams.append({
+            "team_id": t.get("idTeam"),
+            "name": t.get("strTeam"),
+            "short_name": t.get("strTeamShort"),
+            "sport": t.get("strSport"),
+            "league": t.get("strLeague"),
+            "country": t.get("strCountry"),
+            "stadium": t.get("strStadium"),
+            "logo": t.get("strBadge"),
+            "banner": t.get("strBanner"),
+        })
+    return {"teams": teams, "count": len(teams)}
+
+
+def search_players(request_data):
+    """Search players by name.
+
+    Params:
+        query: Player name or partial name to search for.
+    """
+    params = request_data.get("params", {})
+    query = params.get("query", "")
+    if not query:
+        return {"error": True, "message": "query parameter is required"}
+
+    url = f"{BASE_URL}/searchplayers.php?p={urllib.parse.quote(query)}"
+    data = _http_fetch(url)
+    if data.get("error"):
+        return data
+
+    players_raw = data.get("player") or []
+    players = []
+    for p in players_raw:
+        players.append({
+            "player_id": p.get("idPlayer"),
+            "name": p.get("strPlayer"),
+            "team": p.get("strTeam"),
+            "sport": p.get("strSport"),
+            "nationality": p.get("strNationality"),
+            "position": p.get("strPosition"),
+            "photo": p.get("strThumb"),
+            "cutout": p.get("strCutout"),
+        })
+    return {"players": players, "count": len(players)}
+
+
+def get_team_logo(request_data):
+    """Get team logo URL by team name.
+
+    Params:
+        team_name: Name of the team to look up.
+        sport: Sport to filter by (default: Soccer).
+    """
+    params = request_data.get("params", {})
+    team_name = params.get("team_name", "")
+    sport = params.get("sport", "Soccer")
+    if not team_name:
+        return {"error": True, "message": "team_name parameter is required"}
+
+    url = f"{BASE_URL}/searchteams.php?t={urllib.parse.quote(team_name)}"
+    data = _http_fetch(url)
+    if data.get("error"):
+        return data
+
+    teams = data.get("teams") or []
+    if not teams:
+        return {"error": True, "message": f"No team found for '{team_name}'"}
+
+    # Prefer a match in the requested sport, then fall back to any sport.
+    in_sport = [t for t in teams if not sport or t.get("strSport", "").lower() == sport.lower()]
+    t = _best_team_match(team_name, in_sport) or _best_team_match(team_name, teams)
+    if t is None:
+        return _no_close_team(team_name, teams)
+    return {
+        "team_id": t.get("idTeam"),
+        "team_name": t.get("strTeam"),
+        "sport": t.get("strSport"),
+        "logo_url": t.get("strBadge"),
+    }
+
+
+def _name_tokens(name):
+    """Lowercased, accent- and punctuation-free word set; "saint" folds to "st"."""
+    text = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode()
+    words = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()
+    return frozenset("st" if w == "saint" else w for w in words)
+
+
+def _team_names(team):
+    names = [team.get("strTeam"), team.get("strTeamShort")]
+    names += (team.get("strTeamAlternate") or "").split(",")
+    return [n for n in (_name_tokens(n) for n in names) if n]
+
+
+def _best_team_match(query, teams):
+    """The result whose name matches the query, or None.
+
+    TheSportsDB's search is fuzzy and, on the free key, returns a single best
+    guess: "St. Louis Cardinals" comes back as "Louisville". An exact name (or
+    alternate) wins; otherwise a name whose words all appear in the query or
+    vice versa ("Real Madrid CF" / "Real Madrid"). Anything looser is rejected.
+    """
+    wanted = _name_tokens(query)
+    if not wanted:
+        return None
+    for t in teams:
+        if wanted in _team_names(t):
+            return t
+    for t in teams:
+        if any(wanted <= names or names <= wanted for names in _team_names(t)):
+            return t
+    return None
+
+
+def _no_close_team(team_name, teams):
+    found = ", ".join(f"'{c.get('strTeam')}' ({c.get('strSport')})" for c in teams)
+    return {
+        "error": True,
+        "message": (
+            f"No team named '{team_name}' found. TheSportsDB's closest result(s): {found}, "
+            "which do not match the requested name. Try the team's full official name "
+            "or search_teams."
+        ),
+    }
+
+
+def get_team_info(request_data):
+    """Get detailed team information.
+
+    Params:
+        team_name: Name of the team to look up.
+    """
+    params = request_data.get("params", {})
+    team_name = params.get("team_name", "")
+    if not team_name:
+        return {"error": True, "message": "team_name parameter is required"}
+
+    url = f"{BASE_URL}/searchteams.php?t={urllib.parse.quote(team_name)}"
+    data = _http_fetch(url)
+    if data.get("error"):
+        return data
+
+    teams = data.get("teams") or []
+    if not teams:
+        return {"error": True, "message": f"No team found for '{team_name}'"}
+
+    t = _best_team_match(team_name, teams)
+    if t is None:
+        return _no_close_team(team_name, teams)
+    return {
+        "team_id": t.get("idTeam"),
+        "name": t.get("strTeam"),
+        "short_name": t.get("strTeamShort"),
+        "sport": t.get("strSport"),
+        "league": t.get("strLeague"),
+        "country": t.get("strCountry"),
+        "stadium": t.get("strStadium"),
+        "capacity": t.get("intStadiumCapacity"),
+        "description": t.get("strDescriptionEN"),
+        "logo": t.get("strBadge"),
+        "banner": t.get("strBanner"),
+        "jersey": t.get("strEquipment"),
+        "website": t.get("strWebsite"),
+        "year_formed": t.get("intFormedYear"),
+    }
+
+
+def get_player_photo(request_data):
+    """Get player photo URL by player name.
+
+    Params:
+        player_name: Name of the player to look up.
+    """
+    params = request_data.get("params", {})
+    player_name = params.get("player_name", "")
+    if not player_name:
+        return {"error": True, "message": "player_name parameter is required"}
+
+    url = f"{BASE_URL}/searchplayers.php?p={urllib.parse.quote(player_name)}"
+    data = _http_fetch(url)
+    if data.get("error"):
+        return data
+
+    players = data.get("player") or []
+    if not players:
+        return {"error": True, "message": f"No player found for '{player_name}'"}
+
+    p = players[0]
+    return {
+        "player_id": p.get("idPlayer"),
+        "player_name": p.get("strPlayer"),
+        "team": p.get("strTeam"),
+        "sport": p.get("strSport"),
+        "photo_url": p.get("strThumb"),
+        "cutout_url": p.get("strCutout"),
+    }

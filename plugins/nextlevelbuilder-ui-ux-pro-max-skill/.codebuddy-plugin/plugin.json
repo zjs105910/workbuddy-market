@@ -1,0 +1,20 @@
+{
+ "name": "nextlevelbuilder-ui-ux-pro-max-skill",
+ "version": "2026.10.30.56ea9cf",
+ "description": "跨平台专业级 UI/UX 设计智能 Skill：为多端界面提供设计决策、版式与交互规范，让代理产出专业水准的前端设计。",
+ "description_en": "An AI skill providing design intelligence for professional UI/UX across multiple platforms.",
+ "author": {
+  "name": "nextlevelbuilder"
+ },
+ "keywords": [
+  "UI",
+  "UX",
+  "设计",
+  "前端",
+  "claude-code"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+ "sourceCommit": "56ea9cf174ed86786187daa9de0e6247cb0747e4"
+}

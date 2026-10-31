@@ -1,0 +1,13 @@
+# Line-ending policy. POSIX sh and Python scripts must reach disk as LF on
+# every platform: a CRLF shebang fails silently under the hook dispatchers'
+# fallback chains. cmd.exe batch files require CRLF for correct label and
+# goto parsing. Guarded by tests/test_line_endings.py.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary
+*.svg text eol=lf

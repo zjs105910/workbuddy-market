@@ -1,0 +1,19 @@
+{
+ "name": "tt-a1i-archify",
+ "version": "2026.10.30.73aaa06",
+ "description": "把任何想法、计划或代码库变成漂亮的交互式架构图：面向 Claude Code 等智能体的图表技能，含渲染器与配方库。",
+ "description_en": "Turn any idea, plan or codebase into a beautiful interactive diagram - an agent skill for Claude Code with renderers and recipes.",
+ "author": {
+  "name": "tt-a1i"
+ },
+ "keywords": [
+  "架构图",
+  "图表",
+  "可视化",
+  "设计"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/tt-a1i/archify",
+ "sourceCommit": "73aaa0696e8f72c232ea710e6fa94fd953f3e773"
+}

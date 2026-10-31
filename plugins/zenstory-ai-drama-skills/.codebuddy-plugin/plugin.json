@@ -1,0 +1,20 @@
+{
+ "name": "zenstory-ai-drama-skills",
+ "version": "2026.10.30.fdb7b7c",
+ "description": "开源 AI 短剧 / 漫剧创作 skill 合集：剧本、角色资产、分镜 storyboard、图片与视频提示词、内容审查全流程覆盖，适配 Claude Code 与 Codex，从设定到成片提示词一站打通。",
+ "description_en": "Open-source AI short-drama skills for Claude Code & Codex: script, character assets, storyboard, image/video prompts and review.",
+ "author": {
+  "name": "zenstory-ai"
+ },
+ "keywords": [
+  "视频",
+  "短剧",
+  "分镜",
+  "剧本",
+  "提示词"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/zenstory-ai/drama-skills",
+ "sourceCommit": "fdb7b7c58017e3eae64eca382c2a85ede368dab0"
+}

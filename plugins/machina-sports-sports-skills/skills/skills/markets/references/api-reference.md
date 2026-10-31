@@ -1,0 +1,106 @@
+# Markets Orchestration — API Reference
+
+## Commands
+
+| Command | Required | Optional | Description |
+|---|---|---|---|
+| `get_todays_markets` | | sport, date | Fetch ESPN schedule → search both exchanges with sport context → unified dashboard |
+| `search_entity` | query | sport | Search Kalshi + Polymarket for a team/player/event name (passes sport to both platforms) |
+| `compare_odds` | sport, event_id | | ESPN odds + prediction market prices → normalized side-by-side + arb check |
+| `get_sport_markets` | sport | status, limit | Sport-filtered market listing on both platforms (uses sport code, not text query) |
+| `get_sport_schedule` | | sport, date | Unified ESPN schedule across one or all sports |
+| `normalize_price` | price, source | | Convert any source format to common {implied_prob, american, decimal} |
+| `evaluate_market` | sport, event_id | token_id, kalshi_ticker, outcome, fee_per_contract | ESPN odds + executable ask → devig → fee-aware edge → Kelly |
+| `match_markets` | sport | date | Pair the same game across Kalshi and Polymarket (date + team-code join, fuzzy title fallback) |
+| `get_market_price` | venue, ticker (kalshi) or token_id (polymarket) | at_time | Live or point-in-time price — both sides as 0-1 probabilities, one shape for both venues |
+| `get_price_history` | venue, ticker (kalshi) or token_id (polymarket) | interval, start_time, end_time | {timestamp, price} series (0-1 yes probability) at 1m/1h/1d resolution |
+| `get_live_tick` | sport, event_id | | Live market tick for an in-progress game — Kalshi home price + ESPN frame |
+| `get_mock_tick` | mock_file_path | interval_seconds | Deterministic timeline slice from a static mock game file |
+| `get_plays_near_timestamp` | sport, timestamp | game_id, window_seconds, mock_file_path | Plays in the window [timestamp - window_seconds, timestamp] |
+| `resolve_game_market` | sport, event_id | status | Resolve one ESPN game to its Kalshi game-winner market (home side) |
+
+### `evaluate_market` notes
+
+- Prices the side named by `outcome` (0 = home, default; 1 = away) at the **ask** from the venue's order book, plus `fee_per_contract`. A bid, a last trade or a midpoint is a reference price, not what a purchase costs.
+- `fee_per_contract` is dollars per $1 contract. Without it the ask is still reported, but `evaluation` is `null` — the net edge and Kelly are refused rather than computed as if trading were free. Pass `0` to assert a zero-fee venue.
+- The market must be provably this game's full-game winner market: series/slug family, both teams, the right date, and the right side. A wrong-team ticker, a first-half or spread market, a repeat matchup on another date, or a `token_id` naming the other side is refused — never swapped for a different bet.
+- Fails closed on a missing ask or zero depth.
+- `market_prob` is the effective executable cost (ask + fee) the evaluation used. `sources` reports per-venue outcomes (`ok` / `empty` / `error` / `unmatched`).
+
+### `compare_odds` notes
+
+- `sources` gives a per-source outcome (`ok` / `empty` / `error` / `unmatched`) and `completeness` lists which sources actually priced this game's sides. A provider that errored is distinguishable from one with genuinely no markets. When nothing is usable the call fails instead of returning an empty success.
+- `arbitrage_check` is built from reference prices and is labelled `price_basis: "reference"`. Confirm both legs on each venue's order book before treating it as executable.
+
+### `match_markets` notes
+
+- `sport` must exist on both venues: mlb, nfl, nba, nhl, wnba, cfb, cbb, epl, ucl, laliga, bundesliga, seriea, ligue1, mls, worldcup.
+- Each match returns `kalshi.market_tickers` and `polymarket.markets[]` (moneyline markets with `token_ids` and `outcomes`). US-league games have one moneyline market with team-named outcomes; soccer games have several binary ones (home/away/draw).
+- `match_method` is `code` (deterministic identifier join) or `title` (fuzzy fallback — used when the venues' team codes differ, e.g. World Cup ISO vs FIFA country codes).
+- `unmatched` lists games seen on only one venue (listing windows differ).
+
+### `get_market_price` / `get_price_history` notes
+
+- `at_time`, `start_time`, `end_time` accept Unix timestamps or ISO 8601 datetimes.
+- Historical Kalshi prices come from candlesticks (hourly within 7 days of `at_time`, daily within 31); Polymarket from CLOB price history.
+- All prices are 0-1 probabilities for the YES side regardless of venue — no unit conversion needed downstream.
+
+## Supported Sports
+
+### US Sports (with ESPN schedules)
+
+| Sport | Key | Kalshi Series | Polymarket Code |
+|---|---|---|---|
+| NFL | `nfl` | KXNFL | `nfl` |
+| NBA | `nba` | KXNBA | `nba` |
+| MLB | `mlb` | KXMLB | `mlb` |
+| NHL | `nhl` | KXNHL | `nhl` |
+| WNBA | `wnba` | KXWNBA | `wnba` |
+| College Football | `cfb` | KXCFB | `cfb` |
+| College Basketball | `cbb` | KXCBB | `cbb` |
+
+### Football (prediction markets only — no ESPN schedule)
+
+| League | Key | Kalshi Series | Polymarket Code |
+|---|---|---|---|
+| English Premier League | `epl` | KXEPLGAME | `epl` |
+| Champions League | `ucl` | KXUCL | `ucl` |
+| La Liga | `laliga` | KXLALIGA | `lal` |
+| Bundesliga | `bundesliga` | KXBUNDESLIGA | `bun` |
+| Serie A | `seriea` | KXSERIEA | `sea` |
+| Ligue 1 | `ligue1` | KXLIGUE1 | `fl1` |
+| MLS | `mls` | KXMLSGAME | `mls` |
+| FIFA World Cup 2026 | `worldcup` | KXWCGAME | `fifwc` |
+
+## Price Normalization
+
+Different sources use different formats. `normalize_price` converts any format to a common structure.
+
+| Source | Format | Example | Meaning |
+|---|---|---|---|
+| ESPN | American odds | `-150` | Favorite, implied 60% |
+| Polymarket | Probability (0-1) | `0.65` | 65% implied probability |
+| Kalshi | Integer (0-100) | `65` | 65% implied probability |
+
+**Normalized output shape:**
+```json
+{
+  "implied_probability": 0.65,
+  "american": -185.7,
+  "decimal": 1.5385,
+  "source": "polymarket"
+}
+```
+
+## Partial Results Behavior
+
+If one source is unavailable, the module returns what it has with warnings:
+```json
+{
+  "status": true,
+  "data": {
+    "games": [],
+    "warnings": ["Kalshi search failed: connection timeout"]
+  }
+}
+```

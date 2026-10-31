@@ -1,0 +1,18 @@
+{
+ "name": "Marsjunwang-nblane",
+ "version": "2026.10.30.ebe7055",
+ "description": "人 + 代理 + 团队技能共同进化平台：以纯文本沉淀技能资产，5 个技能覆盖个人与团队层面的技能演化与复用。",
+ "author": {
+  "name": "Marsjunwang"
+ },
+ "keywords": [
+  "技能进化",
+  "团队协作",
+  "纯文本",
+  "知识管理"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/Marsjunwang/nblane",
+ "sourceCommit": "ebe70553aa0e5ebabcbcece62b97bac70f2081ad"
+}

@@ -1,0 +1,38 @@
+name: Registry and website checks
+
+on:
+  pull_request:
+    paths:
+      - "registry/**"
+      - "schemas/**"
+      - "website/**"
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - "registry/**"
+      - "schemas/**"
+      - "website/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate, test, type-check and build
+        run: npm run verify

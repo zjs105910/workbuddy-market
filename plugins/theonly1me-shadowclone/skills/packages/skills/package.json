@@ -1,0 +1,19 @@
+{
+  "name": "@shadowclone/skills",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/changes": "workspace:*",
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/sessions": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}

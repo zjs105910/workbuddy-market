@@ -1,0 +1,68 @@
+{
+  "name": "@shadowclone/cli",
+  "private": true,
+  "type": "module",
+  "description": "Turns how you work into a portable, tested environment for the coding agents you already use.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cursor",
+    "agent",
+    "subagent",
+    "local-first"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theonly1me/shadowclone.git"
+  },
+  "homepage": "https://shadowclone.co",
+  "bugs": {
+    "url": "https://github.com/theonly1me/shadowclone/issues"
+  },
+  "bin": {
+    "shadowclone": "bin/shadowclone.mjs"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "preferences",
+    "skills",
+    "plugins",
+    ".claude-plugin",
+    "README.md",
+    "PRIVACY.md",
+    "evals.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "stage": "bun run scripts/stage.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/agents": "workspace:*",
+    "@shadowclone/builds": "workspace:*",
+    "@shadowclone/changes": "workspace:*",
+    "@shadowclone/cloud": "workspace:*",
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/environment": "workspace:*",
+    "@shadowclone/harness": "workspace:*",
+    "@shadowclone/learning": "workspace:*",
+    "@shadowclone/mcp": "workspace:*",
+    "@shadowclone/profile": "workspace:*",
+    "@shadowclone/redact": "workspace:*",
+    "@shadowclone/review": "workspace:*",
+    "@shadowclone/sessions": "workspace:*",
+    "@shadowclone/skills": "workspace:*",
+    "@shadowclone/web": "workspace:*",
+    "bun": "^1.4.2",
+    "commander": "^15.0.0",
+    "smol-toml": "^1.8.0",
+    "zod": "^4.5.4"
+  }
+}

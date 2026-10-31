@@ -1,0 +1,313 @@
+name: release
+
+# Fully automated release: on every push to main, this decides the next version
+# itself, then creates the vX.Y.Z tag, publishes a GitHub Release, and publishes
+# to npm -- all in one job. Nothing about a release needs to be done by hand
+# anymore, PR merges are the only input:
+#
+#   - If package.json's version still matches the latest release tag (the
+#     normal case -- nobody touched it in the merged PR), this job resolves the
+#     next version from the labels on every PR merged since that tag
+#     (.github/scripts/resolve_version.py: minor/feature/enhancement -> minor,
+#     patch/fix/bug -> patch, unlabeled -> patch, chore/ci/docs/dependencies
+#     only -> nothing to release, major -> refused), bumps
+#     package.json, .claude-plugin/plugin.json and docs/contract.md to that version, writes a CHANGELOG.md
+#     section listing those merged PRs, and pushes that bump commit to main
+#     itself before continuing -- see "Auto-bump" below.
+#   - If a PR *did* bump package.json's version by hand (and, by this repo's
+#     convention, wrote its own CHANGELOG.md section and docs/contract.md
+#     edits), that manual choice is left alone and used as-is -- auto-bump
+#     only fills in when nobody made the call already.
+#
+# Either way, once package.json's version has no matching tag, this creates
+# that tag, publishes a GitHub Release with notes extracted from
+# CHANGELOG.md's matching section, and publishes to npm. A push to main that
+# ends up not changing the version at all (nothing mergeable since the last
+# release, e.g. this very bump commit -- see below) is a no-op: every
+# remaining step is skipped.
+#
+# This runs as one job triggered directly by the push to main, not chained
+# through a separate tag-push trigger, because a tag (or, now, a bump commit)
+# pushed by the built-in GITHUB_TOKEN does not itself trigger another workflow
+# run (a deliberate GitHub Actions anti-recursion rule) -- splitting any of
+# this into "push a commit/tag" / "react to that push" workflows would
+# silently never fire the second one. That anti-recursion rule is also why
+# the auto-bump commit below is safe to push straight from this job without
+# looping: it never starts a second run of this workflow, this same run just
+# continues on past it with the new version.
+#
+# main is protected by a ruleset (PR required, 8 status checks) that the
+# built-in GITHUB_TOKEN cannot bypass (GitHub Actions is not an accepted
+# bypass actor; #137). The bump commit is therefore pushed with the
+# RELEASE_PUSH_TOKEN secret when it exists: a fine-grained PAT of a repository
+# admin (Contents: read/write on this repo only), whose "Repository admin"
+# bypass lets the push through. A PAT push DOES trigger workflows, unlike
+# GITHUB_TOKEN, so the bump commit message carries [skip ci]: the tag, the
+# GitHub Release and the npm publish all happen in this same run, and a second
+# run on the bump commit would only find the tag already present. Without the
+# secret the push falls back to GITHUB_TOKEN (works on an unprotected main).
+
+on:
+  push:
+    branches: [main]
+
+# Two merges in quick succession must release one after the other, never side by side: each
+# run resolves "the next version" from the same last tag, so two concurrent runs would both
+# pick the same number and the second one's bump push / tag creation would collide.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read   # resolve_version.py reads merged PRs' labels through gh api
+  id-token: write        # required for `npm publish --provenance`
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tip of main, not the SHA that triggered this run: with two merges in quick
+          # succession the concurrency group queues the second run, and the first must bump on
+          # top of everything already on main or its push is rejected as non-fast-forward
+          # (1.4.2's first run, 2026-09-11: #171 landed while #167's run was still bumping).
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Decide whether an automatic version bump is needed
+        id: setup
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          LAST_VERSION="${LAST_TAG#v}"
+          LAST_VERSION="${LAST_VERSION:-0.0.0}"
+          echo "pkg_version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "last_version=$LAST_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$PKG_VERSION" = "$LAST_VERSION" ]; then
+            echo "needs_auto_bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_auto_bump=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Decides the next version from the labels of every PR merged since the last vX.Y.Z tag
+      # (.github/scripts/resolve_version.py: the same label vocabulary as release-drafter.yml's
+      # autolabeler; chore/ci/docs/dependencies-only PRs are not releasable; an empty result
+      # means "nothing to release" and every remaining step is skipped). This used to be a
+      # release-drafter call with `dry-run: true` -- an input that action does not have, so it
+      # silently ran live, and it could never answer "nothing" (its `exclude-labels` hides PRs
+      # from the notes but `default: patch` still bumps), which published 1.0.4 for a
+      # workflow-only merge. Reads labels through `gh api`, never PR text.
+      - name: Resolve the next version from merged PR labels
+        id: drafter
+        if: steps.setup.outputs.needs_auto_bump == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LAST_VERSION: ${{ steps.setup.outputs.last_version }}
+        run: python3 .github/scripts/resolve_version.py
+
+      # Nobody bumped package.json by hand, and resolve_version.py found something new to
+      # release: bump package.json/docs/contract.md ourselves and write a CHANGELOG.md
+      # section listing the merged PRs (and any issues they closed) since the last tag,
+      # then push that commit to main before the rest of this job continues. Reads PR
+      # titles via `git log` at runtime rather than interpolating them into this script,
+      # since PR titles are attacker-controlled text and GitHub Actions expression
+      # interpolation into a run: block is a known script-injection vector -- only our own
+      # already-resolved, numeric version strings pass through ${{ }} here.
+      - name: Auto-bump package.json / docs/contract.md / docs/roadmap.md / CHANGELOG.md
+        if: |
+          steps.setup.outputs.needs_auto_bump == 'true' &&
+          steps.drafter.outputs.resolved_version != '' &&
+          steps.drafter.outputs.resolved_version != steps.setup.outputs.last_version
+        env:
+          OLD_VERSION: ${{ steps.setup.outputs.last_version }}
+          NEW_VERSION: ${{ steps.drafter.outputs.resolved_version }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess, pathlib, sys
+
+          old = os.environ["OLD_VERSION"]
+          new = os.environ["NEW_VERSION"]
+          root = pathlib.Path(".")
+
+          # An automatic bump never crosses a major boundary. 1.0.0-1.0.2 were published by
+          # accident (2026-09-11) when a `major` label reached three dependency bumps through an
+          # autolabeler rule; that rule is gone, but a hand-applied `major` label on the wrong PR
+          # would do the same. A real major is a deliberate, manual package.json bump in a PR
+          # (the existing manual path), never something this job infers from labels.
+          if old.split(".")[0] != new.split(".")[0]:
+              sys.exit(f"refusing to auto-bump across a major boundary ({old} -> {new}); "
+                       f"bump package.json by hand in a PR if a major release is intended")
+
+          pkg_path = root / "package.json"
+          pkg = pkg_path.read_text(encoding="utf-8")
+          pkg_new = re.sub(r'("version":\s*")[^"]+(")', rf'\g<1>{new}\g<2>', pkg, count=1)
+          assert pkg != pkg_new, "package.json version field not found/replaced"
+          pkg_path.write_text(pkg_new, encoding="utf-8")
+
+          plugin_path = root / ".claude-plugin" / "plugin.json"
+          plugin = plugin_path.read_text(encoding="utf-8")
+          plugin_new = re.sub(r'("version":\s*")[^"]+(")', rf'\g<1>{new}\g<2>', plugin, count=1)
+          assert plugin != plugin_new, ".claude-plugin/plugin.json version field not found/replaced"
+          plugin_path.write_text(plugin_new, encoding="utf-8")
+
+          # Only the two current-version mentions move; a blind replace of the version string
+          # also rewrote every historical "since"/"added in" version (see the helper's docstring).
+          sys.path.insert(0, str(root / ".github" / "scripts"))
+          from bump_contract_md import bump_contract_md
+          contract_path = root / "docs" / "contract.md"
+          contract = contract_path.read_text(encoding="utf-8")
+          contract_path.write_text(bump_contract_md(contract, old, new), encoding="utf-8")
+
+          # The roadmap's "released version today" sentence is pinned to package.json by a test;
+          # the auto-bump used to leave it behind, so every label-driven release left main red
+          # until a docs PR moved it (2.2.1 -> #288).
+          from bump_roadmap_md import bump_roadmap_md
+          roadmap_path = root / "docs" / "roadmap.md"
+          roadmap = roadmap_path.read_text(encoding="utf-8")
+          roadmap_path.write_text(bump_roadmap_md(roadmap, old, new), encoding="utf-8")
+
+          # design-decisions sections written as "## Unreleased — topic" take the shipped version,
+          # as CHANGELOG's do, and its contents list follows. Eleven such headings were left saying
+          # "Unreleased" long after they shipped (2.3.0 .. 2.12.0) before this step existed.
+          from design_decisions_index import release_headings
+          dd_path = root / "docs" / "design-decisions.md"
+          dd_path.write_text(release_headings(dd_path.read_text(encoding="utf-8"), new), encoding="utf-8")
+
+          last_tag = f"v{old}" if old != "0.0.0" else None
+          rev_range = f"{last_tag}..HEAD" if last_tag else "HEAD"
+          log = subprocess.run(
+              ["git", "log", rev_range, "--format=%s----BODY----%b----COMMIT----"],
+              capture_output=True, text=True, check=True,
+          ).stdout
+          commits = [c for c in log.split("----COMMIT----") if c.strip()]
+          subjects, issues = [], set()
+          for c in commits:
+              subject, _, body = c.partition("----BODY----")
+              subject = subject.strip()
+              if subject:
+                  subjects.append(subject)
+              issues.update(int(n) for n in re.findall(r"(?im)^closes\s+#(\d+)\.?\s*$", body))
+
+          bullets = "\n".join(f"- {s}" for s in subjects) or "- (no commit subjects found)"
+          closes_line = f"\n\nCloses: {', '.join(f'#{n}' for n in sorted(issues))}" if issues else ""
+          section = (
+              f"## {new}\n\n"
+              f"_Automated release: version and notes generated from pull requests merged "
+              f"since {old}._\n\n"
+              f"{bullets}{closes_line}\n\n"
+          )
+
+          changelog_path = root / "CHANGELOG.md"
+          changelog = changelog_path.read_text(encoding="utf-8")
+          # Whatever sits under "## Unreleased" (hand-written bullets from the merged PRs, or the
+          # placeholder "(nothing yet)") moves into the new version's section, ahead of the
+          # generated commit-subject bullets, and the placeholder is put back. The anchor used to
+          # be the literal "(nothing yet)" line, so a PR that wrote real notes there broke the
+          # bump step (1.4.1's first run).
+          m = re.search(r"## Unreleased\n(.*?)(?=^## )", changelog, re.S | re.M)
+          assert m, "CHANGELOG.md has no '## Unreleased' section followed by a version heading"
+          unreleased = m.group(1).strip()
+          if unreleased and unreleased != "(nothing yet)":
+              section = section.replace(f"since {old}._\n\n", f"since {old}._\n\n{unreleased}\n", 1)
+          changelog = changelog[:m.start()] + "## Unreleased\n\n(nothing yet)\n\n" + section + changelog[m.end():]
+          changelog_path.write_text(changelog, encoding="utf-8")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json .claude-plugin/plugin.json docs/contract.md CHANGELOG.md docs/roadmap.md docs/design-decisions.md
+          git commit -m "chore(release): bump version to ${NEW_VERSION} [skip ci]"
+          # A merge that landed during this step would still make the push non-fast-forward;
+          # replay the bump on top of it (a conflict here is real and should fail the run).
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Check whether this version is already released
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # The commit to tag is whatever HEAD is *now*: after an auto-bump that is the bump
+          # commit this job just pushed, not the merge commit that triggered the run. Tagging
+          # github.sha (as this did through v1.1.0) put every auto-released tag one commit
+          # before its own version bump, so `git checkout v1.1.0` showed package.json at 1.0.4.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "already_released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract this version's CHANGELOG section
+        if: steps.check.outputs.already_released == 'false'
+        run: |
+          awk -v ver="${{ steps.check.outputs.version }}" '
+            BEGIN { found=0 }
+            /^## / {
+              if (found) exit
+              if (index($0, ver) > 0) { found=1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "No matching CHANGELOG.md section found for ${{ steps.check.outputs.version }}; using a generic note." > release_notes.md
+          fi
+
+      - name: Create tag and GitHub Release
+        if: steps.check.outputs.already_released == 'false'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.check.outputs.tag }}
+          target_commitish: ${{ steps.check.outputs.sha }}
+          body_path: release_notes.md
+          generate_release_notes: true
+
+      - uses: actions/setup-node@v7
+        if: steps.check.outputs.already_released == 'false'
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # Requires an npm access token in this repo's Settings -> Secrets and variables ->
+      # Actions, named NPM_TOKEN (npmjs.com -> your avatar -> Access Tokens -> Generate New
+      # Token -> Granular Access Token or Automation, with publish permission on this
+      # package). Without it, this step fails but the tag/GitHub Release above still stand --
+      # only the npm publish is skipped, so a missing token never blocks the rest of a release.
+      - name: Publish to npm
+        if: steps.check.outputs.already_released == 'false'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # A green job is not a correct release (2026-09-11: three "successful" runs published
+      # 1.0.0-1.0.2 by mistake). So check the *result*, not the exit code: the registry's `latest`
+      # must be exactly the version this run meant to publish, and unless a PR bumped package.json
+      # by hand, the major must not have moved since the previous tag. npm's own publish notice
+      # says the package "may take a few minutes to become available": 1.1.0 was not visible after
+      # 60 s and this step went red on a release that was in fact fine, so the window is now five
+      # minutes. A failure here never re-publishes anything (the next run sees the tag and skips).
+      - name: Verify the publish landed as intended
+        if: steps.check.outputs.already_released == 'false'
+        env:
+          EXPECTED: ${{ steps.check.outputs.version }}
+          PREVIOUS: ${{ steps.setup.outputs.last_version }}
+          AUTO_BUMPED: ${{ steps.setup.outputs.needs_auto_bump }}
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          for i in $(seq 1 30); do
+            LATEST=$(npm view "$PKG" version --cache /tmp/npm-verify-cache 2>/dev/null || true)
+            [ "$LATEST" = "$EXPECTED" ] && break
+            echo "registry latest=$LATEST, expected $EXPECTED (attempt $i/30)"; sleep 10
+          done
+          if [ "$LATEST" != "$EXPECTED" ]; then
+            echo "::error::npm reports latest=$LATEST after publishing $EXPECTED"; exit 1
+          fi
+          if [ "$AUTO_BUMPED" = "true" ] && [ "${EXPECTED%%.*}" != "${PREVIOUS%%.*}" ]; then
+            echo "::error::automatic release crossed a major boundary: $PREVIOUS -> $EXPECTED"; exit 1
+          fi
+          echo "published $PKG@$EXPECTED (previous tag $PREVIOUS)"

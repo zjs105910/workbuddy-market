@@ -1,0 +1,18 @@
+{
+ "name": "ericrisco-rsc-harness",
+ "version": "2026.10.30.f866289",
+ "description": "超大体量的代理技能百科：开发、写作、测试、运维等方向 271 个技能，按需取用，适合作为团队技能弹药库。",
+ "author": {
+  "name": "ericrisco"
+ },
+ "keywords": [
+  "技能百科",
+  "合集",
+  "多方向",
+  "团队"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/ericrisco/rsc-harness",
+ "sourceCommit": "f866289b3e7ec69354cf854e67b52fa29aee088e"
+}

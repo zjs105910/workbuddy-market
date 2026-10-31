@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan review</title>
+<style>
+:root {
+  --page: #fbfaf7; --text: #1d1d1b; --muted: #66645f; --card: #ffffff; --line: #e2dfd8;
+  --done: #2f7d4f; --doing: #a8701c; --todo: #77756f; --blocked: #b5443b; --skipped: #6d5fa8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #161615; --text: #ecebe7; --muted: #a09e98; --card: #1f1f1d; --line: #34332f;
+    --done: #5fbf83; --doing: #e0a84a; --todo: #8f8c85; --blocked: #e57b72; --skipped: #a99be8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 24px; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 28px 0 10px; }
+.meta { color: var(--muted); margin: 0 0 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.counts b { display: block; font-size: 22px; }
+.counts span { color: var(--muted); font-size: 13px; }
+ol.steps { list-style: none; margin: 0; padding: 0; }
+ol.steps li { display: grid; grid-template-columns: 84px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+ol.steps li:last-child { border-bottom: 0; }
+.status { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.done { color: var(--done); } .doing { color: var(--doing); } .todo { color: var(--todo); }
+.blocked { color: var(--blocked); } .skipped { color: var(--skipped); }
+.note { display: block; color: var(--muted); font-size: 13px; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+code, pre { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre { white-space: pre-wrap; margin: 0; }
+#diagram img { display: block; max-width: 100%; height: auto; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <p id="goal"></p>
+  <p class="meta">Plan file: <code id="plan-path"></code>. Updated: <span id="updated"></span>.</p>
+  <div class="counts">
+    <div class="card"><b id="count-done">0</b><span>steps done</span></div>
+    <div class="card"><b id="count-left">0</b><span>steps left</span></div>
+    <div class="card"><b id="count-open">0</b><span>open questions</span></div>
+  </div>
+  <section id="diagram-section" hidden>
+    <h2>Diagram</h2>
+    <div class="card scroll">
+      <div id="diagram"></div>
+      <p class="note" id="diagram-note">The diagram shows as source text until the pinned Mermaid file loads.</p>
+      <pre id="diagram-source"></pre>
+    </div>
+  </section>
+  <h2>Steps</h2>
+  <div class="card"><ol class="steps" id="steps"></ol></div>
+  <h2>Decisions</h2>
+  <div class="card scroll">
+    <table>
+      <thead><tr><th>Question</th><th>Answer</th><th>Source</th></tr></thead>
+      <tbody id="decisions"></tbody>
+    </table>
+  </div>
+  <h2>Open questions</h2>
+  <div class="card"><ul id="open"></ul></div>
+</main>
+<script type="application/json" id="plan">
+{
+  "title": "TEMPLATE: A short name for the change",
+  "goal": "TEMPLATE: One sentence about the result that the user wants.",
+  "planPath": "TEMPLATE: The absolute path of the plan file",
+  "updated": "TEMPLATE: The date and time of this update",
+  "steps": [
+    { "status": "done", "text": "TEMPLATE: Read the code that the request touches.", "note": "" },
+    { "status": "doing", "text": "TEMPLATE: Ask one round of decisions.", "note": "" },
+    { "status": "todo", "text": "TEMPLATE: Write the plan and this page.", "note": "" },
+    { "status": "skipped", "text": "TEMPLATE: A step that you skipped.", "note": "TEMPLATE: The reason for the skip." }
+  ],
+  "decisions": [
+    { "question": "TEMPLATE: A decision that the user made.", "answer": "TEMPLATE: The answer.", "source": "user" }
+  ],
+  "open": ["TEMPLATE: A question that is still open."],
+  "diagram": "flowchart LR\n  Request --> Plan --> Approval --> Steps"
+}
+</script>
+<script>
+const plan = JSON.parse(document.getElementById("plan").textContent);
+const element = (name, text, className) => {
+  const node = document.createElement(name);
+  node.textContent = text;
+  if (className) node.className = className;
+  return node;
+};
+
+document.title = plan.title;
+document.getElementById("title").textContent = plan.title;
+document.getElementById("goal").textContent = plan.goal;
+document.getElementById("plan-path").textContent = plan.planPath;
+document.getElementById("updated").textContent = plan.updated;
+document.getElementById("count-done").textContent = plan.steps.filter((step) => step.status === "done").length;
+document.getElementById("count-left").textContent = plan.steps.filter((step) => step.status !== "done" && step.status !== "skipped").length;
+document.getElementById("count-open").textContent = plan.open.length;
+
+for (const step of plan.steps) {
+  const item = document.createElement("li");
+  const body = element("div", step.text);
+  if (step.note) body.append(element("span", step.note, "note"));
+  item.append(element("span", step.status, `status ${step.status}`), body);
+  document.getElementById("steps").append(item);
+}
+
+for (const decision of plan.decisions) {
+  const row = document.createElement("tr");
+  row.append(element("td", decision.question), element("td", decision.answer), element("td", decision.source));
+  document.getElementById("decisions").append(row);
+}
+
+for (const question of plan.open) {
+  document.getElementById("open").append(element("li", question));
+}
+
+if (plan.diagram) {
+  document.getElementById("diagram-section").hidden = false;
+  document.getElementById("diagram-source").textContent = plan.diagram;
+
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.min.js";
+  script.integrity = "sha384-EbBpjO7rlR6eqZEcG7GaPpyk9H9WrMyPWX4d3KvPYltgt8Z8l0z6R56B1qP40pR4";
+  script.crossOrigin = "anonymous";
+  script.onload = async () => {
+    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    window.mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      htmlLabels: false,
+      flowchart: { htmlLabels: false },
+      theme: dark ? "dark" : "default",
+    });
+    const { svg } = await window.mermaid.render("plan-diagram", plan.diagram);
+    const image = document.createElement("img");
+    image.alt = "Plan diagram";
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    document.getElementById("diagram").replaceChildren(image);
+    document.getElementById("diagram-note").textContent = "Diagram source:";
+  };
+  script.onerror = () => {
+    document.getElementById("diagram-note").textContent = "Mermaid did not load, so the diagram shows as source text.";
+  };
+  document.head.append(script);
+}
+</script>
+</body>
+</html>

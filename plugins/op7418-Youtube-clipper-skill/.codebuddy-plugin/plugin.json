@@ -1,0 +1,21 @@
+{
+ "name": "op7418-Youtube-clipper-skill",
+ "version": "2026.10.30.f31f077",
+ "description": "归藏出品的 YouTube 视频智能剪辑工具：下载视频与字幕、AI 生成分钟级精细章节、选定片段后自动剪辑、字幕翻译为中英双语并烧录，最后产出总结文案，六阶段工作流一步不落。",
+ "description_en": "Smart YouTube clipping by Guizang: download, minute-level AI chapters, auto-cut selected segments, bilingual subtitle translation and burn-in, plus summary copy.",
+ "author": {
+  "name": "op7418"
+ },
+ "keywords": [
+  "视频",
+  "剪辑",
+  "youtube",
+  "切片",
+  "字幕",
+  "双语"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/op7418/Youtube-clipper-skill",
+ "sourceCommit": "f31f077ee0905c95a510a6f34bbd0c3c85b15129"
+}

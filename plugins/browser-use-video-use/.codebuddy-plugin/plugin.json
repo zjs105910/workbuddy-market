@@ -1,0 +1,20 @@
+{
+ "name": "browser-use-video-use",
+ "version": "2026.10.30.43cfc56",
+ "description": "browser-use 团队出品：让 Claude Code 等编码代理直接上手剪辑视频。代理通过逐帧可视化反馈回路「看着剪」，支持剪切、拼接、字幕、特效等真实剪辑操作，把剪辑软件的活交给对话完成。",
+ "description_en": "Edit videos with coding agents: a frame-level visual feedback loop lets Claude Code and friends cut, splice, caption and stylize real footage.",
+ "author": {
+  "name": "browser-use"
+ },
+ "keywords": [
+  "视频",
+  "剪辑",
+  "browser-use",
+  "逐帧",
+  "claude-code"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/browser-use/video-use",
+ "sourceCommit": "43cfc566833548093455c9d4a46bd69913b7e552"
+}

@@ -1,0 +1,19 @@
+{
+ "name": "Jeffallan-claude-skills",
+ "version": "2026.10.30.1be15d8",
+ "description": "面向全栈开发者的 67 个专项技能：把 Claude Code 变成覆盖前后端的专家结对程序员。",
+ "description_en": "67 specialized skills for full-stack developers: transform Claude Code into your expert pair programmer.",
+ "author": {
+  "name": "Jeffallan"
+ },
+ "keywords": [
+  "全栈",
+  "合集",
+  "结对编程",
+  "claude"
+ ],
+ "category": "合集",
+ "license": "MIT",
+ "homepage": "https://github.com/Jeffallan/claude-skills",
+ "sourceCommit": "1be15d8064f88fc25216442406d40add8fd23b53"
+}

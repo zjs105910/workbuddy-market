@@ -1,0 +1,19 @@
+{
+ "name": "google-skills",
+ "version": "2026.10.30.b85f257",
+ "description": "Google 官方 agent skills 库：覆盖 Google Cloud 与全线产品的 166 个技能，官方维护持续更新。",
+ "description_en": "Agent Skills for Google products and technologies.",
+ "author": {
+  "name": "google"
+ },
+ "keywords": [
+  "google",
+  "官方",
+  "合集",
+  "google-cloud"
+ ],
+ "category": "合集",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/google/skills",
+ "sourceCommit": "b85f257d127c190b9c362ac491eb4f0e58f2e5fb"
+}

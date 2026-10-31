@@ -1,0 +1,12 @@
+name: planning-with-files
+version: 0.2.2
+description: Hermes adapter for persistent project planning and selected context injection. Resolves root and .planning/<slug> plans, injects the attested plan each turn, reminds after writes, and registers /pwf and /pwf-status. Optional gated mode can request continuation only through the Hermes pre_verify hook, bounded by agent.max_verify_nudges; legacy plans stay advisory. Explicit catchup modes read same-project local session records for aggregate counts or bounded replay. No network upload path.
+author: planning-with-files contributors
+provides_tools:
+  - planning_with_files_init
+  - planning_with_files_status
+  - planning_with_files_check_complete
+provides_hooks:
+  - pre_llm_call
+  - post_tool_call
+  - pre_verify

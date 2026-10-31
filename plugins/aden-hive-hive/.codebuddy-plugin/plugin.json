@@ -1,0 +1,19 @@
+{
+ "name": "aden-hive-hive",
+ "version": "2026.10.30.e44fdd9",
+ "description": "生产级多代理 Harness：自主代理团队的任务分解、执行与守护（24 个 skill），面向真实业务负载。",
+ "description_en": "Multi-Agent Harness for Production AI.",
+ "author": {
+  "name": "aden-hive"
+ },
+ "keywords": [
+  "多代理",
+  "生产",
+  "框架",
+  "自动化"
+ ],
+ "category": "开发工具",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/aden-hive/hive",
+ "sourceCommit": "e44fdd933d011deae34ed6a9eba5773a27dbdf26"
+}

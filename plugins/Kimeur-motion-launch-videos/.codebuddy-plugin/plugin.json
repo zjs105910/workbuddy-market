@@ -1,0 +1,18 @@
+{
+ "name": "Kimeur-motion-launch-videos",
+ "version": "2026.10.30.b639fc4",
+ "description": "发布视频批量生成技能集：从简短的产品说明生成脚本、分镜与成片，循环产出可发布的宣传视频，共 12 个技能。",
+ "author": {
+  "name": "Kimeur"
+ },
+ "keywords": [
+  "视频生成",
+  "产品发布",
+  "脚本",
+  "分镜"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/Kimeur/motion-launch-videos",
+ "sourceCommit": "b639fc47af4df992452c00674a575bf344cddfa8"
+}

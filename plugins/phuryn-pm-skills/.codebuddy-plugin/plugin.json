@@ -1,0 +1,20 @@
+{
+ "name": "phuryn-pm-skills",
+ "version": "2026.10.30.8607e3b",
+ "description": "产品经理技能市场：100+ 智能体技能、命令与插件，覆盖从产品发现到上市推广的全生命周期。",
+ "description_en": "PM skills marketplace: 100+ agentic skills, commands and plugins - from discovery to strategy, execution and go-to-market.",
+ "author": {
+  "name": "phuryn"
+ },
+ "keywords": [
+  "产品经理",
+  "pm",
+  "市场调研",
+  "增长",
+  "战略"
+ ],
+ "category": "商业",
+ "license": "MIT",
+ "homepage": "https://github.com/phuryn/pm-skills",
+ "sourceCommit": "8607e3b077817f89bf4a9b623246219734ac3be0"
+}

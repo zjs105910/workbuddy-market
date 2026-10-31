@@ -1,0 +1,19 @@
+{
+ "name": "mvanhorn-last30days-skill",
+ "version": "2026.10.30.f4dff26",
+ "description": "研究任意话题在 Reddit、X、YouTube、Hacker News、Polymarket 与全网近 30 天的动态，并合成一份带出处的报告。",
+ "description_en": "Research any topic across Reddit, X, YouTube, HN, Polymarket and the web for the last 30 days, then synthesize.",
+ "author": {
+  "name": "mvanhorn"
+ },
+ "keywords": [
+  "研究",
+  "舆情",
+  "Reddit",
+  "报告"
+ ],
+ "category": "效率",
+ "license": "MIT",
+ "homepage": "https://github.com/mvanhorn/last30days-skill",
+ "sourceCommit": "f4dff26b3b14d3c55c5a9dedfc4c7c8c5df2f84a"
+}

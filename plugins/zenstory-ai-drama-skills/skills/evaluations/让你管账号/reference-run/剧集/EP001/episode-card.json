@@ -1,0 +1,82 @@
+{
+ "episode_id": "EP001",
+ "sources": {
+  "episode-map": {
+   "owner": "short-drama-develop",
+   "artifact": "项目开发/episode-map.jsonl"
+  }
+ },
+ "contract_authority": {
+  "mode": "development_projection",
+  "source_ref": {
+   "src": "episode-map",
+   "record_id": "EP001"
+  },
+  "projected_fields": [
+   "/incoming_state",
+   "/hook",
+   "/objective",
+   "/opposition",
+   "/turn",
+   "/local_dramatic_result",
+   "/information_release",
+   "/premise_device_disclosure",
+   "/outgoing_pressure",
+   "/handoff_state",
+   "/setup_ids",
+   "/payoff_ids"
+  ]
+ },
+ "execution_plan": {
+  "viewpoint_and_audience_alignment": "全集绑定主角视点；观众与他同时知道每一件事，唯一例外是装置的代价（DEV-04）——它从本集起生效，但他与观众都还不知道它是代价",
+  "opening_action_carrier": "他低头看自己的手背：年轻、干净、没有留置针的痕迹。不解释穿越，只给一个身体上的事实",
+  "turn_carrier": "他写下配乐两个字、笔停住、把笔扔开之后，环境声被抽干，一个没有混响的声音说绑定成功",
+  "payoff_carrier": "手机屏幕上浮起的授予清单：演唱、导演、乐器演奏、伴奏素材各一项",
+  "outgoing_pressure_carrier": "屏幕上追加的一行条款文字，以及他停在屏幕上没有点下去的手指；倒计时的光在他脸上一下一下地跳",
+  "scene_jobs": [
+   {
+    "scene_id": "SC001",
+    "agenda_collision": "副团长要把一摊没人接的活交出去；江晨要弄清自己现在是谁、手上有什么",
+    "dramatic_result": "他接下了这摊活，同时确认自己身处一个完全陌生的位置",
+    "external_pressure": "LOW——本场没有外部威胁，压力来自他自己的错位感",
+    "emotional_load": "MEDIUM——刚死过一次的人正在确认自己还活着",
+    "visible_change": "新媒体工作的归属从副团长转到江晨",
+    "source_contract_fields": [
+     "/incoming_state",
+     "/objective",
+     "/opposition"
+    ]
+   },
+   {
+    "scene_id": "SC002",
+    "agenda_collision": "江晨要为这摊空白找到一个能立刻做起来的方案；这个世界的行业现实与他自己的短板同时挡在前面",
+    "dramatic_result": "方案成立但卡在配乐上，装置在这一刻介入并授予能力，随即压上死线，并在最后追加一条失败即收回的条款",
+    "external_pressure": "HIGH——五天一百万粉的倒计时在本场末尾开始走",
+    "emotional_load": "HIGH——从发现荒地的兴奋，到卡住，再到被强行推上跑道",
+    "visible_change": "他从没有手段变成拥有全部执行能力，同时得知这套能力是借来的——失败就全部收回",
+    "source_contract_fields": [
+     "/objective",
+     "/turn",
+     "/local_dramatic_result",
+     "/information_release",
+     "/premise_device_disclosure"
+    ]
+   }
+  ],
+  "production_requirements": [
+   "账号后台列表、行业榜单页、授予清单、倒计时四处画面文字必须可读，字号需与图片提示词对齐",
+   "系统声音无空间混响，与本集其他声音明确区分",
+   "手机屏幕内容出现四次，需保持同一 UI 语言"
+  ]
+ },
+ "source_refs": [
+  {
+   "src": "episode-map",
+   "record_id": "EP001",
+   "field": "/information_release"
+  }
+ ],
+ "open_questions": [],
+ "creator_status": "draft",
+ "_deviation_note": "模板 assets/episode-card.json 的 projected_fields 含 5 个当前 episode-map schema 不存在的字段（/active_pressure、/causal_escalation、/promised_payoff、/character_progression、/rhythm_plan），execution_plan 另有一个指向 /causal_escalation/0 的 source_step_pointer。照抄模板会产生 6 个悬空指针，故本卡只投影真实存在的字段并删去 causal_escalation_realization 块。"
+}

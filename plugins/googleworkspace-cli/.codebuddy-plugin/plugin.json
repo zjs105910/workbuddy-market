@@ -1,0 +1,20 @@
+{
+ "name": "googleworkspace-cli",
+ "version": "2026.10.30.a3768d0",
+ "description": "Google Workspace 官方命令行：Drive、Gmail、Calendar、Sheets、Docs、Chat、Admin 一条命令行全覆盖（95 个 skill）。",
+ "description_en": "One command-line tool for Drive, Gmail, Calendar, Sheets, Docs, Chat, Admin, and more.",
+ "author": {
+  "name": "googleworkspace"
+ },
+ "keywords": [
+  "google",
+  "gmail",
+  "drive",
+  "自动化",
+  "官方"
+ ],
+ "category": "自动化",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/googleworkspace/cli",
+ "sourceCommit": "a3768d0e82ad83cca2da97724e46bea4ff0e6dbd"
+}

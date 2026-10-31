@@ -1,0 +1,565 @@
+{
+  "artifacts": {
+    "EP001:assets": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:35.351229Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/assets/continuity.jsonl": "d7bfb8c0ffe88c052846db8efffee8182aff7ff78056de5a8fabd6da262bea93",
+          "剧集/EP001/assets/decisions.jsonl": "cd9e05e443be32506a8559f323bc3e3d2bc2d5302aabd3f94009728ab10a238b",
+          "剧集/EP001/assets/occurrences.jsonl": "f5ee22c5c1050b14b712039b6fe5c122be4257459e99ff611e9dcbfa6da2587c"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d",
+        "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88",
+        "设定集/locations.jsonl": "e88480cb702d4970a1a920811806252e4684f0d90fbfe3c7b1b639b73552bee1",
+        "设定集/looks.jsonl": "34c0bc02a4a3a398500d7448c6e6d8fe0631a47b2ab14c9146d198609b52b269",
+        "设定集/prop-states.jsonl": "e850543097c9c9a3cc82b6680a229ece99128222a9ec57d146440ecf6c8d0fe1",
+        "设定集/props.jsonl": "fc7e04fee8813427cbc798e9c6890bd440e5261e339e27837e33ebf405792878"
+      },
+      "outputs": [
+        "剧集/EP001/assets/continuity.jsonl",
+        "剧集/EP001/assets/decisions.jsonl",
+        "剧集/EP001/assets/occurrences.jsonl"
+      ],
+      "owner": "short-drama-assets",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:35.351400Z"
+    },
+    "EP001:contract": {
+      "acceptance": {
+        "at": "2026-08-19T04:24:59.448295Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/beats.jsonl": "9d4daa9d210a4103e2d377ad8653439d67e6614512a49ad30e6cf5fcbf6e929f",
+          "剧集/EP001/episode-card.json": "1cd610f3985bd81c33985586005340414710b49efbf6af5894d17cfacb521ba1"
+        }
+      },
+      "inputs": {
+        "项目开发/creative-brief.md": "b0b5421ca4a3c3c85b54d7bbe4c7404a1773d1ac20fc04b6ca4a777e779fb6cf",
+        "项目开发/episode-map.jsonl": "b67436c789ffd3336bf5cfb656f254f29f04919dd81d9e00a80bb0374a6613b5",
+        "项目开发/story-engine.md": "fbe3f2fa6f308c8e25397766d78af34e40d51d3e19365eda1203868d30612661"
+      },
+      "outputs": [
+        "剧集/EP001/beats.jsonl",
+        "剧集/EP001/episode-card.json"
+      ],
+      "owner": "short-drama-write",
+      "review": null,
+      "updated_at": "2026-08-19T04:24:59.448453Z"
+    },
+    "EP001:image-prompts": {
+      "acceptance": {
+        "at": "2026-08-19T09:48:54.509324Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/assets/image-prompt-specs.jsonl": "bd527218e5247ea86bc1956df8f7b4f546c795bcd2cc80c27cfe642bd971957e"
+        }
+      },
+      "inputs": {
+        "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88",
+        "设定集/location-views.jsonl": "65950e3fd7b0729bf97969d2a54f70331950ec8c5a633942d701bc5cf80fb6fd",
+        "设定集/locations.jsonl": "e88480cb702d4970a1a920811806252e4684f0d90fbfe3c7b1b639b73552bee1",
+        "设定集/looks.jsonl": "34c0bc02a4a3a398500d7448c6e6d8fe0631a47b2ab14c9146d198609b52b269",
+        "设定集/prop-states.jsonl": "e850543097c9c9a3cc82b6680a229ece99128222a9ec57d146440ecf6c8d0fe1",
+        "设定集/props.jsonl": "fc7e04fee8813427cbc798e9c6890bd440e5261e339e27837e33ebf405792878"
+      },
+      "outputs": [
+        "剧集/EP001/assets/image-prompt-specs.jsonl"
+      ],
+      "owner": "short-drama-image-prompts",
+      "review": null,
+      "updated_at": "2026-08-19T09:48:54.510451Z"
+    },
+    "EP001:script": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:34.944376Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/screenplay.md": "d1c34d6ac7f10a3a25c03628768d03fe32892509e99f3a662e1151aef2583229"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/beats.jsonl": "9d4daa9d210a4103e2d377ad8653439d67e6614512a49ad30e6cf5fcbf6e929f",
+        "剧集/EP001/episode-card.json": "1cd610f3985bd81c33985586005340414710b49efbf6af5894d17cfacb521ba1",
+        "项目开发/episode-map.jsonl": "b67436c789ffd3336bf5cfb656f254f29f04919dd81d9e00a80bb0374a6613b5"
+      },
+      "outputs": [
+        "剧集/EP001/screenplay.md"
+      ],
+      "owner": "short-drama-write",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:34.944581Z"
+    },
+    "EP001:script-index": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:35.045220Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay.md": "d1c34d6ac7f10a3a25c03628768d03fe32892509e99f3a662e1151aef2583229"
+      },
+      "outputs": [
+        "剧集/EP001/screenplay-index.jsonl"
+      ],
+      "owner": "short-drama-write",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:35.045400Z"
+    },
+    "EP001:storyboard": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:35.567031Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/storyboard/coverage.json": "1225754814944ff3c8f29c1d4c1f8fe003e530ee4a8e6720cbf72027b66d3392",
+          "剧集/EP001/storyboard/keyframes.jsonl": "3e0bedf7b031387ff21b3287e72aa85215b7712ac83da87dfcc9a8e26593d9c2",
+          "剧集/EP001/storyboard/shots.jsonl": "f21b8b9562ce16e68d5049d88b66c05455563a1402aff1c8e542381765753f27"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d",
+        "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88",
+        "设定集/location-views.jsonl": "65950e3fd7b0729bf97969d2a54f70331950ec8c5a633942d701bc5cf80fb6fd",
+        "设定集/locations.jsonl": "e88480cb702d4970a1a920811806252e4684f0d90fbfe3c7b1b639b73552bee1",
+        "设定集/looks.jsonl": "34c0bc02a4a3a398500d7448c6e6d8fe0631a47b2ab14c9146d198609b52b269",
+        "设定集/prop-states.jsonl": "e850543097c9c9a3cc82b6680a229ece99128222a9ec57d146440ecf6c8d0fe1",
+        "设定集/props.jsonl": "fc7e04fee8813427cbc798e9c6890bd440e5261e339e27837e33ebf405792878"
+      },
+      "outputs": [
+        "剧集/EP001/storyboard/coverage.json",
+        "剧集/EP001/storyboard/keyframes.jsonl",
+        "剧集/EP001/storyboard/shots.jsonl"
+      ],
+      "owner": "short-drama-storyboard",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:35.567168Z"
+    },
+    "EP001:video-prompts": {
+      "acceptance": {
+        "at": "2026-08-19T09:53:46.270501Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/storyboard/delivery-containers.jsonl": "6c0cb1c6bf743e2d6a373835c978deccf83be7e077ca01cde6084eaa5337a9a4",
+          "剧集/EP001/storyboard/motion-specs.jsonl": "b411abe4c0571e7d5e0c8cf446708e9401bcf126344d5da822ac2dc77e5308fd",
+          "剧集/EP001/storyboard/music-specs.jsonl": "391831d7be45f52204ab2db9235a4e04f68437804f42690ec8fe575c18f3ce07"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d",
+        "剧集/EP001/storyboard/keyframes.jsonl": "3e0bedf7b031387ff21b3287e72aa85215b7712ac83da87dfcc9a8e26593d9c2",
+        "剧集/EP001/storyboard/shots.jsonl": "f21b8b9562ce16e68d5049d88b66c05455563a1402aff1c8e542381765753f27",
+        "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88"
+      },
+      "outputs": [
+        "剧集/EP001/storyboard/delivery-containers.jsonl",
+        "剧集/EP001/storyboard/motion-specs.jsonl",
+        "剧集/EP001/storyboard/music-specs.jsonl"
+      ],
+      "owner": "short-drama-video-prompts",
+      "review": null,
+      "updated_at": "2026-08-19T09:53:46.272088Z"
+    },
+    "EP001:voice-sheet": {
+      "acceptance": {
+        "at": "2026-08-19T08:15:07.466687Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "剧集/EP001/voice-record-sheet.jsonl": "359ac0c69e4f59a309a51852aabb0aec6a80edf9ee18c2948701bb765326c220"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d",
+        "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88"
+      },
+      "outputs": [
+        "剧集/EP001/voice-record-sheet.jsonl"
+      ],
+      "owner": "short-drama-write",
+      "review": null,
+      "updated_at": "2026-08-19T08:15:07.466847Z"
+    },
+    "assets:bible": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:35.148832Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "设定集/characters.jsonl": "406b1d08a7c156d8a4bdec945c6df33a3e40c0fdf555c285cee98b39223cde88",
+          "设定集/locations.jsonl": "e88480cb702d4970a1a920811806252e4684f0d90fbfe3c7b1b639b73552bee1",
+          "设定集/looks.jsonl": "34c0bc02a4a3a398500d7448c6e6d8fe0631a47b2ab14c9146d198609b52b269",
+          "设定集/prop-states.jsonl": "e850543097c9c9a3cc82b6680a229ece99128222a9ec57d146440ecf6c8d0fe1",
+          "设定集/props.jsonl": "fc7e04fee8813427cbc798e9c6890bd440e5261e339e27837e33ebf405792878"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d"
+      },
+      "outputs": [
+        "设定集/characters.jsonl",
+        "设定集/locations.jsonl",
+        "设定集/looks.jsonl",
+        "设定集/prop-states.jsonl",
+        "设定集/props.jsonl"
+      ],
+      "owner": "short-drama-assets",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:35.148992Z"
+    },
+    "assets:views": {
+      "acceptance": {
+        "at": "2026-08-19T07:46:35.249588Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "设定集/location-views.jsonl": "65950e3fd7b0729bf97969d2a54f70331950ec8c5a633942d701bc5cf80fb6fd"
+        }
+      },
+      "inputs": {
+        "剧集/EP001/screenplay-index.jsonl": "df4c90582efae59683e8f00d527e8a3b56774d310d91cf5f3a29f43a03392e9d",
+        "设定集/locations.jsonl": "e88480cb702d4970a1a920811806252e4684f0d90fbfe3c7b1b639b73552bee1"
+      },
+      "outputs": [
+        "设定集/location-views.jsonl"
+      ],
+      "owner": "short-drama-assets",
+      "review": null,
+      "updated_at": "2026-08-19T07:46:35.249739Z"
+    },
+    "creator:decisions": {
+      "acceptance": {
+        "at": "2026-08-19T08:06:23.725357Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "创作者决策/decisions.jsonl": "756ae559c163a591ba11f7373f3579778b23357fa7750703694574b1db219908"
+        }
+      },
+      "inputs": {},
+      "outputs": [
+        "创作者决策/decisions.jsonl"
+      ],
+      "owner": "short-drama",
+      "review": null,
+      "updated_at": "2026-08-19T08:06:23.725561Z"
+    },
+    "develop:adaptation-map": {
+      "acceptance": {
+        "at": "2026-08-19T04:02:57.153742Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/adaptation-map.jsonl": "cd37eacb44b05a0f0264193ca41d2b0e713a5c1cfb7a57c4846823ed0f399da7"
+        }
+      },
+      "inputs": {
+        "输入/长篇-让你管账号，你高燃混剪炸全网.txt": "21c5e3d1a8487afd9a9b75acd608aca32ebfafa725b52cbd8bd3a289aab9a35e",
+        "项目开发/creative-brief.md": "b0b5421ca4a3c3c85b54d7bbe4c7404a1773d1ac20fc04b6ca4a777e779fb6cf",
+        "项目开发/source-analysis/episode-candidates.jsonl": "cdec2fe90ff6038d68ef63aeb2d631d9a5402b7a9ef6b4f2bb489f0133490e9a"
+      },
+      "outputs": [
+        "项目开发/adaptation-map.jsonl"
+      ],
+      "owner": "short-drama-develop",
+      "review": null,
+      "updated_at": "2026-08-19T04:02:57.153939Z"
+    },
+    "develop:brief": {
+      "acceptance": {
+        "at": "2026-08-19T04:24:47.659894Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/creative-brief.md": "b0b5421ca4a3c3c85b54d7bbe4c7404a1773d1ac20fc04b6ca4a777e779fb6cf",
+          "项目开发/story-engine.md": "fbe3f2fa6f308c8e25397766d78af34e40d51d3e19365eda1203868d30612661"
+        }
+      },
+      "inputs": {
+        "项目开发/source-analysis/adaptation-value.md": "803f21358c8bca8747a3160ca9da3d10a98c43d50cd2de1ab85644d6f4be723c",
+        "项目开发/source-analysis/characters.md": "0a70516e1c20c2f3444a53a8463fbd25dbdc1b65458157a592e1175eb62245d9",
+        "项目开发/source-analysis/world.md": "5293cd25579b23f7643fbf78f5f14b85ff5cde44aba38c23b294fde80e8783d1"
+      },
+      "outputs": [
+        "项目开发/creative-brief.md",
+        "项目开发/story-engine.md"
+      ],
+      "owner": "short-drama-develop",
+      "review": null,
+      "updated_at": "2026-08-19T04:24:47.660264Z"
+    },
+    "develop:episode-map": {
+      "acceptance": {
+        "at": "2026-08-19T04:24:59.342063Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/episode-map.jsonl": "b67436c789ffd3336bf5cfb656f254f29f04919dd81d9e00a80bb0374a6613b5"
+        }
+      },
+      "inputs": {
+        "项目开发/adaptation-map.jsonl": "cd37eacb44b05a0f0264193ca41d2b0e713a5c1cfb7a57c4846823ed0f399da7",
+        "项目开发/creative-brief.md": "b0b5421ca4a3c3c85b54d7bbe4c7404a1773d1ac20fc04b6ca4a777e779fb6cf",
+        "项目开发/story-engine.md": "fbe3f2fa6f308c8e25397766d78af34e40d51d3e19365eda1203868d30612661"
+      },
+      "outputs": [
+        "项目开发/episode-map.jsonl"
+      ],
+      "owner": "short-drama-develop",
+      "review": null,
+      "updated_at": "2026-08-19T04:24:59.342256Z"
+    },
+    "source-analysis:chapters": {
+      "acceptance": {
+        "at": "2026-08-19T03:50:15.815014Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/chapters/ch-1-extract.md": "710cf7c4b1930c25139c8e2379da64adab9630c1707e4261ec4ebd9ab5926236",
+          "项目开发/source-analysis/chapters/ch-10-extract.md": "0a523b7ab9bc94d8328a5e35ea2bf4549f2ff5048b47871b9aa563e67ff7fd58",
+          "项目开发/source-analysis/chapters/ch-11-extract.md": "45e2e364c56b07791be722ab10e9f2894290d269ddc15106b0d5e3a842837756",
+          "项目开发/source-analysis/chapters/ch-12-extract.md": "e38944d14ddd86596d00cb08133449df2b175321cc1fa81c76f40240359c1c0e",
+          "项目开发/source-analysis/chapters/ch-13-extract.md": "ba7fc28395ba4ee7c7ff9f6937f06a2f51b80b6d717a1a224ec431f46a045c75",
+          "项目开发/source-analysis/chapters/ch-14-extract.md": "899673914b033083288980c66dffbc9b01720129c5e865ac4cc3ff01045b6e4d",
+          "项目开发/source-analysis/chapters/ch-15-extract.md": "7b8a26e1733b27455e862ead0c49844243b1655baf5cf64cbd07ae9be2a32b33",
+          "项目开发/source-analysis/chapters/ch-16-extract.md": "99a852e94386bdbbf910caecd49e57e3b5f058c4274e5f26ad9b8e93296ea6a6",
+          "项目开发/source-analysis/chapters/ch-17-extract.md": "5f5a9650a6d801265da2269dde7ac716db3d62b65fb18745d6ac4afd07273ba3",
+          "项目开发/source-analysis/chapters/ch-18-extract.md": "915f9e3f8b18e08e61cb38bb4b2d0b5dfe0ac84ccf9e110ec488faf8156ac10e",
+          "项目开发/source-analysis/chapters/ch-19-extract.md": "fcbf5b08860e97c5f96e25165352effbd426bacaf73f14b268dc911997690a40",
+          "项目开发/source-analysis/chapters/ch-2-extract.md": "f9e334e32bd1002722979af4c7a3e6d76c8b77b8d554153349829b13c0eedaab",
+          "项目开发/source-analysis/chapters/ch-20-extract.md": "9401f9f27d85664a5c4ffc1542225e96b40e0929cd666a3d2831d961532d07d3",
+          "项目开发/source-analysis/chapters/ch-3-extract.md": "ea0365af258d813162dee79616f6ee251f93dd5d923ada86b545f993c676901c",
+          "项目开发/source-analysis/chapters/ch-4-extract.md": "4dd82c8c8da2bfbb173df018aa4b12c3e82a9314e5f1ed8f3959d3f938c37a63",
+          "项目开发/source-analysis/chapters/ch-5-extract.md": "ae37847b6fa94082b6ae9e0b494c7bbe447f3b2494869da51c8a46f981ae29d7",
+          "项目开发/source-analysis/chapters/ch-6-extract.md": "5ea802c6608c11cbea4c726ef774c85ca489b2d571b7106ae52573cee6a2464d",
+          "项目开发/source-analysis/chapters/ch-7-extract.md": "0efa97bed8495623b272f14b296f4de79cbfc50d36b64be22791fda4a2a2b7a7",
+          "项目开发/source-analysis/chapters/ch-8-extract.md": "3aca7264e5fe4e8f99426a3adb99352be38bd93cd21411a51edf6345e711417f",
+          "项目开发/source-analysis/chapters/ch-9-extract.md": "adf1fc0a8e87973ca1128802e8c65242d8db92beba52071337b648e6d334451f"
+        }
+      },
+      "inputs": {
+        "输入/长篇-让你管账号，你高燃混剪炸全网.txt": "21c5e3d1a8487afd9a9b75acd608aca32ebfafa725b52cbd8bd3a289aab9a35e",
+        "项目开发/source-analysis/_index.json": "c323cb97a38a91ca00bbae446a49ae0c5705028f8ef20f862c8c9fc84b35415d"
+      },
+      "outputs": [
+        "项目开发/source-analysis/chapters/ch-1-extract.md",
+        "项目开发/source-analysis/chapters/ch-10-extract.md",
+        "项目开发/source-analysis/chapters/ch-11-extract.md",
+        "项目开发/source-analysis/chapters/ch-12-extract.md",
+        "项目开发/source-analysis/chapters/ch-13-extract.md",
+        "项目开发/source-analysis/chapters/ch-14-extract.md",
+        "项目开发/source-analysis/chapters/ch-15-extract.md",
+        "项目开发/source-analysis/chapters/ch-16-extract.md",
+        "项目开发/source-analysis/chapters/ch-17-extract.md",
+        "项目开发/source-analysis/chapters/ch-18-extract.md",
+        "项目开发/source-analysis/chapters/ch-19-extract.md",
+        "项目开发/source-analysis/chapters/ch-2-extract.md",
+        "项目开发/source-analysis/chapters/ch-20-extract.md",
+        "项目开发/source-analysis/chapters/ch-3-extract.md",
+        "项目开发/source-analysis/chapters/ch-4-extract.md",
+        "项目开发/source-analysis/chapters/ch-5-extract.md",
+        "项目开发/source-analysis/chapters/ch-6-extract.md",
+        "项目开发/source-analysis/chapters/ch-7-extract.md",
+        "项目开发/source-analysis/chapters/ch-8-extract.md",
+        "项目开发/source-analysis/chapters/ch-9-extract.md"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T03:50:15.815172Z"
+    },
+    "source-analysis:entities": {
+      "acceptance": {
+        "at": "2026-08-19T03:53:17.695169Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/characters.md": "0a70516e1c20c2f3444a53a8463fbd25dbdc1b65458157a592e1175eb62245d9",
+          "项目开发/source-analysis/world.md": "5293cd25579b23f7643fbf78f5f14b85ff5cde44aba38c23b294fde80e8783d1"
+        }
+      },
+      "inputs": {
+        "项目开发/source-analysis/chapters/ch-1-extract.md": "710cf7c4b1930c25139c8e2379da64adab9630c1707e4261ec4ebd9ab5926236",
+        "项目开发/source-analysis/chapters/ch-10-extract.md": "0a523b7ab9bc94d8328a5e35ea2bf4549f2ff5048b47871b9aa563e67ff7fd58",
+        "项目开发/source-analysis/chapters/ch-11-extract.md": "45e2e364c56b07791be722ab10e9f2894290d269ddc15106b0d5e3a842837756",
+        "项目开发/source-analysis/chapters/ch-12-extract.md": "e38944d14ddd86596d00cb08133449df2b175321cc1fa81c76f40240359c1c0e",
+        "项目开发/source-analysis/chapters/ch-13-extract.md": "ba7fc28395ba4ee7c7ff9f6937f06a2f51b80b6d717a1a224ec431f46a045c75",
+        "项目开发/source-analysis/chapters/ch-14-extract.md": "899673914b033083288980c66dffbc9b01720129c5e865ac4cc3ff01045b6e4d",
+        "项目开发/source-analysis/chapters/ch-15-extract.md": "7b8a26e1733b27455e862ead0c49844243b1655baf5cf64cbd07ae9be2a32b33",
+        "项目开发/source-analysis/chapters/ch-16-extract.md": "99a852e94386bdbbf910caecd49e57e3b5f058c4274e5f26ad9b8e93296ea6a6",
+        "项目开发/source-analysis/chapters/ch-17-extract.md": "5f5a9650a6d801265da2269dde7ac716db3d62b65fb18745d6ac4afd07273ba3",
+        "项目开发/source-analysis/chapters/ch-18-extract.md": "915f9e3f8b18e08e61cb38bb4b2d0b5dfe0ac84ccf9e110ec488faf8156ac10e",
+        "项目开发/source-analysis/chapters/ch-19-extract.md": "fcbf5b08860e97c5f96e25165352effbd426bacaf73f14b268dc911997690a40",
+        "项目开发/source-analysis/chapters/ch-2-extract.md": "f9e334e32bd1002722979af4c7a3e6d76c8b77b8d554153349829b13c0eedaab",
+        "项目开发/source-analysis/chapters/ch-20-extract.md": "9401f9f27d85664a5c4ffc1542225e96b40e0929cd666a3d2831d961532d07d3",
+        "项目开发/source-analysis/chapters/ch-3-extract.md": "ea0365af258d813162dee79616f6ee251f93dd5d923ada86b545f993c676901c",
+        "项目开发/source-analysis/chapters/ch-4-extract.md": "4dd82c8c8da2bfbb173df018aa4b12c3e82a9314e5f1ed8f3959d3f938c37a63",
+        "项目开发/source-analysis/chapters/ch-5-extract.md": "ae37847b6fa94082b6ae9e0b494c7bbe447f3b2494869da51c8a46f981ae29d7",
+        "项目开发/source-analysis/chapters/ch-6-extract.md": "5ea802c6608c11cbea4c726ef774c85ca489b2d571b7106ae52573cee6a2464d",
+        "项目开发/source-analysis/chapters/ch-7-extract.md": "0efa97bed8495623b272f14b296f4de79cbfc50d36b64be22791fda4a2a2b7a7",
+        "项目开发/source-analysis/chapters/ch-8-extract.md": "3aca7264e5fe4e8f99426a3adb99352be38bd93cd21411a51edf6345e711417f",
+        "项目开发/source-analysis/chapters/ch-9-extract.md": "adf1fc0a8e87973ca1128802e8c65242d8db92beba52071337b648e6d334451f"
+      },
+      "outputs": [
+        "项目开发/source-analysis/characters.md",
+        "项目开发/source-analysis/world.md"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T03:53:17.695344Z"
+    },
+    "source-analysis:index": {
+      "acceptance": {
+        "at": "2026-08-19T03:28:36.927505Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/_index.json": "c323cb97a38a91ca00bbae446a49ae0c5705028f8ef20f862c8c9fc84b35415d"
+        }
+      },
+      "inputs": {
+        "输入/长篇-让你管账号，你高燃混剪炸全网.txt": "21c5e3d1a8487afd9a9b75acd608aca32ebfafa725b52cbd8bd3a289aab9a35e"
+      },
+      "outputs": [
+        "项目开发/source-analysis/_index.json"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T03:28:36.927712Z"
+    },
+    "source-analysis:progress": {
+      "acceptance": {
+        "at": "2026-08-19T03:56:58.736151Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/_progress.md": "dbedd862bcb2e09652b36815003cf546b3e22cb8605d27ee9cefd419d9f2a475"
+        }
+      },
+      "inputs": {},
+      "outputs": [
+        "项目开发/source-analysis/_progress.md"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T03:56:58.736409Z"
+    },
+    "source-analysis:triage": {
+      "acceptance": {
+        "at": "2026-08-19T08:06:23.824724Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/triage.md": "0ad8f97179b8819924fe0f70367cf644e85e99805b364cf13f3565f0949f415f"
+        }
+      },
+      "inputs": {
+        "项目开发/source-analysis/_index.json": "c323cb97a38a91ca00bbae446a49ae0c5705028f8ef20f862c8c9fc84b35415d"
+      },
+      "outputs": [
+        "项目开发/source-analysis/triage.md"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T08:06:23.824903Z"
+    },
+    "source-analysis:units": {
+      "acceptance": {
+        "at": "2026-08-19T03:52:09.134819Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/rhythm-and-emotion.md": "44a6cd00d9dfcafbf67efafb92f7584180f02a22b5a1e292d86efd93d5171ab1",
+          "项目开发/source-analysis/story-units.md": "f4d33c3704cece69376f304e2cf9eb6c86bd9047fdf4fd1028abb588fd17ed70"
+        }
+      },
+      "inputs": {
+        "项目开发/source-analysis/_index.json": "c323cb97a38a91ca00bbae446a49ae0c5705028f8ef20f862c8c9fc84b35415d",
+        "项目开发/source-analysis/chapters/ch-1-extract.md": "710cf7c4b1930c25139c8e2379da64adab9630c1707e4261ec4ebd9ab5926236",
+        "项目开发/source-analysis/chapters/ch-10-extract.md": "0a523b7ab9bc94d8328a5e35ea2bf4549f2ff5048b47871b9aa563e67ff7fd58",
+        "项目开发/source-analysis/chapters/ch-11-extract.md": "45e2e364c56b07791be722ab10e9f2894290d269ddc15106b0d5e3a842837756",
+        "项目开发/source-analysis/chapters/ch-12-extract.md": "e38944d14ddd86596d00cb08133449df2b175321cc1fa81c76f40240359c1c0e",
+        "项目开发/source-analysis/chapters/ch-13-extract.md": "ba7fc28395ba4ee7c7ff9f6937f06a2f51b80b6d717a1a224ec431f46a045c75",
+        "项目开发/source-analysis/chapters/ch-14-extract.md": "899673914b033083288980c66dffbc9b01720129c5e865ac4cc3ff01045b6e4d",
+        "项目开发/source-analysis/chapters/ch-15-extract.md": "7b8a26e1733b27455e862ead0c49844243b1655baf5cf64cbd07ae9be2a32b33",
+        "项目开发/source-analysis/chapters/ch-16-extract.md": "99a852e94386bdbbf910caecd49e57e3b5f058c4274e5f26ad9b8e93296ea6a6",
+        "项目开发/source-analysis/chapters/ch-17-extract.md": "5f5a9650a6d801265da2269dde7ac716db3d62b65fb18745d6ac4afd07273ba3",
+        "项目开发/source-analysis/chapters/ch-18-extract.md": "915f9e3f8b18e08e61cb38bb4b2d0b5dfe0ac84ccf9e110ec488faf8156ac10e",
+        "项目开发/source-analysis/chapters/ch-19-extract.md": "fcbf5b08860e97c5f96e25165352effbd426bacaf73f14b268dc911997690a40",
+        "项目开发/source-analysis/chapters/ch-2-extract.md": "f9e334e32bd1002722979af4c7a3e6d76c8b77b8d554153349829b13c0eedaab",
+        "项目开发/source-analysis/chapters/ch-20-extract.md": "9401f9f27d85664a5c4ffc1542225e96b40e0929cd666a3d2831d961532d07d3",
+        "项目开发/source-analysis/chapters/ch-3-extract.md": "ea0365af258d813162dee79616f6ee251f93dd5d923ada86b545f993c676901c",
+        "项目开发/source-analysis/chapters/ch-4-extract.md": "4dd82c8c8da2bfbb173df018aa4b12c3e82a9314e5f1ed8f3959d3f938c37a63",
+        "项目开发/source-analysis/chapters/ch-5-extract.md": "ae37847b6fa94082b6ae9e0b494c7bbe447f3b2494869da51c8a46f981ae29d7",
+        "项目开发/source-analysis/chapters/ch-6-extract.md": "5ea802c6608c11cbea4c726ef774c85ca489b2d571b7106ae52573cee6a2464d",
+        "项目开发/source-analysis/chapters/ch-7-extract.md": "0efa97bed8495623b272f14b296f4de79cbfc50d36b64be22791fda4a2a2b7a7",
+        "项目开发/source-analysis/chapters/ch-8-extract.md": "3aca7264e5fe4e8f99426a3adb99352be38bd93cd21411a51edf6345e711417f",
+        "项目开发/source-analysis/chapters/ch-9-extract.md": "adf1fc0a8e87973ca1128802e8c65242d8db92beba52071337b648e6d334451f"
+      },
+      "outputs": [
+        "项目开发/source-analysis/rhythm-and-emotion.md",
+        "项目开发/source-analysis/story-units.md"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T03:52:09.135027Z"
+    },
+    "source-analysis:value": {
+      "acceptance": {
+        "at": "2026-08-19T08:06:23.928315Z",
+        "decision": "accepted",
+        "note": "",
+        "outputs": {
+          "项目开发/source-analysis/adaptation-value.md": "803f21358c8bca8747a3160ca9da3d10a98c43d50cd2de1ab85644d6f4be723c",
+          "项目开发/source-analysis/episode-candidates.jsonl": "cdec2fe90ff6038d68ef63aeb2d631d9a5402b7a9ef6b4f2bb489f0133490e9a"
+        }
+      },
+      "inputs": {
+        "项目开发/source-analysis/_index.json": "c323cb97a38a91ca00bbae446a49ae0c5705028f8ef20f862c8c9fc84b35415d",
+        "项目开发/source-analysis/characters.md": "0a70516e1c20c2f3444a53a8463fbd25dbdc1b65458157a592e1175eb62245d9",
+        "项目开发/source-analysis/rhythm-and-emotion.md": "44a6cd00d9dfcafbf67efafb92f7584180f02a22b5a1e292d86efd93d5171ab1",
+        "项目开发/source-analysis/story-units.md": "f4d33c3704cece69376f304e2cf9eb6c86bd9047fdf4fd1028abb588fd17ed70",
+        "项目开发/source-analysis/triage.md": "0ad8f97179b8819924fe0f70367cf644e85e99805b364cf13f3565f0949f415f",
+        "项目开发/source-analysis/world.md": "5293cd25579b23f7643fbf78f5f14b85ff5cde44aba38c23b294fde80e8783d1"
+      },
+      "outputs": [
+        "项目开发/source-analysis/adaptation-value.md",
+        "项目开发/source-analysis/episode-candidates.jsonl"
+      ],
+      "owner": "short-drama-novel-analyze",
+      "review": null,
+      "updated_at": "2026-08-19T08:06:23.928519Z"
+    }
+  },
+  "authority": {
+    "/creator_authority/production_profile/choices": {
+      "decision": "创作者决策/decisions.jsonl#CD-PROFILE-001",
+      "set_at": "2026-08-19T03:27:47.472750Z",
+      "value_sha256": "0527fe1277736c67b202b87a5769c53d204c1865ce07b3549a3021c171945daf"
+    },
+    "/format/pacing": {
+      "decision": "创作者决策/decisions.jsonl#CD-PACING-001",
+      "set_at": "2026-08-19T03:27:47.370400Z",
+      "value_sha256": "285216cec3e1cc9000bb5e1d1f88445812b9f343b4844a2b6ba17783cffdc4f8"
+    },
+    "/format/target_seconds_per_episode": {
+      "decision": "创作者决策/decisions.jsonl#CD-LENGTH-001",
+      "set_at": "2026-08-19T03:27:47.420256Z",
+      "value_sha256": "69f59c273b6e669ac32a6dd5e1b2cb63333d8b004f9696447aee2d422ce63763"
+    }
+  },
+  "last_action": "accepted",
+  "project_id": "SD-40F82968AD87",
+  "project_layout_mode": "canonical",
+  "schema_version": "2.0",
+  "updated_at": "2026-08-19T09:53:46.272095Z"
+}

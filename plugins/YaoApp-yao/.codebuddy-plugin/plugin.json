@@ -1,0 +1,18 @@
+{
+ "name": "YaoApp-yao",
+ "version": "2026.10.30.ae75246",
+ "description": "所有代理与工作台集中一处、全设备可达：任务看板、跨端同步（15 个 skill），AI 原生架构。",
+ "description_en": "All your agents and workspaces in one place, on every device you own.",
+ "author": {
+  "name": "YaoApp"
+ },
+ "keywords": [
+  "看板",
+  "工作台",
+  "跨端",
+  "AI-native"
+ ],
+ "category": "效率",
+ "homepage": "https://github.com/YaoApp/yao",
+ "sourceCommit": "ae7524659f04a09c69d6c67e50075668dc5563a4"
+}

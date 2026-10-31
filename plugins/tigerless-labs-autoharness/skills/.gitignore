@@ -1,0 +1,32 @@
+.claude/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+.env
+.DS_Store
+.CLAUDE.md
+
+dev_skill/
+# launch-post drafts + diagrams (x-launch-post skill)
+.X/
+# dev-internal (lives on the dev branch, excluded from the public release)
+CLAUDE.md
+docs/research-loom/
+docs/research-loom-en/
+autoharness-design-concepts-en.zip
+docs/plans/
+docs/TODO.md
+docs/testing.md
+experiments/
+# dev-internal agent tooling (Open Knowledge), same reason as CLAUDE.md above
+AGENTS.md
+opencode.json

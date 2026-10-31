@@ -1,0 +1,18 @@
+{
+ "name": "yschimke-compose-ai-tools",
+ "version": "2026.10.30.ddb68af",
+ "description": "面向 Jetpack Compose 的代理辅助技能：UI 组件生成、代码规范检查等 3 个技能，帮助代理写出符合 Compose 最佳实践的 Android 界面代码。",
+ "author": {
+  "name": "yschimke"
+ },
+ "keywords": [
+  "Android",
+  "Jetpack Compose",
+  "UI",
+  "代码生成"
+ ],
+ "category": "开发工具",
+ "license": "Apache-2.0",
+ "homepage": "https://github.com/yschimke/compose-ai-tools",
+ "sourceCommit": "ddb68afad71ffaacba8cfa2d693d3cab9cc70f67"
+}

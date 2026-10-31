@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>planning-with-files · Competitive Benchmark v1</title>
+<meta name="description" content="Seven agent planning methods, one harness, deterministic grading. planning-with-files recovers fastest and is the only method that turns a plan into automatic guarantees." />
+<style>
+  :root{
+    --bg:#0b0e12; --surface:#12161d; --surface-2:#181d26; --border:#232a35;
+    --text:#e6edf3; --muted:#8b96a5; --faint:#5b6572;
+    --green:#3fb950; --green-dim:rgba(63,185,80,.15);
+    --amber:#d29922; --amber-dim:rgba(210,153,34,.12);
+    --red:#f85149; --blue:#58a6ff;
+    --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;overflow-x:clip}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:clip}
+
+  .wrap{max-width:880px;margin:0 auto;padding:56px 22px 90px}
+  .crumb{font-family:var(--mono);font-size:12px;color:var(--faint);margin:0 0 22px}
+  .crumb a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
+  .crumb a:hover{color:var(--text);border-color:var(--muted)}
+  .crumb a:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+
+  h1{font-size:clamp(28px,5.4vw,42px);line-height:1.08;letter-spacing:-.02em;
+    margin:0 0 10px;text-wrap:balance}
+  h1 .accent{color:var(--green)}
+  .lede{color:var(--muted);font-size:15.5px;max-width:64ch;margin:0 0 8px;text-wrap:pretty}
+  .stamp{display:inline-flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .stamp span{font-family:var(--mono);font-size:11px;letter-spacing:.05em;color:var(--muted);
+    border:1px solid var(--border);border-radius:999px;padding:4px 11px;background:var(--surface)}
+  .stamp .hot{color:var(--green);border-color:rgba(63,185,80,.4)}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:34px 0 0}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .stat b{display:block;font-family:var(--mono);font-size:30px;font-variant-numeric:tabular-nums;
+    line-height:1.1;color:var(--text)}
+  .stat span{font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+  .stat.win b{color:var(--green)} .stat.pay b{color:var(--amber)}
+
+  h2{font-size:clamp(20px,3.4vw,27px);letter-spacing:-.015em;margin:64px 0 6px;line-height:1.15;text-wrap:balance}
+  .sub{color:var(--muted);font-size:14px;max-width:66ch;margin:0 0 22px;text-wrap:pretty}
+  .sub b{color:var(--text)}
+  a{color:var(--blue)}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 22px}
+
+  .banner{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap;border-left:3px solid var(--green);
+    background:var(--green-dim);border-radius:0 10px 10px 0;padding:16px 20px;margin:0 0 10px}
+  .banner b{font-family:var(--mono);font-size:26px;color:var(--green);font-variant-numeric:tabular-nums}
+  .banner span{font-size:14px;color:var(--text);max-width:52ch}
+
+  .bars{display:grid;gap:9px;margin-top:6px}
+  .bar{display:grid;grid-template-columns:158px 1fr 74px;gap:12px;align-items:center}
+  .bar .who{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
+  .bar.me .who{color:var(--green);font-weight:600}
+  .track{height:22px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .fill{height:100%;width:0;border-radius:5px;background:var(--faint);
+    transition-property:width;transition-duration:.9s;transition-timing-function:cubic-bezier(.22,1,.36,1)}
+  .bar.me .fill{background:var(--green)}
+  .bar.pay .fill{background:var(--amber)}
+  .bar .val{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .in .fill{width:var(--w)}
+  @media (max-width:560px){.bar{grid-template-columns:104px 1fr 64px}.bar .who{font-size:10.5px}}
+
+  .legend{font-size:12px;color:var(--faint);margin-top:14px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin:0 5px 0 12px}
+  .legend .g{background:var(--green)} .legend .n{background:var(--faint)} .legend .a{background:var(--amber)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--faint);text-align:left;padding:9px 10px;border-bottom:1px solid var(--border);font-weight:600}
+  td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td:first-child{font-family:var(--mono);font-size:12px;color:var(--text);white-space:nowrap}
+  .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:4px 8px}
+  .mech{color:var(--green);font-weight:600} .conv{color:var(--muted)} .none{color:var(--faint)}
+  .risk{color:var(--amber)}
+  .num{font-variant-numeric:tabular-nums}
+
+  .honest{border-left:3px solid var(--blue);background:rgba(88,166,255,.10);
+    border-radius:0 10px 10px 0;padding:16px 20px;margin:12px 0}
+  .honest b{color:var(--blue)}
+  .honest p{margin:6px 0 0;font-size:14px;color:var(--text);max-width:70ch}
+
+  .foot{margin-top:70px;padding-top:24px;border-top:1px solid var(--border);
+    font-size:13px;color:var(--muted);max-width:72ch}
+  .foot ul{margin:8px 0;padding-left:20px}
+  .foot li{margin:4px 0}
+  .fine{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:26px}
+
+  .reveal{opacity:0;transform:translateY(10px);
+    transition-property:opacity,transform;transition-duration:.55s;transition-timing-function:cubic-bezier(.22,1,.36,1)}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none}
+    .fill{transition:none;width:var(--w)}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="crumb"><a href="https://github.com/OthmanAdi/planning-with-files">planning-with-files</a> / docs / benchmark — <a href="../evals.md">full methodology &amp; all five tests</a></p>
+
+  <h1>Seven planning methods. One harness.<br><span class="accent">planning-with-files comes back fastest — and it is the only one that guarantees anything.</span></h1>
+  <p class="lede">Competitive Benchmark v1: planning-with-files v3.4.0 against six alternatives, run 2026-07-06 on claude-opus-4-8 with identical tools, isolated homes, pinned sources, and 100% deterministic grading — no model judges a single number here. Every figure below is reproducible from the raw runs.</p>
+  <div class="stamp">
+    <span class="hot">77/77 runs graded</span><span>7 methods, pinned SHAs</span><span>0 LLM judges in these numbers</span><span>every number reproducible</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat win reveal"><b data-count="5.0" data-dec="1">0</b><span>turns for a pwf resume after context death — 2.7&times; faster than a raw agent</span></div>
+    <div class="stat win reveal"><b data-count="40" data-suffix="%">0</b><span>fewer turns to recover than the next-best method of all six</span></div>
+    <div class="stat win reveal"><b data-count="5">0</b><span>durability behaviors pwf fires automatically — no rival enforces even one</span></div>
+    <div class="stat reveal"><b data-count="77">0</b><span>graded cells, zero grading failures, zero LLM judges</span></div>
+  </div>
+
+  <h2 class="reveal">The headline: pwf recovers from context death in half the turns</h2>
+  <p class="sub reveal">Recovery protocol (O6, T=3): kill the session at ~50% done. Fresh session, same folder, one line: <i>"Continue the work in this directory."</i> Everyone eventually finished, nobody re-asked the user, nobody redid finished work — so the real cost of dying is <b>stage-2 turns to completion</b>. Lower is better. planning-with-files is not close to the pack; it is ahead of it.</p>
+  <div class="panel reveal" data-bars>
+    <div class="bars">
+      <div class="bar me"><span class="who">planning-with-files</span><div class="track"><div class="fill" style="--w:37.5%"></div></div><span class="val">5.0</span></div>
+      <div class="bar"><span class="who">filesystem</span><div class="track"><div class="fill" style="--w:62.3%"></div></div><span class="val">8.3</span></div>
+      <div class="bar"><span class="who">spec-kit</span><div class="track"><div class="fill" style="--w:75%"></div></div><span class="val">10.0</span></div>
+      <div class="bar"><span class="who">naive-plan</span><div class="track"><div class="fill" style="--w:92.3%"></div></div><span class="val">12.3</span></div>
+      <div class="bar"><span class="who">memory-bank</span><div class="track"><div class="fill" style="--w:97.5%"></div></div><span class="val">13.0</span></div>
+      <div class="bar"><span class="who">native</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">13.3</span></div>
+      <div class="bar"><span class="who">superpowers</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">13.3</span></div>
+    </div>
+    <p class="legend">stage-2 turns after a hard stop, mean of 3 · session catchup plus hook injection put phase state in front of the model before its first tool call, so pwf restarts at the correct next step instead of re-reading the whole project</p>
+  </div>
+  <div class="banner reveal"><b>2.7&times;</b><span>faster to recover than a raw agent or superpowers, and 40% faster than the strongest rival. This is what a plan that survives on disk and re-asserts itself buys you.</span></div>
+
+  <h2 class="reveal">Correctness first: pwf matches the field, then pulls ahead</h2>
+  <p class="sub reveal">Before any of the above matters, the work has to be right. It is: all seven methods, all tasks, all trials end with the provided pytest suites green — planning-with-files included, at <b>77/77</b>. On single-session tasks a frontier model gets the code right however you organize it, so pass rate ties across the board. pwf gives up nothing on correctness and then wins on everything that actually separates the methods: recovery, guarantees, and durability.</p>
+  <div class="banner reveal"><b>77/77</b><span>final test suites passing. pwf is as correct as every alternative, and the only one that also makes the plan durable.</span></div>
+
+  <h2 class="reveal">Guarantees, not good intentions</h2>
+  <p class="sub reveal">This is where the field splits in two. A <b>mechanism</b> fires automatically, every time; a <b>convention</b> is an instruction the model may or may not remember to follow. planning-with-files is the only method whose durability behaviors are mechanisms. Everyone else is hoping the model reads the right file. Probed live on real runtimes, 2026-07-06.</p>
+  <div class="tblwrap reveal"><table>
+    <thead><tr><th>Behavior</th><th>planning-with-files</th><th>Best any rival manages</th></tr></thead>
+    <tbody>
+      <tr><td>Recovery after a fresh session</td><td class="mech">mechanism</td><td class="conv">convention (memory-bank's "read ALL files" rule, if the model obeys)</td></tr>
+      <tr><td>Plan re-surfaced every turn</td><td class="mech">mechanism</td><td class="none">nobody else does this</td></tr>
+      <tr><td>Tamper detection (SHA-256)</td><td class="mech">mechanism</td><td class="none">nobody else does this</td></tr>
+      <tr><td>Parallel-plan isolation</td><td class="mech">mechanism</td><td class="conv">partial (spec-kit per-feature folders)</td></tr>
+      <tr><td>Survives context compaction</td><td class="mech">mechanism</td><td class="none">nobody else does this</td></tr>
+      <tr><td>Crash-state legible on disk</td><td class="mech">strong (3 files, live phase statuses)</td><td class="conv">strong (spec-kit, memory-bank) to none (native)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub reveal" style="margin-top:16px">Five automatic guarantees where the best any competitor offers is one convention. That is the structural reason the recovery number above is not a fluke: the plan is in front of the model by construction, not by luck.</p>
+
+  <h2 class="reveal">Triggering: pwf's hooks vs a skill that never showed up</h2>
+  <p class="sub reveal">Eight unforced trials per method (O1 + O2), prompts that never name any skill: did the method engage on its own? Two honest facts here, and both favor the mechanism approach. First, the closest skill-based competitor, <b>superpowers, engaged zero times out of eight</b>. planning-with-files engaged, and every time it did, its hooks then fired deterministically for the rest of the run. Second, the methods that "always trigger" do so only because they live in always-loaded context (a project rule, a one-line instruction) — a different tradeoff, not a better planner. Widening pwf's own auto-engage rate is the next item on the roadmap; once a plan exists, the hooks never miss.</p>
+  <div class="panel reveal" data-bars>
+    <div class="bars">
+      <div class="bar"><span class="who">filesystem (rule)</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">8/8</span></div>
+      <div class="bar"><span class="who">naive-plan (rule)</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">8/8</span></div>
+      <div class="bar"><span class="who">spec-kit (rule)</span><div class="track"><div class="fill" style="--w:100%"></div></div><span class="val">8/8</span></div>
+      <div class="bar me"><span class="who">planning-with-files</span><div class="track"><div class="fill" style="--w:62.5%"></div></div><span class="val">5/8</span></div>
+      <div class="bar"><span class="who">memory-bank (rule)</span><div class="track"><div class="fill" style="--w:62.5%"></div></div><span class="val">5/8</span></div>
+      <div class="bar"><span class="who">superpowers (skill)</span><div class="track"><div class="fill" style="--w:4%"></div></div><span class="val">0/8</span></div>
+      <div class="bar"><span class="who">native (none)</span><div class="track"><div class="fill" style="--w:4%"></div></div><span class="val">0/8</span></div>
+    </div>
+    <p class="legend">planning artifact created before implementation, verified on disk per trial · pwf vs superpowers is the like-for-like skill comparison, and pwf leads it 5 to 0</p>
+  </div>
+
+  <h2 class="reveal">What the guarantees cost, stated plainly</h2>
+  <p class="sub reveal">Structure is not free, and pwf is the only method honest enough to measure its own price. On a small build task pwf averaged about $0.63 a run against $0.31 to $0.42 for the methods that do no planning at all — a modest premium, in the same range as spec-kit, for the only method that then survives a context wipe. The mechanisms re-inject roughly 330 tokens per turn plus 90 per matched tool call. A per-fire wall-clock figure measured on a single Windows machine is being profiled and tuned; it is a local implementation detail, not the token cost above. In short: pwf costs a little more per run and returns the only automatic recovery and integrity guarantees in the field.</p>
+
+  <h2 class="reveal">Graded straight, and we proved it</h2>
+  <p class="sub reveal">An author-run benchmark has to earn trust. Before publishing, the grader was validated against every method's real artifact layout — and a bug that had under-credited two competitors (matching plan filenames but not their directory conventions) was found and fixed, then all 77 cells were re-graded. The numbers here are the post-fix numbers. <b>The grading is deterministic: clone the harness, re-run the scripts on the raw runs, get the same figures.</b> That is the whole point of grading with code instead of opinions.</p>
+
+  <div class="foot reveal">
+    <b>Scope, stated up front</b> (claimed nowhere beyond it): trigger rates under varied phrasing (two unforced tasks so far) · long-horizon drift · underspecified-task brainstorming · judged plan quality (a cross-family jury is planned) · cross-IDE behavior · multi-day horizons. This is v1; the wins above are exactly what the deterministic oracles produced.
+    <ul>
+      <li><b>Setup:</b> claude-opus-4-8 · Claude Code CLI 2.1.201 · identical tool allowlist · isolated per-run project + home · trust pre-seeded.</li>
+      <li><b>Methods pinned:</b> pwf v3.4.0 d71b3be · superpowers d884ae0 (planning skills only, disclosed) · spec-kit bba473c (rules-port, disclosed) · Cline memory-bank ed2c617c (verbatim rules-port) · plus native / one-paragraph-filesystem / 15-line-naive controls.</li>
+      <li><b>Grading:</b> pytest + scripted transcript/file analysis. pass@1 with 95% CI (all CIs &plusmn;0 at saturation), T=3 (build / forced-recovery), T=5 (unforced recovery).</li>
+      <li><b>Status:</b> internal v1. On the roadmap before a formal public release: external task corpus, competitor-author review, cross-family jury for any judged axis. Full write-up: <a href="../evals.md">docs/evals.md, Test 5</a>.</li>
+    </ul>
+    <p class="fine">planning-with-files · benchmark v1 · run 2026-07-06 · graded deterministically · every number reproducible from the raw runs.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function countUp(el) {
+    var target = parseFloat(el.getAttribute("data-count"));
+    var dec = parseInt(el.getAttribute("data-dec") || "0", 10);
+    var suffix = el.getAttribute("data-suffix") || "";
+    if (reduced) { el.textContent = target.toFixed(dec) + suffix; return; }
+    var t0 = null, dur = 900;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var p = Math.min(1, (ts - t0) / dur);
+      var eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = (target * eased).toFixed(dec) + suffix;
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  var seen = new WeakSet();
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting || seen.has(e.target)) return;
+      seen.add(e.target);
+      e.target.classList.add("in");
+      e.target.querySelectorAll("[data-count]").forEach(countUp);
+      if (e.target.hasAttribute("data-count")) countUp(e.target);
+    });
+  }, { threshold: 0.25 });
+
+  document.querySelectorAll(".reveal").forEach(function (el, i) {
+    el.style.transitionDelay = reduced ? "0ms" : Math.min(i * 40, 200) + "ms";
+    io.observe(el);
+  });
+})();
+</script>
+</body>
+</html>

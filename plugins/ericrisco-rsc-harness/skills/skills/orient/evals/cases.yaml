@@ -1,0 +1,67 @@
+skill: orient
+
+# How the harness talks to the person: STE-style short sentences, every answer stands alone,
+# register (technical or with analogies) from technical_level, a ladder (text → diagram → HTML →
+# video on request) when the person does not follow, and the brújula at the end of a turn.
+# It defers "install a missing skill?" to suggest and text for others to unslop.
+
+should_trigger:
+  - prompt: "Ya está instalado el postgresdb. ¿Y ahora qué?"
+    why: "An action just finished and the user is unsure what to do next — orient situates them and proposes the next step."
+
+  - prompt: "No sé por dónde seguir con mi proyecto."
+    why: "The user is lost — the core trigger: situate on the map and propose 1-3 next steps."
+
+  - prompt: "No entiendo nada de lo que me has dicho."
+    why: "A clear sign the person does not follow — orient climbs one step of the ladder (a diagram)."
+
+  - prompt: "Dibújame cómo funciona el flujo de login."
+    why: "A direct request for step 2 of the ladder — the smallest diagram that carries the point."
+
+  - prompt: "Explícame qué es Docker desde cero, que no sé nada."
+    why: "Zero background — a from-zero explanation with everyday analogies (the old eli5 job, now step 3 of the ladder)."
+
+  - prompt: "Háblame más técnico, que esto ya lo controlo."
+    why: "A spoken register change — orient sets technical_level to technical, confirms in one line, applies it."
+
+  - prompt: "¿En qué punto del proyecto vamos?"
+    why: "A 'where am I?' question — orient renders the state in sentences that stand alone."
+
+should_not_trigger:
+  - prompt: "Renombra esta variable a `userCount`."
+    route_to: "none"
+    why: "A trivial mechanical edit mid-flow — no full brújula block over a one-line change."
+
+  - prompt: "Necesito una base de datos para guardar pedidos."
+    route_to: "suggest"
+    why: "An install gap — suggest owns it. orient must not duplicate the 'install it?' prompt."
+
+  - prompt: "Haz que este correo al cliente suene más humano."
+    route_to: "unslop"
+    why: "A text the user sends to others — unslop owns the human-register rewrite."
+
+  - prompt: "Arregla el test que falla."
+    route_to: "debug"
+    why: "Root-cause work owned by debug; orient only closes the turn."
+
+capability:
+  - scenario: "The user just ran `npx @ericrisco/rsc add postgresdb` and says 'ya está, ¿y ahora qué?'. The profile shows technical_level non-technical. Show how orient closes the turn."
+    must_include:
+      - "Short sentences, one idea each; no paragraph walls"
+      - "Every line understandable without earlier messages (names the database, does not say 'eso' or 'lo de antes')"
+      - "Plain words with an everyday analogy for any new idea (non-technical register)"
+      - "Closes with 📍 and ➡️, the next step ending in a question"
+      - "Does NOT re-prompt to install a skill (defers that to suggest)"
+
+  - scenario: "Orient explained a caching bug in text. The user replies: '¿qué? no entiendo'. The profile shows technical_level technical. Show the next answer."
+    must_include:
+      - "Climbs exactly one step: a single small diagram (pseudocode, call tree or flow), not an HTML page or a video"
+      - "Uses real names from the code, not placeholders"
+      - "Keeps the technical register (no 101s)"
+      - "At most two lines of prose beside the diagram"
+
+  - scenario: "The profile carries `technical_level: mixed` and an old `accompaniment_level: L0`. The user asks what a migration is. Show how orient answers."
+    must_include:
+      - "Ignores accompaniment_level (retired)"
+      - "Uses the analogies register (mixed → analogies)"
+      - "Short, stand-alone answer that ends with the brújula"

@@ -1,0 +1,18 @@
+{
+ "name": "morluto-rea",
+ "version": "2026.10.30.0d89978",
+ "description": "逆向工程代理技能：从应用行为入手向下还原实现细节，2 个技能覆盖行为观测与结构还原，适合学习与兼容性分析。",
+ "author": {
+  "name": "morluto"
+ },
+ "keywords": [
+  "逆向工程",
+  "行为分析",
+  "学习",
+  "兼容性"
+ ],
+ "category": "安全",
+ "license": "MIT",
+ "homepage": "https://github.com/morluto/rea",
+ "sourceCommit": "0d89978333a7f139c53f35f1bb622d08eb73affa"
+}

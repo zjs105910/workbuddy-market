@@ -1,0 +1,18 @@
+{
+ "name": "buidangminh23-spacing-skill",
+ "version": "2026.10.30.ddfa2a4",
+ "description": "反拥挤间距技能：一条经过打磨的 UI 间距规范，让代理生成的界面保持呼吸感与一致的视觉节奏，适合嵌入任何前端工作流。",
+ "author": {
+  "name": "buidangminh23"
+ },
+ "keywords": [
+  "UI",
+  "间距",
+  "设计规范",
+  "前端"
+ ],
+ "category": "设计",
+ "license": "MIT",
+ "homepage": "https://github.com/buidangminh23/spacing-skill",
+ "sourceCommit": "ddfa2a4df1e0e81eaab1913184ca1d0221b02cd4"
+}
