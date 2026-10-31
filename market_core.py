@@ -122,6 +122,9 @@ from workbuddy_market.artifact import (      # noqa: E402,F401  （v2.16 新增�
     MAX_ARTIFACT_BYTES, ARTIFACT_TIMEOUT, _artifact_open,
     download_artifact, unpack_zip, prepare_package, install_from_entry,
 )
+from workbuddy_market.importer import (      # noqa: E402,F401  （v2.39 新增）
+    commit_import,
+)
 from workbuddy_market.adapters.workbuddy import (   # noqa: E402,F401  （v2.17 新增）
     WORKBUDDY_ADAPTER_VERSION, read_known, _read_known, read_known_or_die,
     _read_known_or_die, backup_known, _prune_backups, is_registered,

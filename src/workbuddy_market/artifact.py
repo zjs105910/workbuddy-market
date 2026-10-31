@@ -32,6 +32,12 @@ manifest 校验 → [3/4] 兼容性与权限 → [4/4] 事务安装），并把�
 
 网络接缝只有一个：``_artifact_open(url)``（返回 response 对象）。
 自检 monkeypatch 这个名字给假流，离线测完全部链路（老纪律）。
+
+v2.38 离线安装：install_from_entry 新增 ``package_path`` —— 本机连不上
+GitHub 时，用别处下载好的产物 zip 从本地走同一条校验链（prepare_package
+本就接受本地 zip 路径）。供应链语义一分不减：注册表条目钉死的
+packageHash 仍然必须对上，不符整包拒绝；条目连固定哈希都没有 → 诚实
+报错（没有「免校验」的离线通道）。
 """
 from __future__ import annotations
 
@@ -129,13 +135,16 @@ def download_artifact(url: str, dest_dir, *, expected_hash=None,
             raise ArtifactError(
                 f"下载不可变产物失败：连不上 GitHub（{reason}）。"
                 "这是网络问题，不是包的问题 —— 包还没开始下载。请确认本机能访问"
-                " github.com（需要代理的环境先开系统代理），然后点重试。") from exc
+                " github.com（需要代理的环境先开系统代理），然后点重试。"
+                "如果这台设备就是连不上 GitHub，可改走「离线安装」：在能联网的设备"
+                "下载该条目的固定产物 zip，到精选市场卡片点「离线安装」从本地导入。") from exc
         except OSError as exc:
             # 部分平台直连被拒 / 中途断流直接抛 OSError（如 WinError 10061）
             got = f"（已收 {total} 字节后中断）" if total else ""
             raise ArtifactError(
                 f"下载不可变产物失败：网络连不上或中断{got}（{exc}）。"
-                "请确认能访问 github.com（需要代理时先开系统代理）后重试。") from exc
+                "请确认能访问 github.com（需要代理时先开系统代理）后重试；"
+                "始终连不上时可在其他设备下载产物 zip，用「离线安装」从本地导入。") from exc
         got = h.hexdigest()
         if want and got != want:
             raise ArtifactError(
@@ -290,11 +299,15 @@ def prepare_package(source, work_dir, *, expected_package_hash=None,
 
 
 def install_from_entry(entry: dict, *, mode: str = "missing", force: bool = False,
-                       progress=None, fetch=None, work_root=None) -> dict:
+                       progress=None, fetch=None, work_root=None,
+                       package_path=None) -> dict:
     """注册表条目 → 不可变 artifact → verify → 两阶段事务安装（v2.16 主链路）。
 
     · 条目没有成套的 packageUrl + packageHash → ConfigError 诚实报错，
       提示走 ghpm 路线（remote/add）—— 绝不静默降级；
+    · ``package_path``（v2.38 离线安装）：给出时跳过下载、直接用本地 zip，
+      此时 packageUrl 不再必需，但 **packageHash 仍必需** —— 离线不是
+      免校验通道，装的那一份必须就是收录审核钉死的那一份；
     · 工作目录默认在系统临时目录（装完即删，不污染 SKILLS_DIR / 市场根）；
     · progress 回调接收每一步的人话进度（server 的任务面板直接喂它）。
 
@@ -305,7 +318,16 @@ def install_from_entry(entry: dict, *, mode: str = "missing", force: bool = Fals
     entry = entry if isinstance(entry, dict) else {}
     url = str(entry.get("packageUrl") or "")
     ph = normalize_sha256(entry.get("packageHash"))
-    if not url or not ph:
+    offline = package_path is not None
+    if offline:
+        if not ph:
+            raise ConfigError(
+                "离线安装需要一个可比对的固定哈希：该条目没有 packageHash"
+                "（收录时未构建不可变产物），本地 zip 无法证明它就是审核过的"
+                "那一份。请改用联网安装（remote/add），或等该条目补齐固定产物。")
+        if not str(package_path).strip():
+            raise ConfigError("离线安装的 package_path 是空路径")
+    elif not url or not ph:
         raise ConfigError(
             "该条目没有完整的不可变产物（packageUrl + packageHash），"
             "无法走包安装链路；请改用 ghpm 路线（remote/add）")
@@ -324,11 +346,15 @@ def install_from_entry(entry: dict, *, mode: str = "missing", force: bool = Fals
             f"wbm-artifact-{os.getpid()}-{time.time_ns() % 1_000_000:06d}")
     work_root = Path(work_root)
 
-    say(f"[1/4] 下载不可变 artifact：{url}")
+    if offline:
+        say(f"[1/4] 离线安装：使用本地包 {package_path}（不联网）")
+    else:
+        say(f"[1/4] 下载不可变 artifact：{url}")
     try:
         from .packaging import compatibility_report, risk_summary   # noqa: PLC0415
         hv = detect_host_version()
-        prep = prepare_package(url, work_root, expected_package_hash=ph,
+        prep = prepare_package(package_path if offline else url, work_root,
+                               expected_package_hash=ph,
                                expected_manifest_hash=mh, force=force,
                                host_version=hv, fetch=fetch)
         if not prep.get("ok"):

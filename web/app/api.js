@@ -37,3 +37,31 @@ export async function api(path, body){
   }
   return data;
 }
+
+/* 离线导入（v2.39）：zip 二进制上传。
+   浏览器安全限制拿不到本地路径，文件选择器只能给 File 对象 ——
+   所以把文件内容直接 POST 给本机服务（Content-Length 由浏览器算），
+   文件名 / 来源仓库经自定义头传递（文件名 URL 编码规避 latin-1 限制）。 */
+export async function apiUpload(path, file, meta){
+  const headers = {
+    "X-Local-Market-Token": MARKET_TOKEN,
+    "Content-Type": "application/octet-stream",
+    "X-Import-Name": encodeURIComponent((meta && meta.name) || file.name || "import.zip"),
+  };
+  if(meta && meta.repo) headers["X-Import-Repo"] = meta.repo;
+  let r;
+  try{
+    r = await fetch(path, {method: "POST", headers, body: file});
+  }catch(e){
+    throw new Error("本机服务没有响应：请确认市场窗口还开着，并刷新本页再试。"
+      + "若开了系统代理 / VPN，请把 127.0.0.1 加入直连（绕过）名单后刷新重试。");
+  }
+  let data = {};
+  try { data = await r.json(); } catch(e){}
+  if(!r.ok || data.ok === false){
+    const err = new Error(data.error || ("HTTP " + r.status));
+    err.status = r.status; err.data = data;
+    throw err;
+  }
+  return data;
+}

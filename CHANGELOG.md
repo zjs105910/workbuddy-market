@@ -4,6 +4,75 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.39.0 — 2026-10-31（离线导入：任意 skill 安装包，选文件即装）
+
+v2.38 的离线安装只认「收录条目 + 钉死 packageHash + 粘贴路径」。用户反馈
+把需求补全了：手上有一个**任意来源**的 skill 安装包（GitHub Download ZIP、
+Release 产物、别人发来的 zip），在市场里点按钮、**弹文件选择框**、选中即装。
+本轮补齐最后两块：文件选择器与任意包导入。
+
+- **内核**（新模块 `importer.py`）：
+  - `stage_upload`：流式接收上传 zip（≤256MB，与 artifact 同一上限）→
+    暂存系统临时目录（绝不进 SKILLS_DIR，30 分钟 TTL 清扫）→ 分类：
+    **Market Package**（根级 manifest.json）走 prepare_package 同一条
+    verify 管线；**原始仓库 zip** 走 unpack_zip（zip-slip / 链接 / bomb
+    防线）→ `find_skill_layout` 定位 skill 根（root/skills/、子目录带
+    SKILL.md、root 即 skill 三种形态，与 build_artifacts 同口径）→
+    pack_package 就地打包成 Market Package；
+  - 带 repo 上下文时仍与注册表钉死的 packageHash 比对：不符整包拒绝
+    （离线导入不是洗白通道）；一致则 pinned=True；
+  - `commit_import`：`confirmed=True` 显式确认才装 —— 走与在线链同一条
+    install_package_skills 两阶段事务；装完记 imports.json（显示名 /
+    来源 zip / packageHash），卸载经 plugin_uninstall_plan 所有权回退，
+    市场是管理者；
+- **服务端**（`market_server.py`）：`POST /api/import/upload`（zip 二进制
+  上传，在 1MiB JSON _body 之前分流流式处理；文件名/来源仓库经
+  X-Import-Name / X-Import-Repo 头，文件名 URL 编码规避 header latin-1
+  限制）+ `POST /api/import/commit {stagingId, confirmed, mode?}`；
+- **状态可见**（`state.py` + `paths.py`）：IMPORTS_PATH（STATE_HOME/
+  imports.json）登记导入元数据，社区分组合并出 **via=import** 卡片
+  （显示名 = zip 名，描述如实标注来源 zip）—— 装过的东西看得见、卸得掉；
+- **前端**：工具栏新增「离线导入」按钮（文件选择器直开）；收录卡片
+  「离线安装」弹窗升级为二选一（选文件 / 粘贴路径）；`api.js` 新增
+  `apiUpload` 二进制上传；预览弹窗如实展示 skill 清单、包声明权限、
+  哈希钉死状态，确认按钮文案按 pinned 区分（未审核包是
+  「我已确认来源，安装」）；
+- **盯防**（selftest 830 → 856，round39）：布局三形态 + 无 skill 诚实报错；
+  Market Package / 原始 zip 分类打包；zip-slip 拒绝；超限 / 中断诚实失败；
+  stagingId 形状校验；未确认拒绝；确认安装 + ownership packageHash +
+  imports 记录 + 卸载计划 + build_state via=import 卡片；pinned 一致 /
+  不符拒绝；服务端端到端（二进制上传 → 未确认 400 → 确认装好）。
+- 同步：版本三处同号盯防更新至 2.39.0；自检计数 856（README×2 +
+  README_EN×2 + ADVANCED_GUIDE×3 + FAQ×2）。
+
+## 2.38.0 — 2026-10-31（离线安装：本机连不上 GitHub 也能装精选市场）
+
+用户实测驱动（B 站评论区）：国内移动网络连不上 GitHub，「安装固定产物」
+第一步下载就挂。本轮给不可变产物链开了**离线通道** —— 用户在能联网的
+设备（手机热点 / 镜像站）下载收录条目的固定产物 zip，回本机从本地导入，
+供应链校验一步不少。
+
+- **内核**（`artifact.py`）：`install_from_entry` 新增 `package_path` ——
+  给出时跳过下载直接用本地 zip（`prepare_package` 本就接受本地路径）；
+  `packageUrl` 不再必需（能离线装的判据是哈希在不在，不是 URL 在不在），
+  但 **packageHash 仍必需**：对不上整包拒绝，条目没有固定哈希 → 诚实报错，
+  没有「免校验」的离线通道。下载失败的人话报错补「离线安装」出路指引。
+- **服务端**（`market_server.py`）：新增 `POST /api/registry/install-offline
+  {repo, zipPath, mode?}`（后台任务，与在线安装同一套并发闸门与任务表）；
+  zipPath 做形状预检（绝对路径 + 存在 + .zip），内容安全交给与在线链路
+  同一条 unpack / verify 管线；`_STAGE_NAMES` 与模块接口文档同步。
+- **前端**（`web/app/plugins.js` / `install.js` / `main.js`）：带固定产物的
+  收录卡片新增「离线安装」按钮 —— 弹窗里给出「手机/镜像下载 → Shift+右键
+  复制文件地址 → 粘贴路径」三步指引，并明示「校验不会打折」。
+- **盯防**（selftest 811 → 830，round38）：离线全链装通（进度如实报
+  「离线 / 不联网」且无「下载」字样）；哈希不符整包拒绝；无 packageHash /
+  坏哈希 / 空路径诚实报错；路径不存在 / 非 zip 报 ArtifactError；在线链路
+  仍要求 packageUrl（不静默降级）；服务端端到端 —— 形状预检四种 400 +
+  真起服务受理 200 + 任务线程把 skill 真装进 SKILLS_DIR 且 ownership
+  带上 packageHash。
+- 同步：版本三处同号盯防（version / core / selftest）更新至 2.38.0；
+  自检计数 830（README×2 + README_EN×2 + ADVANCED_GUIDE×3 + FAQ×2）。
+
 ## 2.37.1 — 2026-10-24（修复 v2.37.0 引入的 ui-smoke 回归）
 
 补丁轮：v2.37.0 的 CSP 加固把自家 UI 冒烟测试打挂了，CI 判红 ——

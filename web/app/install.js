@@ -3,11 +3,66 @@
    供应链确认弹窗（trust 预览、兼容模式勾选、409 漂移放行）全部保留原语义。 */
 
 import { STATE, REG } from "./state.js";
-import { api } from "./api.js";
+import { api, apiUpload } from "./api.js";
 import { $, esc, toast, confirmBox, errorBox } from "./utils.js";
 import { permBlock } from "./trust.js";
 import { regUpdatable } from "./update.js";
 import { watchJob, refreshNow } from "./jobs.js";
+
+/* ---- 离线导入（v2.39）：上传 zip → 风险预览 → 显式确认 → 事务安装 ----
+   浏览器拿不到本地路径，文件选择器的 File 对象直接二进制上传给本机服务；
+   内容安全（zip 防线 / verify / 哈希钉死）全在服务端，前端只如实展示
+   预览并把「未经收录审核」的确认做实 —— 确认按钮文案按 pinned 区分。 */
+export async function offlineImportFile(file, opts){
+  const meta = {repo: (opts && opts.repo) || ""};
+  let pv;
+  try{
+    pv = await apiUpload("/api/import/upload", file, meta);
+  }catch(err){
+    await errorBox("离线导入：读取安装包失败", err);
+    return;
+  }
+  await confirmAndCommit(pv);
+}
+
+async function confirmAndCommit(pv){
+  const granted = ((pv.risk && pv.risk.items) || []).filter(it => it.granted);
+  const skillsHtml = (pv.skills || []).map(s => '<code>'+esc(s)+'</code>').join("、");
+  let html =
+    '<div class="note"><b>'+esc(pv.name)+'</b>（'+
+    (pv.kind === "package" ? "Market Package" : "原始仓库 zip，已按 Skill 协议自动打包")+
+    '）<br>包含 skill：'+ (skillsHtml || "（无）") +'<br>'+
+    (pv.pinned
+      ? '✓ 与收录审核固定的产物哈希一致（packageHash 校验通过）'
+      : '<b>未经收录审核</b>：包内容完整性已逐文件 SHA-256 校验，'+
+        '但<b>来源是否可信请自行判断</b>。')+
+    '</div>';
+  if(granted.length){
+    html += '<div class="grp"><h5>包声明的权限（'+granted.length+'）</h5><ul>'+
+      granted.map(it => '<li><code>'+esc(it.label)+'</code>'+
+        (it.scope ? '（'+esc(it.scope)+'）' : '')+'</li>').join("")+'</ul></div>';
+  } else {
+    html += '<div class="note">包未声明文件系统 / 网络 / Shell 等敏感权限。</div>';
+  }
+  html += '<div class="note">安装走两阶段事务（可恢复）；装完在「本机技能 → 社区安装」可卸载。</div>';
+  const ok = await confirmBox("确认安装这个离线包？", html,
+    pv.pinned ? "安装" : "我已确认来源，安装");
+  if(!ok) return;
+  try{
+    const r = await api("/api/import/commit", {stagingId: pv.stagingId, confirmed: true});
+    const parts = [];
+    if(r.added && r.added.length) parts.push("新增 "+r.added.length+" 个");
+    if(r.updated && r.updated.length) parts.push("更新 "+r.updated.length+" 个");
+    if(r.skipped && r.skipped.length) parts.push("跳过 "+r.skipped.length+" 个已有");
+    if(r.foreign && r.foreign.length) parts.push("保留 "+r.foreign.length+" 个非本市场");
+    if(r.failed && r.failed.length) parts.push("失败 "+r.failed.length+" 个");
+    toast(parts.length ? "导入完成："+parts.join("，") : "导入完成",
+          (r.failed || []).length > 0);
+    refreshNow();
+  }catch(err){
+    await errorBox("离线导入失败", err);
+  }
+}
 
 export async function handleDataAction(t){
   /* ---- 更新中心：全部更新（v2.26，一键批量） ---- */
@@ -95,6 +150,43 @@ export async function handleDataAction(t){
     }catch(err){
       const act = await errorBox("卸载「"+id+"」失败", err, () => t.click());
       if(act === "retry"){ t.disabled = true; }
+    }
+    return true;
+  }
+
+  /* ---- 精选市场：离线安装（v2.38 路径粘贴 / v2.39 文件选择）----
+     本机连不上 GitHub 时：把收录条目的固定产物 zip 弄到这台电脑上，
+     选文件或粘贴路径导入。选文件走 /api/import/upload（上传时带 repo
+     上下文，服务端仍与钉死的 packageHash 比对，不符整包拒绝）；粘贴
+     路径走 /api/registry/install-offline（同一条严格链）。 */
+  if(t.dataset.roffline){
+    const repo = t.dataset.roffline;
+    const ok = await confirmBox("离线安装 "+repo+"？",
+      '<div class="note">本机连不上 GitHub 也能装：在<b>能联网的设备</b>（手机热点 / '+
+      '镜像站都行）下载这个插件收录时的<b>固定产物 zip</b>（「详情」里的产物链接），'+
+      '传到这台电脑后，二选一：<br>'+
+      '① 点「选择 zip 文件」直接选中（推荐）：<br>'+
+      '<input id="offFile" type="file" accept=".zip" style="margin-top:6px"><br>'+
+      '② 或粘贴 zip 的完整路径：<br>'+
+      '<input id="offZip" type="text" placeholder="粘贴 zip 的完整路径，例如 C:\\下载\\plugin-1.0.0.zip" '+
+      'style="width:100%;margin-top:6px;box-sizing:border-box"><br>'+
+      '小技巧：资源管理器里按住 <b>Shift</b> 再右键 zip → 「复制文件地址」，直接粘贴。<br>'+
+      '<b>校验不会打折</b>：两种方式都会与收录审核固定的 SHA-256 比对，不是那一份就整包拒绝。</div>',
+      "下一步");
+    if(!ok) return true;
+    const f = $("#offFile") && $("#offFile").files && $("#offFile").files[0];
+    if(f){
+      await offlineImportFile(f, {repo});
+      return true;
+    }
+    const zp = (($("#offZip") && $("#offZip").value) || "").trim().replace(/^"+|"+$/g, "");
+    if(!zp){ toast("没有选择文件，也没有填写 zip 路径"); return true; }
+    try{
+      const r = await api("/api/registry/install-offline", {repo, zipPath: zp});
+      watchJob(r.jobId, "离线安装 " + repo);
+    }catch(err){
+      const act = await errorBox("离线安装 "+repo+" 失败", err, () => t.click());
+      if(act === "retry"){ /* 重试按钮会原样再点一次「离线安装」 */ }
     }
     return true;
   }

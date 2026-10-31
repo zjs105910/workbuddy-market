@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from .paths import (
     SKILLS_DIR, PLUGINS_DIR, MARKET_ROOT, WB, MANIFEST_PATH,
-    KNOWN_PATH, GITHUB_REGISTRY, STATE_PATH, GHPM_PY,
+    KNOWN_PATH, GITHUB_REGISTRY, STATE_PATH, GHPM_PY, IMPORTS_PATH,
 )
 from .fsutil import read_json
 from .config import CLASSIFY_PURPOSES, load_config, verify_mode, needs_exact
@@ -247,6 +247,11 @@ def build_state(purpose: str = "ui") -> dict:
                         "overlap": overlap}
 
     community = []
+    # v2.39：离线导入（importer.py）的显示元数据 —— pid 是 "import-<slug>"
+    # 机器名，卡片名用用户导入时的 zip 名；via=import 如实标注来源。
+    imports_meta = read_json(IMPORTS_PATH, {}) or {}
+    if not isinstance(imports_meta, dict):
+        imports_meta = {}
     for plug, g in sorted(groups.items()):
         want = sorted(g["skills"])
         have = [s for s in want if s in skills_here]
@@ -271,6 +276,16 @@ def build_state(purpose: str = "ui") -> dict:
             "installed": len(have) == len(want) and len(want) > 0,
             "partial": 0 < len(have) < len(want),
         }
+        im = imports_meta.get(plug)
+        if isinstance(im, dict) and im:
+            base["via"] = "import"
+            base["name"] = str(im.get("name") or plug)
+            base["description"] = ("离线导入的安装包：SHA-256 校验 + 事务安装，"
+                                   "可经市场卸载"
+                                   + (f"（来源 zip：{im.get('zipName')}）"
+                                      if im.get("zipName") else ""))
+            if im.get("zipName"):
+                base["zipName"] = str(im["zipName"])
         if g.get("via") == "ghpm":
             src_only = bool(g.get("sourceOnly"))
             base["sourceOnly"] = src_only

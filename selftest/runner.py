@@ -35,6 +35,8 @@ from .round21_26 import round24
 from .round21_26 import round25
 from .round21_26 import round26
 from .round27 import round27
+from .round38 import round38
+from .round39 import round39
 
 
 def run() -> None:
@@ -114,6 +116,12 @@ def run() -> None:
 
     # ============ 42. v2.36.1：兼容模式 0 skill 仓库全量可见可卸载 ============
     round27()
+
+    # ============ 43. v2.38：离线安装（本地 zip 走同一条哈希校验链） ============
+    round38()
+
+    # ============ 44. v2.39：离线导入（任意 skill 安装包） ============
+    round39()
 
 
 def main() -> int:

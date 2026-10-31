@@ -117,7 +117,7 @@ cd workbuddy-market
 
 <!-- registry-table:start -->
 
-> 共 **100** 个收录条目，由每日 CI 从人工审核的注册表自动刷新本表格。
+> 共 **110** 个收录条目，由每日 CI 从人工审核的注册表自动刷新本表格。
 
 | 插件 | 说明 | 分类 | 信任级 |
 | --- | --- | --- | --- |
@@ -221,6 +221,16 @@ cd workbuddy-market
 | [Stitch 官方技能库](https://github.com/google-labs-code/stitch-skills) | Google Labs Stitch 官方技能库：配合 Stitch MCP 服务器使用的 16 个技能，遵循 Agent Skills 开放规范。 | 合集 | 已审 |
 | [Yao 全端代理工作台](https://github.com/YaoApp/yao) | 所有代理与工作台集中一处、全设备可达：任务看板、跨端同步（15 个 skill），AI 原生架构。 | 效率 | 已审 |
 | [界面构建技能集](https://github.com/jakubkrehel/skills) | 帮你构建出色界面的代理技能合集（14 个 skill）：从布局系统到交互细节的实战规范。 | 设计 | 已审 |
+| [HyperFrames 视频框架](https://github.com/heygen-com/hyperframes) | HeyGen 官方的「写 HTML 渲染视频」代理视频框架：用 HTML/CSS/GSAP 描述画面与动效，Playwright + FFmpeg 渲染成片，内建 26 个官方 skill 覆盖字幕、转场、图表动画与成片导出，专为编码代理设计。 | 设计 | 已审 |
+| [编码代理剪视频](https://github.com/browser-use/video-use) | browser-use 团队出品：让 Claude Code 等编码代理直接上手剪辑视频。代理通过逐帧可视化反馈回路「看着剪」，支持剪切、拼接、字幕、特效等真实剪辑操作，把剪辑软件的活交给对话完成。 | 设计 | 已审 |
+| [FFmpeg 剪辑工具箱](https://github.com/kajisho5/ffmpeg-skill) | 本地视频剪辑工具箱：42 个带机器可读契约的 FFmpeg 工具与 MCP 服务器，覆盖剪切、字幕烧录、画面重构、响度归一与多平台导出，全程本地运行，不依赖云服务与 API key。 | 设计 | 已审 |
+| [对话式视频剪辑台](https://github.com/0xsline/OpenChatCut) | 开源对话式 AI 视频编辑器：专业多轨时间轴 + Agent Skills + MCP 集成 + Remotion 渲染，31 个技能覆盖素材导入、电影感短片、字幕与成片输出，聊天中完成整段剪辑。 | 设计 | 已审 |
+| [视频解说成片](https://github.com/zenstory-ai/video-recap-skills) | 把任意视频做成中文解说成片的 Claude Code / Codex 技能集：场景切分、ASR 转写、VLM 理解画面、解说稿生成、TTS 配音、FFmpeg 合成，并支持一键导出可编辑的剪映 / CapCut 草稿，本地 FFmpeg + 单个 MiMo key 即可，无需 GPU。 | 设计 | 已审 |
+| [宝玉 AI 视频剪辑台](https://github.com/JimLiu/baocut) | 宝玉（JimLiu）出品的 AI 视频剪辑代理：自带可编辑时间轴，转录、字幕、翻译、配音、剪辑与动效一站式完成，剪完还能回到时间轴手工微调，兼顾自动化与可控性。 | 设计 | 已审 |
+| [万物皆可讲解视频](https://github.com/Vincentwei1021/anything2explainer) | 输入一个主题，产出一支黑底动效讲解视频：TTS 旁白、逐句字幕与章节进度条齐备，中英文皆可，每一帧都用 Remotion 代码绘制，跨平台渲染结果一致，Claude Code / Codex 可用。 | 设计 | 已审 |
+| [口播讲解视频工坊](https://github.com/Vincentwei1021/video-talkcraft) | 把 Claude Code / Codex 变成口播动效工作室：词级配音对齐、109 张动效配方卡与防幻灯片镜头系统，用 Remotion 渲染旁白驱动的讲解视频，让口播内容不再是一页页 PPT。 | 设计 | 已审 |
+| [AI 短剧创作技能集](https://github.com/zenstory-ai/drama-skills) | 开源 AI 短剧 / 漫剧创作 skill 合集：剧本、角色资产、分镜 storyboard、图片与视频提示词、内容审查全流程覆盖，适配 Claude Code 与 Codex，从设定到成片提示词一站打通。 | 设计 | 已审 |
+| [YouTube 智能切片](https://github.com/op7418/Youtube-clipper-skill) | 归藏出品的 YouTube 视频智能剪辑工具：下载视频与字幕、AI 生成分钟级精细章节、选定片段后自动剪辑、字幕翻译为中英双语并烧录，最后产出总结文案，六阶段工作流一步不落。 | 设计 | 已审 |
 
 <!-- registry-table:end -->
 
@@ -257,8 +267,8 @@ cd workbuddy-market
 | 平台 | 当前状态 |
 | --- | --- |
 | Windows 10/11 | 主要使用与验证环境；仓库文档记录了 WorkBuddy 5.7.6 面板实测 |
-| Linux | CI 三平台硬门槛：完整隔离 selftest（811 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
-| macOS | CI 三平台硬门槛：完整隔离 selftest（811 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
+| Linux | CI 三平台硬门槛：完整隔离 selftest（856 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
+| macOS | CI 三平台硬门槛：完整隔离 selftest（856 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
 
 ## 文档与社区
 

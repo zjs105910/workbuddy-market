@@ -348,7 +348,10 @@ function cardRegistry(e){
         ? (viaArtifact
             ? '<button class="tiny" data-tab="local">本机技能页查看</button>'
             : '<button class="tiny" data-rupdate="'+attr(e.repo)+'">检查更新</button>')
-        : '<button class="tiny primary" data-radd="'+attr(e.repo)+'" title="'+attr(instTitle)+'">'+instLabel+'</button>')+
+        : '<button class="tiny primary" data-radd="'+attr(e.repo)+'" title="'+attr(instTitle)+'">'+instLabel+'</button>'+
+          // v2.38 离线安装：本机连不上 GitHub 时的本地导入通道（只有带
+          // 固定哈希的条目才有 —— 校验语义与在线链路完全一致）。
+          (hasPkg ? '<button class="tiny" data-roffline="'+attr(e.repo)+'" title="本机连不上 GitHub 时，用下载好的产物 zip 从本地安装">离线安装</button>' : ''))+
     '</div>'+
   '</div>';
 }

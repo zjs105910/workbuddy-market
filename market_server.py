@@ -66,10 +66,25 @@ v2.13 API 版本化：
 
 v2.16 包安装链路：
   POST /api/registry/install {repo, mode?} 走不可变 artifact 链路
-  （后台任务）：注册表条目带 packageUrl + packageHash 时，下载 →
-  哈希校验（对不上整包拒绝，无放行）→ verify_package → 两阶段事务安装。
-  条目没有成套 artifact 字段时任务失败并提示走 /api/remote/add。
-  哈希钉死的那一份不存在上游漂移，因此无需 remote/add 的 409 闸门。
+                              （后台任务）：注册表条目带 packageUrl + packageHash 时，下载 →
+                              哈希校验（对不上整包拒绝，无放行）→ verify_package → 两阶段事务安装。
+                              条目没有成套 artifact 字段时任务失败并提示走 /api/remote/add。
+                              哈希钉死的那一份不存在上游漂移，因此无需 remote/add 的 409 闸门。
+  POST /api/registry/install-offline {repo, zipPath, mode?}
+                              离线安装（v2.38）：本机连不上 GitHub 时，用别处
+                              下载好的固定产物 zip 从本地导入（后台任务）。
+                              供应链校验一步不少：仍与注册表钉死的 packageHash
+                              比对，不符整包拒绝；条目没有固定哈希 → 诚实报错。
+  POST /api/import/upload     离线导入（v2.39）：请求体是任意 skill 安装包 zip
+                              （二进制，≤256MB；X-Import-Name / X-Import-Repo 头
+                              传元数据）。流式暂存 → 分类（Market Package /
+                              原始仓库 zip）→ 就地打包校验 → 返回风险预览，
+                              不装。收录仓库上下文给出时仍与钉死 packageHash
+                              比对，不符整包拒绝。
+  POST /api/import/commit     {stagingId, confirmed, mode?} 离线导入提交：
+                              confirmed=true（用户看完风险预览显式确认）才进
+                              两阶段事务安装；装完记录 imports.json，
+                              本机技能页社区分区出现 via=import 卡片（可卸载）。
 
 v2.21 收藏（评审 #13）：
   POST /api/favorites        {repo, on} 加 / 取消收藏（本机持久化，Local-first）；
@@ -331,7 +346,9 @@ _STAGE_NAMES = {
     "/api/uninstall": "卸载", "/api/trash/purge": "清空回收站",
     "/api/remote/add": "GitHub 安装", "/api/remote/update": "GitHub 更新",
     "/api/remote/remove": "GitHub 移除",
-    "/api/registry/install": "固定产物安装", "/api/catalog/refresh": "刷新目录",
+    "/api/registry/install": "固定产物安装",
+    "/api/registry/install-offline": "离线安装",
+    "/api/catalog/refresh": "刷新目录",
     "/api/favorites": "收藏", "/api/open/path": "打开目录",
 }
 
@@ -804,7 +821,8 @@ def _sync_registry_sha_from_job(repo: str, lines) -> bool:
     return changed
 
 
-def _registry_install_job(repo: str, mode: str = "missing", force: bool = False):
+def _registry_install_job(repo: str, mode: str = "missing", force: bool = False,
+                          package_path: str | None = None):
     """社区注册表的**包安装**任务（v2.16）：不可变 artifact → verify → 事务安装。
 
     与 _remote_job 同一套闸门与任务表（并发满员返回 None，由调用方回 429）。
@@ -812,17 +830,22 @@ def _registry_install_job(repo: str, mode: str = "missing", force: bool = False)
     校验，对不上整包拒绝），不是仓库当前的 HEAD —— 上游漂移在这条链路里
     天然不存在，所以这里不需要 _registry_drift 的 409 闸门。
     条目没有成套 artifact 字段时任务会失败并给出诚实提示（走 remote/add）。
+
+    ``package_path``（v2.38 离线安装）：给出时走本地 zip（不联网），调用方
+    （/api/registry/install-offline）已先验过「绝对路径 + 存在 + .zip」；
+    供应链校验在内核里一步不少 —— packageHash 对不上照样整包拒绝。
     """
     if not _RUNNER.acquire():
         core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝包安装 {repo}")
         return None
     try:
-        jid = _new_job(f"包安装 {repo}")
+        jid = _new_job(f"{'离线安装' if package_path else '包安装'} {repo}")
     except BaseException:
         _RUNNER.release()
         raise
 
-    core.log("info", "job", f"registry-install {repo} 开始（artifact 链路）")
+    core.log("info", "job",
+             f"registry-install {repo} 开始（{'离线本地包' if package_path else 'artifact'} 链路）")
 
     def work():
         try:
@@ -836,6 +859,7 @@ def _registry_install_job(repo: str, mode: str = "missing", force: bool = False)
                 core.log("error", "job", f"registry-install {repo} 失败：条目不存在")
                 return
             r = core.install_from_entry(entry, mode=mode, force=force,
+                                        package_path=package_path,
                                         progress=lambda m: _job_push(jid, m))
             ok = bool(r.get("ok"))
             if not ok and r.get("errors"):
@@ -1189,6 +1213,34 @@ class Handler(BaseHTTPRequestHandler):
             return None, "请求体必须是一个 JSON 对象"
         return data, None
 
+    def _import_upload(self):
+        """离线导入：流式接收 zip → 暂存 → 分类/打包 → 预览（不装）。
+
+        请求体是 zip 二进制（Content-Length 必须，上限与 artifact 同一
+        256MB）；文件名 / 来源仓库经 X-Import-Name / X-Import-Repo 头
+        传递（文件名 URL 编码，规避 header latin-1 限制）。
+        内容安全全在 importer.stage_upload 内（unpack_zip / prepare_package
+        / pack_package 同一套防线），这里只做头的解析与长度预检。
+        """
+        from urllib.parse import unquote
+        from workbuddy_market.importer import (  # noqa: PLC0415
+            MAX_IMPORT_BYTES, stage_upload)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._json({"ok": False, "error": "Content-Length 不是数字"}, 400)
+        if n <= 0:
+            return self._json({"ok": False, "error": "缺少请求体（zip 二进制）"}, 400)
+        if n > MAX_IMPORT_BYTES:
+            return self._json({"ok": False,
+                               "error": f"zip 过大（{n} 字节，上限 {MAX_IMPORT_BYTES}）"}, 413)
+        name = unquote(self.headers.get("X-Import-Name") or "import.zip")
+        repo = (self.headers.get("X-Import-Repo") or "").strip()
+        r = stage_upload(self.rfile.read, n, name_hint=name, repo=repo,
+                         registry_lookup=core.get_registry)
+        code = 200 if r.get("ok") else 400
+        return self._json(r, code)
+
     # ---- 路由
 
     def do_GET(self):
@@ -1347,6 +1399,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found", "path": path}, 404)
         if not self._guard():
             return
+        # 离线导入（v2.39）：请求体是 zip 二进制（可达 256MB），不能走
+        # 1MiB 的 JSON _body —— 在读体之前分流到流式上传处理器。
+        if path == "/api/import/upload":
+            return self._import_upload()
         body, err = self._body()
         if err is not None:
             code = 413 if "过大" in err else 400
@@ -1443,6 +1499,50 @@ class Handler(BaseHTTPRequestHandler):
                 if jid is None:
                     return self._json(_busy_payload(), 429)
                 return self._json({"ok": True, "jobId": jid})
+            if path == "/api/registry/install-offline":
+                # 离线安装（v2.38）：本机连不上 GitHub 时，用别处下载好的
+                # 固定产物 zip 从本地导入。供应链校验一步不少：内核仍与注册
+                # 表钉死的 packageHash 比对，不符整包拒绝；条目没有固定哈希
+                # → 诚实报错（没有「免校验」的离线通道）。
+                # zipPath 只做形状预检（绝对路径 + 存在 + .zip），内容安全
+                # 全部交给与在线链路同一条 unpack/verify 管线。
+                repo, err2 = _repo_arg(body)
+                if err2:
+                    return self._json({"ok": False, "error": err2}, 400)
+                zp = str(body.get("zipPath") or "").strip().strip('"')
+                if not zp:
+                    return self._json({"ok": False,
+                                       "error": "缺少 zipPath：请填本地 zip 的完整路径"
+                                       "（资源管理器里 Shift+右键文件 →「复制文件地址」）"}, 400)
+                zpath = Path(zp)
+                if not zpath.is_absolute():
+                    return self._json({"ok": False,
+                                       "error": f"zipPath 必须是绝对路径，收到：{zp[:200]}"}, 400)
+                if zpath.suffix.lower() != ".zip" or not zpath.is_file():
+                    return self._json({"ok": False,
+                                       "error": f"zipPath 不存在或不是 .zip 文件：{zp[:200]}"}, 400)
+                mode = body.get("mode") or "missing"
+                if mode not in core.INSTALL_MODES:
+                    return self._json({"ok": False,
+                                       "error": f"未知安装模式 {mode}"}, 400)
+                jid = _registry_install_job(repo, mode=mode,
+                                            force=bool(body.get("force")),
+                                            package_path=zp)
+                if jid is None:
+                    return self._json(_busy_payload(), 429)
+                return self._json({"ok": True, "jobId": jid})
+            if path == "/api/import/commit":
+                # 离线导入提交（v2.39）：上传预览后，用户显式确认风险
+                # （confirmed=true）才真正进两阶段事务安装；与在线链同一条
+                # install_package_skills，卸载经所有权回退由市场管理。
+                sid = str(body.get("stagingId") or "").strip()
+                if not sid:
+                    return self._json({"ok": False, "error": "缺少 stagingId"}, 400)
+                r = core.commit_import(sid, confirmed=bool(body.get("confirmed")),
+                                       mode=body.get("mode") or "update")
+                if r.get("ok"):
+                    invalidate_state()
+                return self._json(r, 200 if r.get("ok") else 400)
             if path == "/api/catalog/refresh":
                 jid = _catalog_refresh_job()
                 if jid is None:

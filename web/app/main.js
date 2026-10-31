@@ -10,7 +10,7 @@ import { regUpdatable, showUpdateCenter } from "./update.js";
 import { regDetailHtml } from "./details.js";
 import { isFav } from "./favorites.js";
 import { bindRefresh } from "./jobs.js";
-import { handleDataAction } from "./install.js";
+import { handleDataAction, offlineImportFile } from "./install.js";
 
 /* ---------------- 顶部与骨架渲染 ---------------- */
 /* v2.35：切 tab 的公共路径（tab 按钮态 + setTab 一次到位）。
@@ -138,7 +138,7 @@ async function loadLog(){
 // v2.35 用户实测二修：data-rremove = 社区安装分区里 ghpm 链卡片的「移除…」
 // （走 /api/remote/remove → ghpm remove，市场不拥有这些技能的所有权）。
 document.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter],[data-rremove],[data-ghmore]");
+  const t = e.target.closest("[data-c],[data-f],[data-tab],[data-toggle],[data-install],[data-uninstall],[data-radd],[data-rupdate],[data-rupdate-all],[data-regdetail],[data-path],[data-crefresh],[data-fav],[data-shot],[data-updatecenter],[data-rremove],[data-ghmore],[data-roffline]");
   if(!t) return;
 
   // v2.23 三入口 tab：本机技能 / 精选市场 / 探索 GitHub
@@ -223,6 +223,18 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("input", (e) => { if(e.target.id === "q") renderCards(); });
 
 /* ---------------- 顶部按钮 ---------------- */
+// 离线导入（v2.39）：文件选择器直开，选任意 skill 安装包 zip。
+// 预览 / 风险确认 / 事务安装在 install.js 的 offlineImportFile 里。
+$("#btnImport").onclick = () => {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zip";
+  input.onchange = () => {
+    if(input.files && input.files[0]) offlineImportFile(input.files[0]);
+  };
+  input.click();
+};
+
 $("#btnSync").onclick = async (e) => {
   e.target.disabled = true;
   try{
