@@ -4,10 +4,7 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
-## 未发布（回收站 restore + 独立代码评审修复）
-
-> 代码已落地，版本号 / tag / PyPI 待发版确认后统一推进（当前 `MARKET_VERSION`
-> 仍为 2.39.0，不动它以免破坏三方同步门禁）。
+## 2.40.0 — 2026-11-07（回收站 restore + 独立代码评审两轮加固）
 
 - **回收站能出了**（`trash.restore_from_trash`）：
   - 搬入时留 `treeHash`（内容 SHA-256）与所有权快照；恢复前复算哈希，
