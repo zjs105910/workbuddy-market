@@ -30,6 +30,7 @@ from __future__ import annotations
 from .paths import (
     SKILLS_DIR, PLUGINS_DIR, MARKET_ROOT, WB, MANIFEST_PATH,
     KNOWN_PATH, GITHUB_REGISTRY, STATE_PATH, GHPM_PY, IMPORTS_PATH,
+    TRASH_DIR,
 )
 from .fsutil import read_json
 from .config import CLASSIFY_PURPOSES, load_config, verify_mode, needs_exact
@@ -378,6 +379,15 @@ def build_state(purpose: str = "ui") -> dict:
             "count": ts["count"],
             "bytes": ts["bytes"],
             "policy": trash_config(),
+            # v2.40：网页要列得出条目、显示真实位置（v2.7 起回收站已不在
+            # 仓库根的 .trash，而在 STATE_HOME/trash），才能逐项恢复。
+            "dir": str(TRASH_DIR),
+            "items": [{"name": i.get("name", ""), "size": i.get("size", 0),
+                       "mtime": i.get("mtime", 0), "reason": i.get("reason", ""),
+                       "skill": i.get("skill", ""),
+                       "restorable": bool(i.get("restorable")),
+                       "occupied": bool(i.get("occupied"))}
+                      for i in ts["items"]],
         },
         "stats": {
             "localPlugins": len(plugins),

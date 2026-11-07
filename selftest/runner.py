@@ -37,6 +37,7 @@ from .round21_26 import round26
 from .round27 import round27
 from .round38 import round38
 from .round39 import round39
+from .round40 import round40
 
 
 def run() -> None:
@@ -122,6 +123,9 @@ def run() -> None:
 
     # ============ 44. v2.39：离线导入（任意 skill 安装包） ============
     round39()
+
+    # ============ 45. 回收站 restore（内容指纹 + 事务 + 所有权闭环） ============
+    round40()
 
 
 def main() -> int:

@@ -312,14 +312,18 @@ def commit_import(staging_id: str, *, confirmed: bool, mode: str = "update") -> 
         version=str(rec.get("version") or "0.0.0"),
         package_hash=str(rec.get("packageHash") or "") or None, mode=mode)
     if r.get("ok"):
-        record_import(str(rec["pid"]), {
-            "name": str(rec.get("name") or rec["pid"]),
-            "via": "import", "zipName": str(rec.get("zipName") or ""),
-            "repo": str(rec.get("repo") or ""),
-            "pinned": bool(rec.get("pinned")),
-            "skills": skills,
-            "packageHash": str(rec.get("packageHash") or ""),
-        })
+        # v2.40 评审修复：imports.json 也是本机状态文件，两个并发导入
+        # 各读一份旧表再原子写会丢记录。与收藏 / 装卸同口径，纳入市场锁。
+        from .locking import locked  # noqa: PLC0415
+        with locked():
+            record_import(str(rec["pid"]), {
+                "name": str(rec.get("name") or rec["pid"]),
+                "via": "import", "zipName": str(rec.get("zipName") or ""),
+                "repo": str(rec.get("repo") or ""),
+                "pinned": bool(rec.get("pinned")),
+                "skills": skills,
+                "packageHash": str(rec.get("packageHash") or ""),
+            })
         shutil.rmtree(staging_root() / sid, ignore_errors=True)
         rec_path.unlink(missing_ok=True)
     return r

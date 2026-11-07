@@ -139,13 +139,18 @@ export async function handleDataAction(t){
     if(!plan.removable.length){
       body += '<div class="note">这个插件当前没有「可安全卸载」的 skill，卸载不会有任何改动。</div>';
     }
-    body += '<div class="note">移走的东西都在市场的 <code>.trash</code> 里，可以手工恢复。</div>';
+    body += '<div class="note">移走的东西进回收站，可在「回收站」里逐项恢复；内容被改动过的条目只能手工取回。</div>';
     const ok = await confirmBox("卸载「"+id+"」", body, "卸载");
     if(!ok) return true;
     t.disabled = true;
     try{
       const r = await api("/api/uninstall", {id});
-      toast(r.moved.length ? ("已移入回收站："+r.moved.join("、")) : "没有需要移除的 skill");
+      // 评审修复：搬入回收站失败的 skill 必须如实报出来，不能只报成功项。
+      if(r.failed && r.failed.length){
+        toast("部分 skill 未能移入回收站（本机文件未改动）："+r.failed.join("、"), true);
+      }else{
+        toast(r.moved.length ? ("已移入回收站："+r.moved.join("、")) : "没有需要移除的 skill");
+      }
       refreshNow();
     }catch(err){
       const act = await errorBox("卸载「"+id+"」失败", err, () => t.click());

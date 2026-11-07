@@ -282,23 +282,89 @@ $("#btnReg").onclick = async (e) => {
 
 $("#btnUpdate").onclick = async () => { await showUpdateCenter(); };
 
-$("#btnTrash").onclick = async () => {
-  const t = STATE.trash, pol = t.policy || {};
+/* ---- 回收站（v2.40）：列出条目 + 逐项恢复 ----
+   两段式确认放在同一个弹窗内，不套弹窗（三个弹窗入口共用 #cfm 节点，
+   嵌套会互相覆盖内容）。路径由后端给出，不再写死仓库根的 .trash。 */
+async function showTrashDialog(){
+  const t = STATE.trash || {}, pol = t.policy || {};
+  const items = (t.items || []).slice().reverse();      // 新的在前
+  const rows = items.length ? items.map(i => {
+    const when = i.mtime ? new Date(i.mtime*1000).toLocaleString() : "时间未知";
+    const label = i.skill ? esc(i.skill) : esc(i.name);
+    let action;
+    if(!i.restorable){
+      action = '<span style="opacity:.7">不可自动恢复（可到回收站目录手工取回）</span>';
+    }else if(i.occupied){
+      action = '<span style="opacity:.7">同名技能已存在，先在市场里卸载当前版本</span>';
+    }else{
+      action = '<button class="tiny" data-rrestore="'+attr(i.name)+'">恢复…</button>';
+    }
+    return '<li style="margin-bottom:8px"><strong>'+label+'</strong> · '+mb(i.size)+
+      ' · '+esc(when)+'<br><span style="opacity:.7">条目 '+esc(i.name)+' · '+
+      esc(i.reason||"未登记")+'</span><br>'+action+'</li>';
+  }).join("") : '<li>回收站是空的。</li>';
+
   const html = '<div class="grp"><h5>当前回收站</h5><ul>'+
     '<li>共 '+t.count+' 项，'+mb(t.bytes)+'</li>'+
     '<li>自动清理阈值：超过 '+(pol.max_age_days||0)+' 天，或总量超过 '+mb(pol.max_bytes||0)+'</li>'+
     '</ul></div>'+
-    '<div class="note">回收站里是卸载 / 覆盖时移走的 skill 目录，可以手工恢复。<br>'+
-    '位置：<code>'+esc(STATE.root)+'\\.trash</code><br>'+
-    '清空只影响这个目录，不会碰 <code>~/.workbuddy/skills</code>。</div>';
-  const ok = await confirmBox("回收站", html, "清空回收站");
-  if(!ok) return;
-  try{
-    const r = await api("/api/trash/purge", {});
-    toast("已清空回收站，释放 "+mb(r.result.freed));
-    await refresh();
-  }catch(err){ toast(err.message, true); }
-};
+    '<div class="grp"><h5>条目（'+items.length+'）</h5>'+
+    '<ul style="max-height:280px;overflow:auto;padding-left:18px;line-height:1.6">'+rows+'</ul></div>'+
+    '<div class="note">恢复会重新校验内容指纹；被改动过、升级前生成、手工放入或覆盖安装'+
+    '留下的旧版本都不支持自动恢复，也绝不覆盖已存在的同名技能。<br>'+
+    '回收站位置：<code>'+esc(t.dir || "（服务未返回）")+'</code><br>'+
+    '清空只影响这个目录，不会碰 <code>~/.workbuddy/skills</code>。</div>'+
+    '<div class="grp"><button class="tiny danger" id="btnTrashPurge">清空回收站…</button></div>';
+
+  const done = infoBox("回收站", html);     // innerHTML 同步写入，可立即绑事件
+  const box = $("#cfmBody");
+  box.onclick = async (ev) => {
+    const rb = ev.target.closest("[data-rrestore]");
+    if(rb){
+      if(rb.dataset.armed !== "1"){
+        rb.dataset.armed = "1";
+        rb.textContent = "再点一次确认恢复";
+        toast("恢复会把技能写回本机技能目录，再点一次确认");
+        return;
+      }
+      rb.disabled = true;
+      try{
+        const r = await api("/api/trash/restore", {name: rb.dataset.rrestore, confirmed:true});
+        toast("已恢复：" + r.restored +
+              (r.warnings && r.warnings.length ? "（"+r.warnings.join("；")+"）" : ""));
+        rb.textContent = "已恢复";
+        await refresh();
+      }catch(err){
+        rb.disabled = false; rb.dataset.armed = "0"; rb.textContent = "恢复…";
+        toast(err.message, true);
+      }
+      return;
+    }
+    const pb = ev.target.closest("#btnTrashPurge");
+    if(pb){
+      if(pb.dataset.armed !== "1"){
+        pb.dataset.armed = "1";
+        pb.textContent = "确认永久清空？";
+        toast("这会永久删除回收站全部条目，再点一次确认", true);
+        return;
+      }
+      pb.disabled = true;
+      try{
+        const r = await api("/api/trash/purge", {});
+        toast("已清空回收站，释放 " + mb(r.result.freed));
+        box.innerHTML = '<div class="note">回收站已清空。</div>';
+        await refresh();
+      }catch(err){
+        pb.disabled = false; pb.dataset.armed = "0"; pb.textContent = "清空回收站…";
+        toast(err.message, true);
+      }
+    }
+  };
+  await done;
+  box.onclick = null;
+}
+
+$("#btnTrash").onclick = async () => { await showTrashDialog(); };
 
 $("#btnLog").onclick = async () => { $("#drawer").classList.add("show"); await loadLog(); };
 $("#btnLogClose").onclick = () => $("#drawer").classList.remove("show");

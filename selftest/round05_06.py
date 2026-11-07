@@ -252,6 +252,10 @@ def round5():
         c = http.client.HTTPConnection("127.0.0.1", port5, timeout=10)
         data = json.dumps(body).encode() if body is not None else None
         h = {"X-Local-Market-Token": "tok5", "Content-Type": "application/json"}
+        if body is not None:
+            # 写接口必须带同源 Origin（v2.40 评审加固）；传 headers 可覆盖
+            # 以测试「跨源 / 无 Origin」被拒的分支。
+            h.setdefault("Origin", f"http://127.0.0.1:{port5}")
         h.update(headers or {})
         c.request("POST" if body is not None else "GET", path, body=data, headers=h)
         r = c.getresponse()

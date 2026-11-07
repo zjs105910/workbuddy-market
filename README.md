@@ -30,7 +30,7 @@ $ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market
 
 - **管理自己的 Skills**：将本机技能打包、同步，并注册到 WorkBuddy 插件面板。
 - **发现社区技能**：浏览精选目录，也可以搜索 GitHub 上的公开仓库。
-- **安装过程更可追溯**：安装前有来源与风险预览；支持内容校验、事务恢复和回收站。
+- **安装过程更可追溯**：安装前有来源与风险预览；支持内容校验、事务恢复和回收站逐项恢复（内容哈希不符或目标已存在一律拒绝）。
 - **本机优先**：网页服务只监听 `127.0.0.1`；你的私有市场配置和本机技能内容不随仓库提交。
 
 ![WorkBuddy Market 架构总览](docs/diagrams/wbm-architecture.svg)
@@ -267,8 +267,8 @@ cd workbuddy-market
 | 平台 | 当前状态 |
 | --- | --- |
 | Windows 10/11 | 主要使用与验证环境；仓库文档记录了 WorkBuddy 5.7.6 面板实测 |
-| Linux | CI 三平台硬门槛：完整隔离 selftest（856 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
-| macOS | CI 三平台硬门槛：完整隔离 selftest（856 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
+| Linux | CI 三平台硬门槛：完整隔离 selftest（893 项）+ pytest + POSIX 语义冒烟 + wheel 构建 + ui-smoke；尚未验证真实 WorkBuddy 宿主集成 |
+| macOS | CI 三平台硬门槛：完整隔离 selftest（893 项）+ pytest；真实 fcntl/symlink 语义由 CI 实跑，尚未验证真实 WorkBuddy 宿主集成 |
 
 ## 文档与社区
 

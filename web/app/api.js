@@ -26,7 +26,7 @@ export async function api(path, body){
   }
   let data = {};
   try { data = await r.json(); } catch(e){}
-  if(r.status === 403) throw new Error("本机服务拒绝了这次请求（口令失效，刷新页面即可）");
+  if(r.status === 403) throw new Error(data.error || "本机服务拒绝了这次请求（口令或来源校验未通过，刷新页面即可）");
   if(!r.ok || data.ok === false){
     const err = new Error(data.error || ("HTTP " + r.status));
     err.status = r.status; err.data = data;   // 409 漂移拦截等结构化错误要用

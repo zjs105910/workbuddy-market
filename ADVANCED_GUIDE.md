@@ -176,7 +176,7 @@ WorkBuddy 宿主集成已验证**：
 
 | 分档      | 含义                  | 卸载时               |
 | ------- | ------------------- | ----------------- |
-| ✅ 可安全卸载 | 本市场装的，且内容没被动过       | 移入 `.trash/`，可恢复  |
+| ✅ 可安全卸载 | 本市场装的，且内容没被动过       | 移入回收站，可在网页逐项恢复  |
 | ⚠️ 被改过  | 本市场装的，但之后你改过        | **默认保留**，避免吞掉你的改动 |
 | ⚠️ 非本市场 | 从别的途径装的（比如 ghpm 装的） | **永不触碰**          |
 
@@ -264,7 +264,7 @@ workbuddy-market/
 │                                        registry.yml（注册表每日重建）
 ├── scripts/build_registry.py         ← 注册表每日重建脚本（CI 与本机共用）
 ├── market_server.py                  ← 本地网页服务（只监听 127.0.0.1，带口令鉴权）
-├── selftest.py                       ← 856 项自检入口（默认隔离模式，不碰真实环境）
+├── selftest.py                       ← 893 项自检入口（默认隔离模式，不碰真实环境）
 ├── selftest/                         ← 自检实现（v2.34 从单体拆包，逐字搬迁）：
 │   ├── __init__.py                   ←   共享基础设施（隔离环境/ck·sk·section/夹具/链接助手）
 │   ├── runner.py                     ←   main + run 编排（轮次调度顺序即契约）
@@ -289,8 +289,8 @@ workbuddy-market/
 ├── .market-log.ndjson                ← 事件流，一行一条 JSON（超 10MB 自动轮转）
 ├── .market-state.json                ← 上次同步的统计
 ├── .backups/                         ← known_marketplaces.json 的备份（留最近 20 份）
-└── .trash/                           ← 回收站（卸载 / 覆盖 / 退役的目录都在这）
-    └── .index.json                   ← 各项体积记账，避免每次都重新扫一遍
+└── .trash/                           ← 回收站（v2.7 起实际在 STATE_HOME/trash；此树为旧布局示意）
+    └── .index.json                   ← 各项体积 / 内容指纹 / 所有权快照，恢复时逐项校验
 ```
 
 ---
@@ -313,7 +313,7 @@ python launcher.py --force-register # 打包/自检失败也照样注册（不�
 python launcher.py --no-register  # 只开网页，不碰 WorkBuddy 配置
 python launcher.py --serve --no-open --port 8899   # 换端口、不开浏览器
 
-python selftest.py                # 856 项自检，隔离模式（临时目录里跑完整流程）
+python selftest.py                # 893 项自检，隔离模式（临时目录里跑完整流程）
 python selftest.py --real         # 只读检查现网状态，不写任何东西
 
 python -m workbuddy_market doctor   # 体检（唯一不依赖 clone 布局的子命令）
@@ -407,6 +407,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | 32 并发打 `/api/state`              | 无死锁、无异常；`build_state` **只重建 1 次**           |
 | 8 并发 `install` / 8 并发 `register` | 无异常、无丢失更新、无重复事务                             |
 | 10 个后台任务请求同时打进来                 | 只接受 `MAX_RUNNING_JOBS` 个，其余 **429**；令牌不泄漏    |
+| 同步写接口（装卸 / 清空 / 恢复 / 收藏 / 导入提交） | 不走 429，由可重入市场文件锁串行化；锁竞争回 **503 `MARKET_BUSY`**；回收站索引另有进程内锁防「读→改→写」互相覆盖 |
 | 源端目录读不了                         | `sync` **直接失败**，市场内容**一个文件都不删**             |
 | 安装源读不了                          | 该 skill 安装失败，本机版本**一个字节没动**                  |
 | 本机 skill 读不了                    | 卸载判定保守当成 `modified` → **不搬走**                |
@@ -440,7 +441,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 | 文件/目录                                          | 操作                         | 兜底                                              |
 | ---------------------------------------------- | -------------------------- | ----------------------------------------------- |
 | `~/.workbuddy/plugins/known_marketplaces.json` | 加/删**一条**记录，其余原样保留         | 全程持文件锁；**乐观合并**（写前重读比对，被别人改过就重试）；改前自动备份（纳秒戳）；写回后校验；`撤销注册.cmd` |
-| `~/.workbuddy/skills/<name>/`                  | 安装只补缺 / 按需更新；卸载**只动本市场装的** | 全部走 `.trash/`，可手工拖回；装/卸全程有事务日志，崩了能补账                   |
+| `~/.workbuddy/skills/<name>/`                  | 安装只补缺 / 按需更新；卸载**只动本市场装的** | 移进回收站后可在网页逐项恢复（复算内容哈希，目标已存在或内容被改动一律拒绝）；装/卸全程有事务日志，崩了能补账 |
 | 本市场目录                                          | 打包产物，可随时重建                 | 退役目录也是 rename 进 `.trash/`                       |
 
 > **关于 `known_marketplaces.json` 被改动**：WorkBuddy 自己在运行时也会改写这个文件  
@@ -525,7 +526,7 @@ workbuddy-market search <kw>        # 按关键词搜索社区目录；--json �
 
 ```
 python -m py_compile market_core.py market_server.py launcher.py selftest.py src/workbuddy_market/*.py
-python selftest.py        # 856 passed, 0 failed
+python selftest.py        # 893 passed, 0 failed
 python scripts/ui_smoke.py --ci   # 推送前必跑：与 CI 同口径（核心检查被跳过即硬失败）
 python launcher.py --status
 python launcher.py --recover

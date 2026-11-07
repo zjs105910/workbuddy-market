@@ -194,7 +194,10 @@ def uninstall_local_plugin(plugin_id: str, force: bool = False) -> dict:
         if not plan.get("ok"):
             return plan
 
-        moved, kept, warnings = [], [], []
+        moved, kept, failed, warnings = [], [], [], []
+        # 卸载前读一次所有权：搬进回收站时把「谁装的、哪一份」一起封存，
+        # 恢复时才有凭据重建所有权（否则恢复出来的技能会变成 foreign）。
+        own_now = load_ownership()
         trash_index = TrashIndex()
         tx = _core.tx_begin("uninstall", plugin_id,
                             plan.get("removable", []) + plan.get("modified", []),
@@ -217,7 +220,19 @@ def uninstall_local_plugin(plugin_id: str, force: bool = False) -> dict:
                     kept.append({"skill": sname, "why": f"路径越界，拒绝处理：{exc}"})
                     continue
                 reason = "uninstall" if kind == "safe" else "uninstall-modified"
-                if not move_to_trash(d, reason, index=trash_index):
+                owner_snap = dict(own_now["skills"].get(sname) or {})
+                owner_snap["skill"] = sname
+                if not move_to_trash(d, reason, index=trash_index,
+                                     owner=owner_snap):
+                    # 评审修复：以前这里静默 continue —— 跨卷校验失败、
+                    # junction 拒绝、rename 失败都会让这个 skill 从
+                    # moved/kept/warnings 全线消失，返回体还报 ok=True。
+                    # 失败必须进 failed，磁盘没动就如实说没动。
+                    failed.append(sname)
+                    kept.append({"skill": sname,
+                                 "why": "移入回收站失败，本机文件未改动"})
+                    warnings.append(f"{sname} 移入回收站失败，未卸载")
+                    log("error", "uninstall", warnings[-1])
                     continue
                 # 搬走成功就立刻登记 —— 此刻所有权还留着，日志就是「还没清」的凭证
                 _core.tx_note_removed(tx, sname)
@@ -233,10 +248,11 @@ def uninstall_local_plugin(plugin_id: str, force: bool = False) -> dict:
                         f"所有权记录未能清除：{exc}（已记入事务日志，下次启动会自动补清）")
                     log("error", "uninstall", warnings[-1])
 
-            log("warn" if dropped(plan, force) else "info", "uninstall",
-                f"{plugin_id}: 移除 {len(moved)}，保留 {len(kept)}"
+            log("warn" if dropped(plan, force) or failed else "info", "uninstall",
+                f"{plugin_id}: 移除 {len(moved)}，保留 {len(kept)}，失败 {len(failed)}"
                 + (f"（{'、'.join(moved)}）" if moved else ""))
-            return {"ok": True, "moved": moved, "kept": kept,
+            return {"ok": not failed, "moved": moved, "kept": kept,
+                    "failed": failed,
                     "trash": str(TRASH_DIR), "force": force, "recovered": recovered,
                     "warnings": warnings,
                     "plan": {k: plan[k] for k in ("counts", "removable", "modified", "untouched")}}

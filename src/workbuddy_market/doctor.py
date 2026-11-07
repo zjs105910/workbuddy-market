@@ -20,7 +20,6 @@ clone 目录里运行时，cli 入口会先把仓库根写进环境变量；在 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from .config import ConfigError, load_config, validate_config
 from .ownership import load_ownership
@@ -30,7 +29,7 @@ from .paths import (
 )
 from .registry import REGISTRY_FILENAME, load_registry_cache
 from .transactions import tx_list
-from .trash import _TRASH_NAME_BAD, _load_trash_index, trash_stats
+from .trash import _trash_entry, _load_trash_index, trash_stats
 
 
 def _check(name: str, ok: bool, detail: str = "", warn: bool = False,
@@ -194,12 +193,13 @@ def run_doctor(fix: bool = False) -> dict:
 
 
 def _bad_entry_name(name) -> bool:
-    """与 trash._trash_entry 的边界一致，但不做 ensure_child（doctor 不碰磁盘）。"""
-    if not isinstance(name, str) or not name:
-        return True
-    if any(ch in name for ch in _TRASH_NAME_BAD):
-        return True
-    return Path(name).name != name
+    """复用 trash._trash_entry 的**唯一口径**（评审修复）。
+
+    以前这里自写了一份简化版：漏掉 "." / ".." / ".index.json" 与
+    ensure_child 的越界判断，于是 doctor 会把脏索引判成 ✓，而
+    trash_stats 实际会剔除它 —— 体检结论与真实行为正好相反。
+    """
+    return _trash_entry(name) is None
 
 
 def render(result: dict) -> str:

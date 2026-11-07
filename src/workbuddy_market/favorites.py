@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 
 from .fsutil import atomic_write_text, read_json
+from .locking import locked
 from .paths import STATE_HOME
 
 FAVORITES_PATH = STATE_HOME / "favorites.json"
@@ -59,21 +60,26 @@ def set_favorite(repo: str, on: bool) -> bool:
     """加 / 删一个收藏。返回变更后的完整列表。
 
     repo 合法性由调用方保证（注册表条目已经过 validate_repo），这里只做
-    非空与大小写归一；写盘走原子写（半截 JSON 绝不落盘）。"""
+    非空与大小写归一；写盘走原子写（半截 JSON 绝不落盘）。
+
+    v2.40 评审修复：整段「读 → 改 → 写」纳入市场锁。同步写接口不走
+    JobLimiter(4)/429，靠的正是这把锁串行化；以前收藏是唯一漏锁的
+    本机状态写入，两个并发请求会各读一份旧列表、后写覆盖先写。"""
     key = (repo or "").strip()
     if not key:
         return load_favorites()
-    cur = load_favorites()
-    cur_keys = [r.casefold() for r in cur]
-    k = key.casefold()
-    changed = False
-    if on and k not in cur_keys:
-        cur.append(key)
-        changed = True
-    if not on and k in cur_keys:
-        cur = [r for r in cur if r.casefold() != k]
-        changed = True
-    if changed:
-        atomic_write_text(FAVORITES_PATH,
-                          json.dumps({"repos": cur}, ensure_ascii=False, indent=2))
-    return cur
+    with locked():
+        cur = load_favorites()
+        cur_keys = [r.casefold() for r in cur]
+        k = key.casefold()
+        changed = False
+        if on and k not in cur_keys:
+            cur.append(key)
+            changed = True
+        if not on and k in cur_keys:
+            cur = [r for r in cur if r.casefold() != k]
+            changed = True
+        if changed:
+            atomic_write_text(FAVORITES_PATH,
+                              json.dumps({"repos": cur}, ensure_ascii=False, indent=2))
+        return cur

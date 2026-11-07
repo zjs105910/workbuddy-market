@@ -105,6 +105,7 @@ from workbuddy_market.trash import (         # noqa: E402,F401  （v2.12 R4 新�
     TRASH_INDEX_PATH, _TRASH_NAME_BAD, _load_trash_index, _save_trash_index,
     _trash_entry, _measure, TrashIndex, move_to_trash, trash_config,
     trash_stats, _safe_mtime, prune_trash,
+    restore_from_trash,                     # v2.40：回收站恢复
 )
 from workbuddy_market.ownership import (     # noqa: E402,F401  （v2.12 R4 新增）
     load_ownership, save_ownership, record_owner, _market_id, forget_owner,

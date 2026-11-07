@@ -350,7 +350,11 @@ def round4():
         data = None
         if body is not None:
             data = body if isinstance(body, bytes) else json.dumps(body).encode()
-        c.request(m, path, body=data, headers=headers or {})
+        h = dict(headers or {})
+        if m not in ("GET", "HEAD", "OPTIONS"):
+            # 写接口必须带同源 Origin；测试传入的 headers 优先（可测跨源）
+            h.setdefault("Origin", f"http://127.0.0.1:{PORT}")
+        c.request(m, path, body=data, headers=h)
         r = c.getresponse()
         raw = r.read()
         c.close()

@@ -141,10 +141,13 @@ def round38():
 
     def hit(method, path, body=None):
         c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
+        h = {"X-Local-Market-Token": TOKS,
+             "Content-Type": "application/json"}
+        if method not in ("GET", "HEAD", "OPTIONS"):
+            h["Origin"] = f"http://127.0.0.1:{PORT}"
         c.request(method, path,
                   body=json.dumps(body) if body is not None else None,
-                  headers={"X-Local-Market-Token": TOKS,
-                           "Content-Type": "application/json"})
+                  headers=h)
         resp = c.getresponse()
         raw = resp.read()
         c.close()

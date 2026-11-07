@@ -193,14 +193,19 @@ def init_token(token: str | None = None) -> str:
     return TOKEN
 
 
-def origin_allowed(origin: str | None, port: int) -> bool:
-    """Origin 校验。没带 Origin（curl / 脚本）时不在这里拦 —— 交给 token。
+def origin_allowed(origin: str | None, port: int, *, write: bool = False) -> bool:
+    """Origin 校验。
 
-    浏览器对**同源 POST** 也会带 Origin，所以自己页面的请求能正常通过；
-    带 `http://evil.example` 的跨源请求会被这里挡掉。
+    **只读**请求（GET / curl / 本地脚本）没带 Origin 时仍放行，交给 token。
+    **写**请求（POST 等）必须带同源 Origin：token 本身已能挡跨源，但纵深
+    防御不能只压在一道闸上 —— 不带 Origin 的跨站表单 / 老浏览器提交、
+    或任何拿到令牌却想从别的来源发修改的通道，在这里直接挡掉。
+
+    浏览器对同源 POST 一定会带 Origin，所以自己的页面不受影响；需要
+    用脚本调写接口时，显式带上 ``Origin: http://127.0.0.1:<端口>``。
     """
     if origin is None or origin == "":
-        return True
+        return not write
     if origin == "null":
         return False                  # sandbox iframe / data: 页面
     try:
@@ -344,10 +349,12 @@ _STAGE_NAMES = {
     "/api/sync": "重新打包", "/api/register": "注册到 WorkBuddy",
     "/api/unregister": "撤销注册", "/api/install": "本机安装",
     "/api/uninstall": "卸载", "/api/trash/purge": "清空回收站",
+    "/api/trash/restore": "恢复回收站条目",
     "/api/remote/add": "GitHub 安装", "/api/remote/update": "GitHub 更新",
     "/api/remote/remove": "GitHub 移除",
     "/api/registry/install": "固定产物安装",
     "/api/registry/install-offline": "离线安装",
+    "/api/import/upload": "离线导入上传", "/api/import/commit": "离线导入安装",
     "/api/catalog/refresh": "刷新目录",
     "/api/favorites": "收藏", "/api/open/path": "打开目录",
 }
@@ -381,7 +388,11 @@ def _api_error_payload(path: str, exc: Exception) -> tuple:
     返回 (payload, http_status)。
     """
     from workbuddy_market.errors import ConfigError, ScanError, FileLockTimeout
-    stage = _STAGE_NAMES.get(path, path or "操作")
+    stage = _STAGE_NAMES.get(path)
+    if stage is None and path.startswith("/api/job/") and path.endswith("/cancel"):
+        stage = "取消任务"          # 动态 job id：表里放不了，单独归类
+    if stage is None:
+        stage = path or "操作"
     base = {"ok": False, "stage": stage}
     if isinstance(exc, FileLockTimeout):
         base.update({
@@ -1167,11 +1178,16 @@ class Handler(BaseHTTPRequestHandler):
                    "application/json; charset=utf-8")
 
     def _guard(self) -> bool:
-        """鉴权：Origin + token。任一不过就回 403 并返回 False。"""
+        """鉴权：Origin（写操作必带且同源）+ token。任一不过就回 403。"""
         origin = self.headers.get("Origin")
-        if not origin_allowed(origin, self._port()):
-            core.log("warn", "api", f"拒绝跨源请求：Origin={origin!r} {self.path}")
-            self._json({"ok": False, "error": "跨源请求被拒绝（本机服务只服务自己的页面）"}, 403)
+        write = self.command not in ("GET", "HEAD", "OPTIONS")
+        if not origin_allowed(origin, self._port(), write=write):
+            core.log("warn", "api",
+                     f"拒绝请求：Origin={origin!r} method={self.command} {self.path}")
+            self._json({"ok": False,
+                        "error": ("写操作必须带同源 Origin 头（本机服务只接受自己页面"
+                                  "发起的修改）") if not origin else
+                                 "跨源请求被拒绝（本机服务只服务自己的页面）"}, 403)
             return False
         got = self.headers.get("X-Local-Market-Token")
         # v2.37：常量时间比较 —— 字符串 != 在首个不同字节就短路，
@@ -1402,7 +1418,15 @@ class Handler(BaseHTTPRequestHandler):
         # 离线导入（v2.39）：请求体是 zip 二进制（可达 256MB），不能走
         # 1MiB 的 JSON _body —— 在读体之前分流到流式上传处理器。
         if path == "/api/import/upload":
-            return self._import_upload()
+            # 二进制分流在 _body / try 之前（256MB 不能走 1MiB JSON），
+            # 但异常必须和其余 POST 一样回成结构化 JSON —— 评审修复：
+            # 以前这里在兜底 try 之外，zip 解析 / 磁盘满抛异常会让连接裸断。
+            try:
+                return self._import_upload()
+            except Exception as exc:
+                core.log("error", "api", f"{path} 出错：{exc!r}")
+                payload, code = _api_error_payload(path, exc)
+                return self._json(payload, code)
         body, err = self._body()
         if err is not None:
             code = 413 if "过大" in err else 400
@@ -1449,6 +1473,18 @@ class Handler(BaseHTTPRequestHandler):
                 r = core.prune_trash(force=True, quiet=True)
                 invalidate_state()
                 return self._json({"ok": True, "result": r})
+            if path == "/api/trash/restore":
+                # v2.40：只接受条目名，目标路径由内核按索引里的 skill 名
+                # 构造（绝不让网页传路径）；confirmed 必须显式为 True，
+                # 内核还会复算 treeHash，内容不符 / 目标已存在一律 conflict。
+                rname = str(body.get("name") or "")
+                if not rname:
+                    return self._json({"ok": False, "error": "缺少回收站条目名"}, 400)
+                r = core.restore_from_trash(rname,
+                                            confirmed=body.get("confirmed") is True)
+                if r.get("ok"):
+                    invalidate_state()
+                return self._json(r, 200 if r.get("ok") else 400)
             if path == "/api/remote/add":
                 repo, err2 = _repo_arg(body)
                 if err2:

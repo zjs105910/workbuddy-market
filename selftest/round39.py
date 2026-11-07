@@ -185,7 +185,9 @@ def round39():
     def post_raw(path, body: bytes, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=15)
         c.request("POST", path, body=body,
-                  headers={"X-Local-Market-Token": TOKS, **(headers or {})})
+                  headers={"X-Local-Market-Token": TOKS,
+                           "Origin": f"http://127.0.0.1:{PORT}",
+                           **(headers or {})})
         resp = c.getresponse()
         raw_out = resp.read()
         c.close()

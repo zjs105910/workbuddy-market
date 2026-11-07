@@ -194,7 +194,10 @@ def round11():
         c = http.client.HTTPConnection("127.0.0.1", PORT2, timeout=10)
         m = method or ("POST" if body is not None else "GET")
         data = json.dumps(body).encode() if body is not None else None
-        c.request(m, path, body=data, headers=headers or {})
+        h = dict(headers or {})
+        if m not in ("GET", "HEAD", "OPTIONS"):
+            h.setdefault("Origin", f"http://127.0.0.1:{PORT2}")
+        c.request(m, path, body=data, headers=h)
         r = c.getresponse()
         raw = r.read()
         c.close()
@@ -587,7 +590,9 @@ def round12():
     def post5(path, obj, headers=None):
         c = http.client.HTTPConnection("127.0.0.1", PORT5, timeout=10)
         c.request("POST", path, body=json.dumps(obj).encode(),
-                  headers={"Content-Type": "application/json", **(headers or {})})
+                  headers={"Content-Type": "application/json",
+                           "Origin": f"http://127.0.0.1:{PORT5}",
+                           **(headers or {})})
         r = c.getresponse()
         raw = r.read()
         c.close()

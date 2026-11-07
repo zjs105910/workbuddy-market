@@ -4,6 +4,40 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 未发布（回收站 restore + 独立代码评审修复）
+
+> 代码已落地，版本号 / tag / PyPI 待发版确认后统一推进（当前 `MARKET_VERSION`
+> 仍为 2.39.0，不动它以免破坏三方同步门禁）。
+
+- **回收站能出了**（`trash.restore_from_trash`）：
+  - 搬入时留 `treeHash`（内容 SHA-256）与所有权快照；恢复前复算哈希，
+    不符 / 读不全 / 缺指纹一律记 `conflict`，条目、日志、所有权全部保留，
+    绝不把改过的东西洗白成市场版本；
+  - 目标只由内核按索引里校验过的 skill 名构造 `SKILLS_DIR/<skill>`，
+    网页传不进任何路径；同名目标已存在直接拒绝，绝不覆盖；
+  - `locked()` + 事务凭证先于磁盘变更，成功后重建所有权 —— 恢复完仍卸得掉；
+  - `POST /api/trash/restore {name, confirmed}`；`state` 暴露条目摘要与
+    真实回收站目录；网页回收站弹窗逐项两段式确认「恢复」/「清空」；
+  - 升级前的旧条目、手工放入、sync 退役 / reinstall 旧版本都诚实标注
+    「不可自动恢复」，引导到回收站目录手工取回。
+- **独立评审修复**：卸载搬入失败进 `failed` 且不再谎报 `ok`；`prune_trash`
+  纳入全局锁；`trash_stats` 补录过 `_trash_entry` 且跳过 `.partial` 与链接；
+  写侧 `dst` / `reason` 校验；doctor 非法名口径复用 `_trash_entry`；
+  `protected` 按名字去重；二进制上传异常回结构化 JSON 不再裸断；
+  `_STAGE_NAMES` 补齐漏登记的 3 个路由；前端不再写死旧 `.trash` 路径。
+- **评审加固第二轮**（「设计权衡」不留尾巴）：
+  - 写接口必须带同源 Origin（只读 curl / 脚本仍放行），`origin_allowed(write=True)`；
+    所有内部 HTTP 自检补 Origin 头，前端 403 文案如实反映来源校验；
+  - 同步写接口口径统一：收藏 `set_favorite`、导入 `record_import` 补可重入市场锁；
+    SECURITY / ADVANCED_GUIDE 写明「后台任务 JobLimiter(4) → 429，同步写靠文件锁
+    → 503 `MARKET_BUSY`」，不再让文档与实现各说各话；
+  - 回收站索引 `.index.json` 的「读→改→写」纳入进程内 RLock；
+    `TrashIndex.flush` 改为「重读最新 + 合并本实例增删」，不再整份覆盖，
+    状态轮询补录的条目不会被批量卸载抹掉；
+  - 真并发盯防：4 线程收藏无丢失更新、4 线程索引 flush 不互相覆盖。
+- **盯防**：selftest 新增 round40（37 项，856 → 893），pytest 新增
+  `test_trash_restore.py`（纯输入防线，只读不碰本机状态）。
+
 ## 2.39.0 — 2026-10-31（离线导入：任意 skill 安装包，选文件即装）
 
 v2.38 的离线安装只认「收录条目 + 钉死 packageHash + 粘贴路径」。用户反馈
