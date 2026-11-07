@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "suite_id": "synthetic-toolbook-output-v1",
+  "target": "synthetic-handbook",
+  "trigger_cases": [
+    {"case_id": "trigger-total", "prompt": "按手册计算商品总额", "expected": "should_trigger", "runs": 1},
+    {"case_id": "unrelated", "prompt": "写一首关于星空的诗", "expected": "should_not_trigger", "runs": 1}
+  ],
+  "output_cases": [
+    {
+      "case_id": "total",
+      "prompt": "合成手册规定同种商品总额=数量×单价，数量用件，单价用元/件。数量3件，单价12元/件。返回JSON，字段total和unit。",
+      "assertions": [
+        {"kind": "json_number", "value": "$.total", "expected": 36, "abs_tol": 0.001},
+        {"kind": "json_equals", "value": "$.unit", "expected": "元"}
+      ]
+    },
+    {
+      "case_id": "missing-input",
+      "prompt": "合成手册规定总额=数量×单价，任一缺失先补齐，不作估计。当前只有数量3件。返回JSON，字段status（needs_input或completed）、missing（字段名数组）。",
+      "assertions": [
+        {"kind": "json_equals", "value": "$.status", "expected": "needs_input"},
+        {"kind": "json_equals", "value": "$.missing", "expected": ["unit_price"]}
+      ]
+    },
+    {
+      "case_id": "pending-confirmation",
+      "prompt": "合成受理流程：编号和联系人完整后分配负责人并记录接收时间；负责人确认才标为accepted，否则pending_confirmation。编号R-7、联系人小林，刚分配负责人但尚未确认。返回JSON，字段request_id和status。",
+      "assertions": [
+        {"kind": "json_equals", "value": "$.request_id", "expected": "R-7"},
+        {"kind": "json_equals", "value": "$.status", "expected": "pending_confirmation"}
+      ]
+    }
+  ]
+}

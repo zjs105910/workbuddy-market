@@ -1,0 +1,56 @@
+import { skillById } from './manifest.js';
+
+const OUTCOMES = {
+  unslop: 'Writing for others that sounds natural and human',
+  suggest: 'An assistant that proposes what you need as you go',
+  harness: 'A tidy workspace: connect and document your company',
+  init: 'Guided project bootstrap',
+  nextjs: 'Your website (fast, ready for Google)',
+  flutter: 'Your mobile app',
+  fastapi: 'Your API / Python backend',
+  go: 'Your Go backend service',
+  postgresdb: 'Store your data reliably',
+  design: 'Make it look good and convert',
+  'design-loop': 'Make it as good as the site you admire',
+  'design-dna': 'Keep every page looking like yours',
+  marketing: 'Copy that sells',
+  presentations: 'On-brand presentations',
+  'course-storytelling': 'Teach so it actually lands',
+  'building-agents': 'Your own AI agent',
+  'secure-coding': 'Make it secure',
+  deployment: 'Put it online',
+  godot: 'Your game (Godot)',
+  unity: 'Your game (Unity)',
+  unreal: 'Your game (Unreal)',
+  'game-design': "Design a game that's fun",
+  'fable-operator': 'Reason it through, reliably',
+  finetuning: 'Fine-tune an open model',
+  'machine-learning': 'Build a classic ML model',
+  'deep-learning': 'Train a neural network',
+  nlp: 'Do NLP the right way',
+  'open-weights': 'Pick an open-weight model',
+  vllm: 'Serve open models at scale',
+  'automation-strategy': 'Decide what to automate',
+  n8n: 'Automate with n8n (API/MCP)',
+  make: 'Automate with Make (API/MCP)',
+  zapier: 'Automate with Zapier (MCP)',
+  'power-automate': 'Automate with Power Automate',
+};
+
+export function hasOutcome(id) {
+  return Object.prototype.hasOwnProperty.call(OUTCOMES, id);
+}
+
+export function expandRecommends(manifest, chosen) {
+  const set = new Set();
+  for (const id of chosen) {
+    set.add(id);
+    const s = skillById(manifest, id);
+    for (const r of s?.recommends || []) set.add(r);
+  }
+  return [...set];
+}
+
+export function toOutcomes(ids) {
+  return ids.map((id) => ({ id, label: OUTCOMES[id] || id }));
+}

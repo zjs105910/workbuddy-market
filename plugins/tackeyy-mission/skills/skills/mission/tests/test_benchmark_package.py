@@ -1,0 +1,1249 @@
+import json
+import re
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+BENCHMARK_DIR = REPO_ROOT / "benchmarks" / "mission-vs-goal"
+
+
+def _load_official_goal_runner():
+    path = BENCHMARK_DIR / "run_claude_goal_vs_mission.py"
+    spec = importlib.util.spec_from_file_location("run_claude_goal_vs_mission", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_paired_runner():
+    path = BENCHMARK_DIR / "run_paired_pilot.py"
+    spec = importlib.util.spec_from_file_location("run_paired_pilot", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_arm_specific_budget_flags_override_common_budget_in_child_command():
+    runner = _load_official_goal_runner()
+
+    goal_command = runner.build_child_command(
+        "claude_code_goal_command",
+        "prompt",
+        max_budget_usd=4.0,
+        max_budget_usd_goal=3.0,
+        max_budget_usd_mission=10.0,
+    )
+    mission_command = runner.build_child_command(
+        "mission",
+        "prompt",
+        max_budget_usd=4.0,
+        max_budget_usd_goal=3.0,
+        max_budget_usd_mission=10.0,
+    )
+
+    assert goal_command[goal_command.index("--max-budget-usd") + 1] == "3.0"
+    assert mission_command[mission_command.index("--max-budget-usd") + 1] == "10.0"
+
+
+def test_budget_fallback_chain_is_arm_specific_then_common_then_two_dollars():
+    runner = _load_official_goal_runner()
+
+    assert runner.resolve_max_budget_usd(
+        "mission",
+        max_budget_usd=6.0,
+        max_budget_usd_mission=8.0,
+    ) == 8.0
+    assert runner.resolve_max_budget_usd("mission", max_budget_usd=6.0) == 6.0
+    assert runner.resolve_max_budget_usd("mission") == 2.0
+
+
+def test_default_child_budget_preserves_two_dollar_legacy_behavior():
+    runner = _load_official_goal_runner()
+
+    command = runner.build_child_command("claude_code_goal_command", "prompt")
+
+    assert command[command.index("--max-budget-usd") + 1] == "2.0"
+
+
+def test_blocked_burn_rate_is_recorded_only_for_valid_blocked_measurements():
+    runner = _load_official_goal_runner()
+
+    assert runner.calculate_burn_rate_usd_per_min("blocked", 6.0, 3.0) == 2.0
+    assert runner.calculate_burn_rate_usd_per_min("completed", 6.0, 3.0) is None
+    assert runner.calculate_burn_rate_usd_per_min("blocked", 6.0, 0.0) is None
+
+
+def test_summary_counts_budget_blocked_records_per_arm():
+    runner = _load_official_goal_runner()
+
+    def record(arm, failure_kind):
+        return {
+            "arm": arm,
+            "run_status": "blocked" if failure_kind else "completed",
+            "failure_kind": failure_kind,
+            "comparable_attempt": failure_kind is None,
+            "completion": failure_kind is None,
+            "validator_pass": failure_kind is None,
+            "human_quality_score": 1.0,
+            "intervention_count": 0,
+            "evidence_completeness": 1.0,
+            "elapsed_minutes": 1.0,
+            "quality_marker_score": None,
+            "total_cost_usd": 1.0,
+        }
+
+    summary = runner.summarize(
+        records=[
+            record("claude_code_goal_command", None),
+            record("mission", "max_budget_usd"),
+        ],
+        tasks=[{"id": "fixture-task"}],
+        run_id="budget-fixture",
+        starting_commit="abcdef0",
+        tasks_path=BENCHMARK_DIR / "tasks.complex.json",
+    )
+
+    assert summary["arms"]["claude_code_goal_command"]["budget_blocked_records"] == 0
+    assert summary["arms"]["mission"]["budget_blocked_records"] == 1
+    assert any(
+        "WARNING: one or more records were blocked by max_budget_usd" in limitation
+        for limitation in summary["limitations"]
+    )
+
+
+def test_budget_marker_overrides_validator_pass_and_preserves_blocked_metrics():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout='{"subtype":"error_max_budget_usd"}',
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=True,
+        validator_pass=True,
+    )
+
+    assert status == {
+        "run_status": "blocked",
+        "blocked_reason": "max_budget_usd",
+        "failure_kind": "max_budget_usd",
+        "comparable_attempt": False,
+    }
+    assert runner.calculate_burn_rate_usd_per_min(status["run_status"], 6.0, 3.0) == 2.0
+
+
+def test_completed_budget_validation_discussion_is_not_blocked():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps({"result": "Implemented max_budget_usd validation and all tests pass."}),
+        stderr="",
+        timed_out=False,
+        returncode=0,
+        output_exists=True,
+        validator_pass=True,
+    )
+
+    assert status == {
+        "run_status": "completed",
+        "blocked_reason": None,
+        "failure_kind": None,
+        "comparable_attempt": True,
+    }
+
+
+def test_completed_negated_budget_diagnosis_is_not_blocked():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps({"result": "Rejected hypothesis: max_budget_usd was not the cause."}),
+        stderr="",
+        timed_out=False,
+        returncode=0,
+        output_exists=True,
+        validator_pass=True,
+    )
+
+    assert status == {
+        "run_status": "completed",
+        "blocked_reason": None,
+        "failure_kind": None,
+        "comparable_attempt": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "result_text",
+    (
+        "The 'maximum budget reached' error was not observed; all tests passed.",
+        "The maximum budget reached message was not the cause of the failure.",
+    ),
+)
+def test_completed_quoted_or_negated_provider_budget_phrase_is_not_blocked(
+    result_text,
+):
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps({"result": result_text}),
+        stderr="",
+        timed_out=False,
+        returncode=0,
+        output_exists=True,
+        validator_pass=True,
+    )
+
+    assert status == {
+        "run_status": "completed",
+        "blocked_reason": None,
+        "failure_kind": None,
+        "comparable_attempt": True,
+    }
+
+
+def test_exact_provider_budget_phrase_with_zero_exit_is_blocked():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps({"result": "Maximum budget reached"}),
+        stderr="",
+        timed_out=False,
+        returncode=0,
+        output_exists=False,
+        validator_pass=False,
+    )
+
+    assert status == {
+        "run_status": "blocked",
+        "blocked_reason": "max_budget_usd",
+        "failure_kind": "max_budget_usd",
+        "comparable_attempt": False,
+    }
+
+
+def test_detect_max_budget_accepts_structured_and_definitive_error_evidence():
+    runner = _load_official_goal_runner()
+
+    assert runner.detect_max_budget_limit({"subtype": "error_max_budget_usd"}, "", 0) is True
+    assert runner.detect_max_budget_limit(
+        {"is_error": True, "result": "max_budget_usd"}, "", 0,
+    ) is True
+    assert runner.detect_max_budget_limit(
+        {"terminal_reason": "max_budget_usd", "result": "max budget"}, "", 0,
+    ) is True
+    assert runner.detect_max_budget_limit({"result": "max_budget_usd"}, "", 1) is True
+    assert runner.detect_max_budget_limit(
+        {"result": "Maximum budget reached"}, "", 0,
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ("--max-budget-usd", "--max-budget-usd-goal", "--max-budget-usd-mission"),
+)
+@pytest.mark.parametrize("value", ("0", "-1", "nan", "inf"))
+def test_invalid_budget_flags_fail_before_output_cleanup_or_clone(tmp_path, monkeypatch, flag, value):
+    runner = _load_official_goal_runner()
+    run_id = "invalid-budget-fixture"
+    results_dir = tmp_path / "results"
+    artifacts_dir = tmp_path / "artifacts"
+    results_dir.mkdir()
+    artifact_run_dir = artifacts_dir / run_id
+    artifact_run_dir.mkdir(parents=True)
+    result_path = results_dir / f"{run_id}.jsonl"
+    summary_path = results_dir / f"{run_id}-summary.json"
+    result_path.write_text("preserve-result\n", encoding="utf-8")
+    summary_path.write_text("preserve-summary\n", encoding="utf-8")
+    sentinel = artifact_run_dir / "preserve.txt"
+    sentinel.write_text("preserve-artifact\n", encoding="utf-8")
+    clone_called = False
+
+    def track_clone(*_args, **_kwargs):
+        nonlocal clone_called
+        clone_called = True
+
+    monkeypatch.setattr(runner, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(runner, "ARTIFACTS_DIR", artifacts_dir)
+    monkeypatch.setattr(runner, "prepare_clone", track_clone)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_claude_goal_vs_mission.py",
+            "--starting-commit",
+            "abcdef0",
+            "--run-id",
+            run_id,
+            "--model-id",
+            "fixture-model",
+            flag,
+            value,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        runner.main()
+
+    assert (
+        result_path.read_text(encoding="utf-8"),
+        summary_path.read_text(encoding="utf-8"),
+        sentinel.read_text(encoding="utf-8"),
+        clone_called,
+    ) == ("preserve-result\n", "preserve-summary\n", "preserve-artifact\n", False)
+
+
+def test_discriminating_runbooks_document_arm_budgets_with_measured_evidence():
+    runbooks = [
+        (BENCHMARK_DIR / "discriminating-cohort-runbook.md").read_text(encoding="utf-8"),
+        (BENCHMARK_DIR / "discriminating-cohort-runbook.ja.md").read_text(encoding="utf-8"),
+    ]
+
+    for runbook in runbooks:
+        assert "--max-budget-usd-goal 3" in runbook
+        assert "--max-budget-usd-mission 10" in runbook
+        assert "2026-08-07-portfolio-v6-repeats3" in runbook
+        assert "portfolio-std-contract" in runbook
+        assert "2026-08-02-portfolio-v5-speed" in runbook
+        assert "portfolio-std-contract-mission" in runbook
+
+def _spend_limit_fixture() -> dict:
+    path = Path(__file__).parent / "fixtures" / "benchmark-api-spend-limit.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _benchmark_record(arm: str, failure_kind: str | None = None) -> dict:
+    blocked = failure_kind is not None
+    return {
+        "arm": arm,
+        "run_status": "blocked" if blocked else "completed",
+        "blocked_reason": failure_kind,
+        "failure_kind": failure_kind,
+        "comparable_attempt": not blocked,
+        "completion": not blocked,
+        "validator_pass": not blocked,
+        "human_quality_score": 1.0 if blocked else 4.0,
+        "intervention_count": 0,
+        "evidence_completeness": 1.0 if blocked else 4.0,
+        "elapsed_minutes": 0.05,
+        "quality_marker_score": None,
+        "total_cost_usd": 0,
+    }
+
+
+def test_detect_spend_limit_accepts_429_fixture_and_limit_messages():
+    runner = _load_official_goal_runner()
+
+    assert runner.detect_spend_limit(_spend_limit_fixture(), "") is True
+    assert runner.detect_spend_limit({"result": "Rate Limit reached"}, "") is True
+    assert runner.detect_spend_limit({"result": "USAGE LIMIT reached"}, "") is True
+    assert runner.detect_spend_limit({}, "monthly SPEND LIMIT reached") is True
+
+
+def test_detect_spend_limit_rejects_unrelated_failures():
+    runner = _load_official_goal_runner()
+
+    assert runner.detect_spend_limit({"api_error_status": 500, "result": "server error"}, "") is False
+
+
+def test_detect_spend_limit_rejects_successful_rate_limit_discussion():
+    runner = _load_official_goal_runner()
+
+    assert runner.detect_spend_limit(
+        {"result": "The rate limit handler now passes all tests."},
+        "",
+    ) is False
+
+
+def test_detect_spend_limit_rejects_negated_usage_limit_diagnosis():
+    runner = _load_official_goal_runner()
+
+    assert runner.detect_spend_limit(
+        {"result": "Rejected hypothesis: prior API usage limit was not the current cause."},
+        "",
+    ) is False
+
+
+def test_spend_limit_classification_is_identical_for_both_arms():
+    runner = _load_official_goal_runner()
+    fixture_stdout = json.dumps(_spend_limit_fixture())
+
+    status = runner.classify_run_status(
+        stdout=fixture_stdout,
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=False,
+        validator_pass=False,
+    )
+
+    assert status == {
+        "run_status": "blocked",
+        "blocked_reason": "api_spend_limit",
+        "failure_kind": "api_spend_limit",
+        "comparable_attempt": False,
+    }
+    assert runner.apply_mission_adherence_guard(
+        status,
+        arm="mission",
+        mission_state_note="mission_state_missing",
+        task_complexity="Complex",
+    ) == status
+
+
+def test_spend_limit_overrides_completed_artifact_and_validator():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps(_spend_limit_fixture()),
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=True,
+        validator_pass=True,
+    )
+
+    assert status["failure_kind"] == "api_spend_limit"
+
+
+def test_text_only_limit_markers_override_valid_artifact_and_validator():
+    runner = _load_official_goal_runner()
+
+    for message in (
+        "You've hit your org's monthly spend limit",
+        "Rate limit reached",
+        "Usage limit reached",
+    ):
+        status = runner.classify_run_status(
+            stdout=json.dumps({"result": message}),
+            stderr="",
+            timed_out=False,
+            returncode=1,
+            output_exists=True,
+            validator_pass=True,
+        )
+
+        assert status == {
+            "run_status": "blocked",
+            "blocked_reason": "api_spend_limit",
+            "failure_kind": "api_spend_limit",
+            "comparable_attempt": False,
+        }
+
+
+def test_benchmark_readmes_list_api_spend_limit_reason():
+    for name in ("README.md", "README.ja.md"):
+        readme = (BENCHMARK_DIR / name).read_text(encoding="utf-8")
+
+        assert "`api_spend_limit`" in readme
+
+
+def test_non_429_command_failure_keeps_legacy_classification():
+    runner = _load_official_goal_runner()
+
+    status = runner.classify_run_status(
+        stdout=json.dumps({"api_error_status": 500, "result": "server error"}),
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=False,
+        validator_pass=False,
+    )
+
+    assert status == {
+        "run_status": "failed",
+        "blocked_reason": None,
+        "failure_kind": "command_error",
+        "comparable_attempt": True,
+    }
+
+
+def test_execute_plan_stops_automatically_after_spend_limit():
+    runner = _load_official_goal_runner()
+    started = []
+
+    def worker(entry):
+        started.append(entry)
+        return _benchmark_record(
+            "claude_code_goal_command",
+            "api_spend_limit" if entry == 2 else None,
+        )
+
+    records, stopped_early = runner.execute_plan([1, 2, 3], worker)
+
+    assert [record["failure_kind"] for record in records] == [None, "api_spend_limit"]
+    assert started == [1, 2]
+    assert stopped_early is True
+
+
+def test_parallel_execute_plan_finishes_in_flight_workers_without_starting_more():
+    runner = _load_official_goal_runner()
+    second_started = runner.threading.Event()
+    release_second = runner.threading.Event()
+    started = []
+
+    def worker(entry):
+        started.append(entry)
+        if entry == 1:
+            assert second_started.wait(timeout=1)
+            release_second.set()
+            return _benchmark_record("claude_code_goal_command", "api_spend_limit")
+        if entry == 2:
+            second_started.set()
+            assert release_second.wait(timeout=1)
+        return _benchmark_record("mission")
+
+    records, stopped_early = runner.execute_plan([1, 2, 3, 4], worker, parallel=2)
+
+    assert sorted(started) == [1, 2]
+    assert len(records) == 2
+    assert stopped_early is True
+
+
+def test_summary_counts_spend_limits_per_arm_and_warns_about_early_stop():
+    runner = _load_official_goal_runner()
+    records = [
+        _benchmark_record("claude_code_goal_command", "api_spend_limit"),
+        _benchmark_record("mission", "api_spend_limit"),
+    ]
+
+    summary = runner.summarize(
+        records=records,
+        tasks=[{"id": "fixture-task"}],
+        run_id="spend-limit-fixture",
+        starting_commit="abcdef0",
+        tasks_path=BENCHMARK_DIR / "tasks.complex.json",
+        stopped_early=True,
+    )
+
+    assert summary["arms"]["claude_code_goal_command"]["api_spend_limit_records"] == 1
+    assert summary["arms"]["mission"]["api_spend_limit_records"] == 1
+    assert "run stopped early: api_spend_limit at record 1/2" in summary["limitations"]
+    assert any("comparability" in limitation.lower() for limitation in summary["limitations"])
+
+
+def test_mission_vs_goal_pilot_has_exactly_ten_tasks():
+    data = json.loads((BENCHMARK_DIR / "tasks.json").read_text(encoding="utf-8"))
+    complex_data = json.loads((BENCHMARK_DIR / "tasks.complex.json").read_text(encoding="utf-8"))
+    quality_data = json.loads((BENCHMARK_DIR / "tasks.quality.json").read_text(encoding="utf-8"))
+
+    assert data["benchmark"] == "mission-vs-goal-pilot"
+    assert data["task_count"] == 10
+    assert data["arms"] == ["goal_only", "mission"]
+    assert len(data["tasks"]) == 10
+    assert len({task["id"] for task in data["tasks"]}) == 10
+    assert complex_data["benchmark"] == "mission-vs-goal-pilot"
+    assert complex_data["cohort"] == "complex"
+    assert complex_data["task_count"] == 10
+    assert complex_data["arms"] == ["goal_only", "mission"]
+    assert len(complex_data["tasks"]) == 10
+    assert len({task["id"] for task in complex_data["tasks"]}) == 10
+    assert all(task["mission_complexity"] in {"Complex", "Critical"} for task in complex_data["tasks"])
+    assert all(task["mission_max_iter"] >= 2 for task in complex_data["tasks"])
+    assert quality_data["benchmark"] == "mission-vs-goal-pilot"
+    assert quality_data["cohort"] == "quality-critical"
+    assert quality_data["task_count"] == 5
+    assert quality_data["arms"] == ["claude_code_goal_command", "mission"]
+    assert len(quality_data["tasks"]) == 5
+    assert len({task["id"] for task in quality_data["tasks"]}) == 5
+    assert all(len(task["quality_markers"]) >= 7 for task in quality_data["tasks"])
+
+
+def test_mission_vs_goal_tasks_have_marketing_safe_hypotheses():
+    task_sets = [
+        json.loads((BENCHMARK_DIR / "tasks.json").read_text(encoding="utf-8")),
+        json.loads((BENCHMARK_DIR / "tasks.complex.json").read_text(encoding="utf-8")),
+        json.loads((BENCHMARK_DIR / "tasks.quality.json").read_text(encoding="utf-8")),
+        json.loads((BENCHMARK_DIR / "tasks.tail.json").read_text(encoding="utf-8")),
+        json.loads((BENCHMARK_DIR / "tasks.openworld.json").read_text(encoding="utf-8")),
+    ]
+    required = {"id", "category", "difficulty", "prompt", "validator", "primary_metric", "hypothesis"}
+
+    for data in task_sets:
+        for task in data["tasks"]:
+            assert required <= task.keys()
+            assert "smarter" not in task["hypothesis"].lower()
+            assert "always" not in task["hypothesis"].lower()
+            assert task["validator"].strip()
+
+
+def test_mission_vs_goal_result_schema_matches_declared_arms():
+    tasks = json.loads((BENCHMARK_DIR / "tasks.json").read_text(encoding="utf-8"))
+    schema = json.loads((BENCHMARK_DIR / "result.schema.json").read_text(encoding="utf-8"))
+
+    assert schema["properties"]["benchmark"]["const"] == tasks["benchmark"]
+    assert set(tasks["arms"]) <= set(schema["properties"]["arm"]["enum"])
+    assert "claude_code_goal_command" in schema["properties"]["arm"]["enum"]
+    assert schema["properties"]["mission_profile"]["enum"] == ["full", "light", "quality", None]
+    assert schema["properties"]["quality_marker_score"]["maximum"] == 1
+    assert schema["properties"]["quality_markers_matched"]["type"] == "array"
+    assert schema["properties"]["quality_markers_missing"]["type"] == "array"
+    assert "human_quality_score" in schema["required"]
+    assert "quality_score_method" in schema["required"]
+    assert "automated_heuristic_not_blind_human" in schema["properties"]["quality_score_method"]["enum"]
+    assert "evidence_completeness" in schema["required"]
+    assert schema["properties"]["run_status"]["enum"] == ["completed", "failed", "blocked"]
+    assert "api_usage_limit" in schema["properties"]["blocked_reason"]["enum"]
+    assert "api_spend_limit" in schema["properties"]["blocked_reason"]["enum"]
+    assert "max_budget_usd" in schema["properties"]["blocked_reason"]["enum"]
+    assert "timeout" in schema["properties"]["blocked_reason"]["enum"]
+    assert "max_budget_usd" in schema["properties"]["failure_kind"]["enum"]
+    assert "api_spend_limit" in schema["properties"]["failure_kind"]["enum"]
+    assert schema["properties"]["comparable_attempt"]["type"] == "boolean"
+    assert schema["properties"]["max_budget_usd_effective"]["minimum"] == 0
+    assert schema["properties"]["burn_rate_usd_per_min"]["minimum"] == 0
+    # F-1: model_id is required and recorded verbatim; arm_order supports counterbalancing.
+    assert "model_id" in schema["required"]
+    assert schema["properties"]["model_id"]["type"] == "string"
+    assert schema["properties"]["arm_order"]["type"] == "integer"
+
+
+def test_score_from_signals_is_arm_blind_and_deterministic():
+    # F-1: both runners score from the same pure signals with no arm identity.
+    import inspect
+
+    for module in (_load_paired_runner(), _load_official_goal_runner()):
+        score = module.score_from_signals
+        params = list(inspect.signature(score).parameters)
+        assert "arm" not in params, f"{module.__name__}.score_from_signals must not take arm"
+        # Marker-less (#247 v2 でも legacy 二値の意味を維持): pass -> 4.0, fail -> 1.0.
+        assert score(True, None, has_markers=False) == (4.0, 4.0)
+        assert score(False, None, has_markers=False) == (1.0, 1.0)
+        # Markered (#247 gradient v2): 1 + 1*validator_fraction + 3*marker.
+        # 内容 recall が支配項になり、構造だけでは天井に届かない。
+        assert score(True, 0.5) == (3.5, 3.5)
+        assert score(True, 1.0) == (5.0, 5.0)
+        assert score(True, None) == (2.0, 2.0)  # marker 全滅 (nullified) の pass は 2.0
+        assert score(False, None, validator_fraction=0.5) == (1.5, 1.5)
+        # Callers nullify marker_score on a failed validator, so (False, 0.5) does
+        # not occur in practice; the pure function stays a literal deterministic map.
+        assert score(False, 0.5) == (2.5, 2.5)
+
+
+def test_paired_runner_has_no_arm_hardcoded_scores():
+    # Regression guard against F-1: the old arm-hardcoded values must be gone.
+    source = (BENCHMARK_DIR / "run_paired_pilot.py").read_text(encoding="utf-8")
+    assert "quality_score = 4.5" not in source
+    assert "evidence_score = 4.7" not in source
+    assert "evidence_score = 3.8" not in source
+    assert 'arm == "mission" and mission_state_passes' not in source
+
+
+def test_counterbalanced_plan_alternates_first_arm_by_task_index():
+    module = _load_paired_runner()
+    tasks = [{"id": "t0"}, {"id": "t1"}, {"id": "t2"}]
+    arms = ("goal_only", "mission")
+    plan = module.counterbalanced_plan(tasks, arms)
+
+    # Two records per task, preserving arm_order 1/2.
+    assert len(plan) == 6
+    # Even index task -> declared order first; odd index -> reversed.
+    assert (plan[0][0]["id"], plan[0][1], plan[0][2]) == ("t0", "goal_only", 1)
+    assert (plan[1][0]["id"], plan[1][1], plan[1][2]) == ("t0", "mission", 2)
+    assert (plan[2][0]["id"], plan[2][1], plan[2][2]) == ("t1", "mission", 1)
+    assert (plan[3][0]["id"], plan[3][1], plan[3][2]) == ("t1", "goal_only", 2)
+    assert (plan[4][0]["id"], plan[4][1], plan[4][2]) == ("t2", "goal_only", 1)
+    assert (plan[5][0]["id"], plan[5][1], plan[5][2]) == ("t2", "mission", 2)
+    # Both runners expose an identical counterbalancing helper.
+    other = _load_official_goal_runner()
+    plan2 = other.counterbalanced_plan(tasks, ("claude_code_goal_command", "mission"))
+    assert plan2[2][1] == "mission" and plan2[2][2] == 1
+
+
+def test_mission_vs_goal_docs_link_benchmark_package():
+    loop_doc = (REPO_ROOT / "docs" / "LOOP_ENGINEERING.md").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    readme_ja = (REPO_ROOT / "README.ja.md").read_text(encoding="utf-8")
+
+    expected_en = "benchmarks/mission-vs-goal/README.md"
+    expected_ja = "benchmarks/mission-vs-goal/README.ja.md"
+    assert expected_en in loop_doc
+    assert expected_en in readme
+    assert expected_ja in readme_ja
+
+
+def test_mission_vs_goal_has_japanese_benchmark_docs():
+    readme_ja = (BENCHMARK_DIR / "README.ja.md").read_text(encoding="utf-8")
+    report_ja = (BENCHMARK_DIR / "report-template.ja.md").read_text(encoding="utf-8")
+    complex_plan_ja = (BENCHMARK_DIR / "complex-validation-plan.ja.md").read_text(encoding="utf-8")
+
+    assert "10 タスク pilot benchmark" in readme_ja
+    assert "Marketing Guardrails" in readme_ja
+    assert "report-template.ja.md" in readme_ja
+    assert "tasks.complex.json" in readme_ja
+    assert "claude_code_goal_command" in readme_ja
+    assert "general model benchmark ではない" in report_ja
+    assert "`mission` は `/goal` より X% 賢い" in report_ja
+    assert "workspace API usage limit" in complex_plan_ja
+    assert "結果ではありません" in complex_plan_ja
+    assert (BENCHMARK_DIR / "official-goal-rerun-runbook.ja.md").exists()
+
+
+def test_mission_artifact_required_smoke_result_is_marketing_safe():
+    smoke_path = BENCHMARK_DIR / "results" / "2026-06-28-mission-artifact-required-smoke.json"
+    smoke = json.loads(smoke_path.read_text(encoding="utf-8"))
+
+    assert smoke["benchmark"] == "mission-artifact-required-smoke"
+    assert smoke["scope"] == "local CLI smoke, not a paired /goal comparison"
+    assert smoke["artifact_required"] is True
+    assert smoke["artifact_completion"] is True
+    assert smoke["validator_pass"] is True
+    assert smoke["quality_score_method"] == "unit_test_backed_cli_smoke_not_blind_human"
+    assert "mission artifact support outperforms Claude Code /goal" in smoke["claims_not_supported"]
+    assert "25 passed" in smoke["verification"]["focused_result"]
+
+
+def test_mission_vs_goal_measured_reports_are_honest_about_paired_runs():
+    report = (BENCHMARK_DIR / "report.md").read_text(encoding="utf-8")
+    report_ja = (BENCHMARK_DIR / "report.ja.md").read_text(encoding="utf-8")
+    results_path = BENCHMARK_DIR / "results" / "2026-06-27-codex-cli-local.jsonl"
+    summary_path = BENCHMARK_DIR / "results" / "2026-06-27-codex-cli-local-summary.json"
+    official_results_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-smoke-v2.jsonl"
+    official_summary_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-smoke-v2-summary.json"
+    official_rerun_smoke_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-smoke-v3.jsonl"
+    official_rerun_smoke_summary_path = (
+        BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-smoke-v3-summary.json"
+    )
+    official_rerun_full_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-complex-v1.jsonl"
+    official_rerun_full_summary_path = (
+        BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-complex-v1-summary.json"
+    )
+    official_incremental_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-incremental-v1.jsonl"
+    official_incremental_summary_path = (
+        BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-incremental-v1-summary.json"
+    )
+    official_light_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-light-v1.jsonl"
+    official_light_summary_path = (
+        BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-light-v1-summary.json"
+    )
+    official_quality_path = BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-quality-v1.jsonl"
+    official_quality_summary_path = (
+        BENCHMARK_DIR / "results" / "2026-06-28-claude-goal-vs-mission-quality-v1-summary.json"
+    )
+    official_mission_raw = (
+        BENCHMARK_DIR
+        / "artifacts"
+        / "2026-06-28-claude-goal-vs-mission-smoke-v2"
+        / "complex-cross-file-feature-mission"
+        / "claude-result.json"
+    )
+
+    records = [json.loads(line) for line in results_path.read_text(encoding="utf-8").splitlines()]
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    by_arm = {
+        arm: [record for record in records if record["arm"] == arm]
+        for arm in ("goal_only", "mission")
+    }
+
+    assert len(records) == 20
+    assert len(by_arm["goal_only"]) == 10
+    assert len(by_arm["mission"]) == 10
+    assert all(record["completion"] for record in records)
+    assert all(record["validator_pass"] for record in records)
+    assert {record["quality_score_method"] for record in records} == {"automated_heuristic_not_blind_human"}
+    assert summary["records"] == 20
+    assert summary["expected_records"] == 20
+    assert summary["arms"]["goal_only"]["average_quality_score"] == 4.0
+    assert summary["arms"]["mission"]["average_quality_score"] == 4.5
+    assert summary["arms"]["goal_only"]["average_evidence_completeness"] == 3.8
+    assert summary["arms"]["mission"]["average_evidence_completeness"] == 4.7
+
+    official_records = [json.loads(line) for line in official_results_path.read_text(encoding="utf-8").splitlines()]
+    official_summary = json.loads(official_summary_path.read_text(encoding="utf-8"))
+    official_by_arm = {
+        arm: [record for record in official_records if record["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+
+    assert len(official_records) == 2
+    assert official_summary["records"] == 2
+    assert official_summary["expected_records"] == 2
+    assert official_by_arm["claude_code_goal_command"][0]["completion"] is True
+    assert official_by_arm["claude_code_goal_command"][0]["validator_pass"] is True
+    assert official_by_arm["mission"][0]["completion"] is False
+    assert official_by_arm["mission"][0]["validator_pass"] is False
+    assert "workspace API usage limits" in official_mission_raw.read_text(encoding="utf-8")
+
+    rerun_smoke_records = [
+        json.loads(line) for line in official_rerun_smoke_path.read_text(encoding="utf-8").splitlines()
+    ]
+    rerun_smoke_summary = json.loads(official_rerun_smoke_summary_path.read_text(encoding="utf-8"))
+    rerun_smoke_by_arm = {
+        arm: [record for record in rerun_smoke_records if record["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+    assert len(rerun_smoke_records) == 2
+    assert rerun_smoke_summary["records"] == 2
+    assert rerun_smoke_summary["expected_records"] == 2
+    assert all(record["run_status"] == "completed" for record in rerun_smoke_records)
+    assert all(record["comparable_attempt"] is True for record in rerun_smoke_records)
+    assert all(record["completion"] is True for record in rerun_smoke_records)
+    assert all(record["validator_pass"] is True for record in rerun_smoke_records)
+    assert rerun_smoke_by_arm["claude_code_goal_command"][0]["human_quality_score"] == 4.0
+    assert rerun_smoke_by_arm["mission"][0]["human_quality_score"] == 4.0
+    assert rerun_smoke_by_arm["claude_code_goal_command"][0]["elapsed_minutes"] == 1.7
+    assert rerun_smoke_by_arm["mission"][0]["elapsed_minutes"] == 6.5
+
+    rerun_full_records = [
+        json.loads(line) for line in official_rerun_full_path.read_text(encoding="utf-8").splitlines()
+    ]
+    rerun_full_summary = json.loads(official_rerun_full_summary_path.read_text(encoding="utf-8"))
+    rerun_full_by_arm = {
+        arm: [record for record in rerun_full_records if record["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+    assert len(rerun_full_records) == 20
+    assert rerun_full_summary["records"] == 20
+    assert rerun_full_summary["expected_records"] == 20
+    assert all(record["run_status"] == "blocked" for record in rerun_full_records)
+    assert all(record["blocked_reason"] == "api_usage_limit" for record in rerun_full_records)
+    assert all(record["comparable_attempt"] is False for record in rerun_full_records)
+    assert len(rerun_full_by_arm["claude_code_goal_command"]) == 10
+    assert len(rerun_full_by_arm["mission"]) == 10
+    assert rerun_full_summary["arms"]["claude_code_goal_command"]["blocked_records"] == 10
+    assert rerun_full_summary["arms"]["mission"]["blocked_records"] == 10
+
+    incremental_records = [
+        json.loads(line) for line in official_incremental_path.read_text(encoding="utf-8").splitlines()
+    ]
+    incremental_summary = json.loads(official_incremental_summary_path.read_text(encoding="utf-8"))
+    incremental_by_arm = {
+        arm: [record for record in incremental_records if record["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+    assert incremental_summary["selected_task_ids"] == [
+        "complex-failing-test-triage",
+        "complex-review-thread-resolution",
+    ]
+    assert incremental_summary["records"] == 4
+    assert incremental_summary["expected_records"] == 4
+    assert incremental_summary["arms"]["claude_code_goal_command"]["comparable_records"] == 2
+    assert incremental_summary["arms"]["mission"]["comparable_records"] == 0
+    assert all(record["run_status"] == "completed" for record in incremental_by_arm["claude_code_goal_command"])
+    assert all(record["validator_pass"] is True for record in incremental_by_arm["claude_code_goal_command"])
+    assert all(record["run_status"] == "blocked" for record in incremental_by_arm["mission"])
+    assert all(record["blocked_reason"] == "max_budget_usd" for record in incremental_by_arm["mission"])
+    assert all(record["comparable_attempt"] is False for record in incremental_by_arm["mission"])
+
+    light_records = [json.loads(line) for line in official_light_path.read_text(encoding="utf-8").splitlines()]
+    light_summary = json.loads(official_light_summary_path.read_text(encoding="utf-8"))
+    light_by_arm = {
+        arm: [record for record in light_records if record["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+    assert light_summary["selected_task_ids"] == ["complex-failing-test-triage"]
+    assert light_summary["mission_profile"] == "light"
+    assert light_summary["records"] == 2
+    assert light_summary["expected_records"] == 2
+    assert light_summary["arms"]["claude_code_goal_command"]["comparable_records"] == 1
+    assert light_summary["arms"]["mission"]["comparable_records"] == 1
+    assert all(record["run_status"] == "completed" for record in light_records)
+    assert all(record["validator_pass"] is True for record in light_records)
+    assert light_by_arm["mission"][0]["mission_profile"] == "light"
+    assert light_by_arm["claude_code_goal_command"][0]["elapsed_minutes"] == 9.56
+    assert light_by_arm["mission"][0]["elapsed_minutes"] == 5.27
+
+    quality_records = [json.loads(line) for line in official_quality_path.read_text(encoding="utf-8").splitlines()]
+    quality_summary = json.loads(official_quality_summary_path.read_text(encoding="utf-8"))
+    assert quality_summary["selected_task_ids"] == ["quality-critical-release-governance"]
+    assert quality_summary["mission_profile"] == "quality"
+    assert quality_summary["task_cohort"] == "quality"
+    assert quality_summary["records"] == 1
+    assert quality_summary["expected_records"] == 2
+    assert quality_summary["stopped_early"] is True
+    assert quality_summary["arms"]["claude_code_goal_command"]["blocked_records"] == 1
+    assert quality_summary["arms"]["claude_code_goal_command"]["comparable_records"] == 0
+    assert quality_summary["arms"]["claude_code_goal_command"]["average_quality_marker_score"] is None
+    assert quality_summary["arms"]["mission"]["records"] == 0
+    assert quality_records[0]["arm"] == "claude_code_goal_command"
+    assert quality_records[0]["run_status"] == "blocked"
+    assert quality_records[0]["blocked_reason"] == "api_usage_limit"
+    assert quality_records[0]["quality_marker_score"] is None
+
+    assert "Paired benchmark runs completed | 20 / 20" in report
+    assert "Goal-only runs completed | 10 / 10" in report
+    assert "Mission runs completed | 10 / 10" in report
+    assert "Quality score method | automated heuristic" in report
+    assert "Average quality score | 4.00 / 5 | 4.50 / 5" in report
+    assert "Average evidence completeness | 3.80 / 5 | 4.70 / 5" in report
+    assert "Benchmark + doc consistency tests | 30 passed / 30" in report
+    assert "Full mission test suite | 402 passed / 402" in report
+    assert "not a blind human evaluation" in report
+    assert "Claude Code Official `/goal` Smoke" in report
+    assert "workspace API usage limit" in report
+    assert "does not support a marketing claim that either arm is better" in report
+    assert "Claude Code Official `/goal` Rerun After API Limit Increase" in report
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-smoke-v3`" in report
+    assert "Average elapsed minutes | 1.70 | 6.50" in report
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-complex-v1`" in report
+    assert "Blocked records | 20 / 20" in report
+    assert "Denominator is zero" in report
+    assert "Cost-Controlled Incremental Rerun" in report
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-incremental-v1`" in report
+    assert "Max-budget blocked records | 2 / 4" in report
+    assert "Total Claude cost recorded | USD 9.39057695" in report
+    assert "`/goal` completed both tasks; `/mission` did not return success" in report
+    assert "Lightweight Mission Profile Rerun" in report
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-light-v1`" in report
+    assert "Mission profile | `light`" in report
+    assert "Average elapsed minutes | 9.56 | 5.27" in report
+    assert "Recorded Claude cost | USD 3.00670750 | USD 2.00569500" in report
+    assert "Quality-Focused Critical Task Attempt" in report
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-quality-v1`" in report
+    assert "Mission profile | `quality`" in report
+    assert "Records written | 1 / 2" in report
+    assert "`/mission` records | 0" in report
+    assert "Quality-marker comparison | unavailable" in report
+    assert "Paired benchmark runs completed | 20 / 20" in report_ja
+    assert "Goal-only runs completed | 10 / 10" in report_ja
+    assert "Mission runs completed | 10 / 10" in report_ja
+    assert "Quality score method | automated heuristic" in report_ja
+    assert "Average quality score | 4.00 / 5 | 4.50 / 5" in report_ja
+    assert "Average evidence completeness | 3.80 / 5 | 4.70 / 5" in report_ja
+    assert "Benchmark + doc consistency tests | 30 passed / 30" in report_ja
+    assert "Full mission test suite | 402 passed / 402" in report_ja
+    assert "blind human evaluation でもありません" in report_ja
+    assert "Claude Code 公式 `/goal` smoke" in report_ja
+    assert "workspace API usage limit" in report_ja
+    assert "どちらが優れているという marketing claim は出せない" in report_ja
+    assert "API limit 引き上げ後の Claude Code 公式 `/goal` 再実行" in report_ja
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-smoke-v3`" in report_ja
+    assert "Average elapsed minutes | 1.70 | 6.50" in report_ja
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-complex-v1`" in report_ja
+    assert "Blocked records | 20 / 20" in report_ja
+    assert "denominator が 0" in report_ja
+    assert "Cost-controlled incremental rerun" in report_ja
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-incremental-v1`" in report_ja
+    assert "Max-budget blocked records | 2 / 4" in report_ja
+    assert "Total Claude cost recorded | USD 9.39057695" in report_ja
+    assert "`/goal` は両 task を完了、`/mission` は success を返せなかった" in report_ja
+    assert "Lightweight mission profile rerun" in report_ja
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-light-v1`" in report_ja
+    assert "Mission profile | `light`" in report_ja
+    assert "Average elapsed minutes | 9.56 | 5.27" in report_ja
+    assert "Recorded Claude cost | USD 3.00670750 | USD 2.00569500" in report_ja
+    assert "Quality-focused critical task attempt" in report_ja
+    assert "Run id | `2026-06-28-claude-goal-vs-mission-quality-v1`" in report_ja
+    assert "Mission profile | `quality`" in report_ja
+    assert "Records written | 1 / 2" in report_ja
+    assert "`/mission` records | 0" in report_ja
+    assert "Quality-marker comparison | unavailable" in report_ja
+
+    # --- Tail cohort run (2026-07-07) ---
+    tail_results_path = BENCHMARK_DIR / "results" / "2026-07-07-claude-goal-vs-mission-tail-v1.jsonl"
+    tail_summary_path = BENCHMARK_DIR / "results" / "2026-07-07-claude-goal-vs-mission-tail-v1-summary.json"
+
+    tail_records = [json.loads(line) for line in tail_results_path.read_text(encoding="utf-8").splitlines()]
+    tail_summary = json.loads(tail_summary_path.read_text(encoding="utf-8"))
+    tail_by_arm = {
+        arm: [r for r in tail_records if r["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+
+    # 10 records, all completed and comparable
+    assert len(tail_records) == 10
+    assert len(tail_by_arm["claude_code_goal_command"]) == 5
+    assert len(tail_by_arm["mission"]) == 5
+    assert all(r["run_status"] == "completed" for r in tail_records)
+    assert all(r["comparable_attempt"] is True for r in tail_records)
+    assert all(r["validator_pass"] is True for r in tail_records)
+
+    # model_id is claude-sonnet-5 on all records
+    assert all(r["model_id"] == "claude-sonnet-5" for r in tail_records)
+
+    # Both arms tied on human_quality_score average (4.97)
+    assert tail_summary["arms"]["claude_code_goal_command"]["average_quality_score"] == 4.97
+    assert tail_summary["arms"]["mission"]["average_quality_score"] == 4.97
+
+    # Zero forbidden hits on both arms
+    assert all(r["forbidden_markers_matched"] == [] for r in tail_records)
+
+    # Summary fields
+    assert tail_summary["records"] == 10
+    assert tail_summary["expected_records"] == 10
+    assert tail_summary["mission_profile"] == "full"
+    assert tail_summary["task_cohort"] == "tail"
+    assert tail_summary["arms"]["claude_code_goal_command"]["comparable_records"] == 5
+    assert tail_summary["arms"]["mission"]["comparable_records"] == 5
+    assert tail_summary["arms"]["claude_code_goal_command"]["blocked_records"] == 0
+    assert tail_summary["arms"]["mission"]["blocked_records"] == 0
+
+    # report.md pins
+    assert "Tail Cohort Run (tail-first-failure)" in report
+    assert "Run id | `2026-07-07-claude-goal-vs-mission-tail-v1`" in report
+    assert "Starting commit | `3591f9947cddb9028538f8d333a0eeb6545b726e`" in report
+    assert "Mission profile | `full`" in report
+    assert "model_id | `claude-sonnet-5`" in report
+    assert "Average quality score | 4.97 / 5 | 4.97 / 5" in report
+    assert "Forbidden marker hits | 0 | 0" in report
+    assert "Total elapsed minutes | 11.63 | 67.35" in report
+    assert "secondary analysis; primary JSONL unchanged" in report
+    assert "both arms 0.86" in report
+    assert "Safe to say about the tail run" in report
+    assert "results/2026-07-07-claude-goal-vs-mission-tail-v1.jsonl" in report
+    assert "artifacts/2026-07-07-claude-goal-vs-mission-tail-v1/" in report
+
+    # report.ja.md pins
+    assert "Tail cohort run (tail-first-failure)" in report_ja
+    assert "Run id | `2026-07-07-claude-goal-vs-mission-tail-v1`" in report_ja
+    assert "model_id | `claude-sonnet-5`" in report_ja
+    assert "Average quality score | 4.97 / 5 | 4.97 / 5" in report_ja
+    assert "Forbidden marker hits | 0 | 0" in report_ja
+    assert "secondary analysis" in report_ja
+    assert "Tail run について言ってよい" in report_ja
+    assert "results/2026-07-07-claude-goal-vs-mission-tail-v1.jsonl" in report_ja
+
+    # tasks.tail.json: new pattern present
+    tail_tasks = json.loads((BENCHMARK_DIR / "tasks.tail.json").read_text(encoding="utf-8"))
+    config_drift = next(t for t in tail_tasks["tasks"] if t["id"] == "tail-config-spec-drift")
+    health_marker = next(m for m in config_drift["quality_markers"] if m["name"] == "Drift: health interval 75s")
+    # #558 で regex 化した。literal 断片の pin は意味を失うため、
+    # 元の guard の意図 (表記ゆれを取りこぼさない) を挙動で検証する。
+    assert health_marker.get("match_type") == "regex"
+    _hit = lambda text: any(  # noqa: E731
+        re.search(pat, text.lower(), re.DOTALL) for pat in health_marker["patterns"]
+    )
+    for variant in (
+        "health check interval: spec 15s, runbook seconds=75",
+        "health interval | 15 | 75 |",
+        "health-check interval drift (15s spec vs `75` in runbook)",
+    ):
+        assert _hit(variant), f"health interval marker missed variant: {variant}"
+    # 値が片方しかない記述は同定になっていないので一致してはならない。
+    assert not _hit("health check interval is 75 seconds")
+
+    # --- Pattern-Fix Validation Smoke (2026-07-10) ---
+    smoke_v2_results_path = BENCHMARK_DIR / "results" / "2026-07-10-claude-goal-vs-mission-tail-smoke-v2.jsonl"
+    smoke_v2_summary_path = BENCHMARK_DIR / "results" / "2026-07-10-claude-goal-vs-mission-tail-smoke-v2-summary.json"
+
+    smoke_v2_records = [json.loads(line) for line in smoke_v2_results_path.read_text(encoding="utf-8").splitlines()]
+    smoke_v2_summary = json.loads(smoke_v2_summary_path.read_text(encoding="utf-8"))
+    smoke_v2_by_arm = {
+        arm: [r for r in smoke_v2_records if r["arm"] == arm]
+        for arm in ("claude_code_goal_command", "mission")
+    }
+
+    # 2 records: 1 task x 2 arms; run stopped early due to blocked mission arm
+    assert len(smoke_v2_records) == 2
+    assert smoke_v2_summary["records"] == 2
+    assert smoke_v2_summary["expected_records"] == 2
+    assert smoke_v2_summary["mission_profile"] == "full"
+    assert smoke_v2_summary["task_cohort"] == "tail"
+    assert smoke_v2_summary["stopped_early"] is True
+
+    # model_id is claude-sonnet-5 on all records
+    assert all(r["model_id"] == "claude-sonnet-5" for r in smoke_v2_records)
+
+    # goal arm: completed, pattern fix confirmed — marker score 1.00 (7/7 including "Drift: health interval 75s")
+    goal_record = smoke_v2_by_arm["claude_code_goal_command"][0]
+    assert goal_record["run_status"] == "completed"
+    assert goal_record["comparable_attempt"] is True
+    assert goal_record["validator_pass"] is True
+    assert goal_record["quality_marker_score"] == 1.0
+    assert "Drift: health interval 75s" in goal_record["quality_markers_matched"]
+    assert goal_record["quality_markers_missing"] == []
+    assert goal_record["forbidden_markers_matched"] == []
+
+    # mission arm: blocked by api_usage_limit, excluded from comparable aggregates
+    mission_record = smoke_v2_by_arm["mission"][0]
+    assert mission_record["run_status"] == "blocked"
+    assert mission_record["blocked_reason"] == "api_usage_limit"
+    assert mission_record["comparable_attempt"] is False
+    assert mission_record["quality_marker_score"] is None
+    assert mission_record["forbidden_markers_matched"] == []
+
+    # summary arm aggregates
+    assert smoke_v2_summary["arms"]["claude_code_goal_command"]["comparable_records"] == 1
+    assert smoke_v2_summary["arms"]["claude_code_goal_command"]["blocked_records"] == 0
+    assert smoke_v2_summary["arms"]["mission"]["blocked_records"] == 1
+    assert smoke_v2_summary["arms"]["mission"]["comparable_records"] == 0
+
+    # report.md pins for smoke-v2
+    assert "Pattern-Fix Validation Smoke (2026-07-10)" in report
+    assert "Run id | `2026-07-10-claude-goal-vs-mission-tail-smoke-v2`" in report
+    assert "Starting commit | `4fdb222b6073cef22676206625ccc61b83c9f658`" in report
+    assert "results/2026-07-10-claude-goal-vs-mission-tail-smoke-v2.jsonl" in report
+    assert "artifacts/2026-07-10-claude-goal-vs-mission-tail-smoke-v2/" in report
+
+    # report.ja.md pins for smoke-v2
+    assert "Pattern-Fix Validation Smoke (2026-07-10)" in report_ja
+    assert "Run id | `2026-07-10-claude-goal-vs-mission-tail-smoke-v2`" in report_ja
+    assert "results/2026-07-10-claude-goal-vs-mission-tail-smoke-v2.jsonl" in report_ja
+    assert "artifacts/2026-07-10-claude-goal-vs-mission-tail-smoke-v2/" in report_ja
+
+
+def test_mission_vs_goal_protocol_controls_review_bias():
+    protocol = (BENCHMARK_DIR / "README.md").read_text(encoding="utf-8")
+    runner = (BENCHMARK_DIR / "run_paired_pilot.py").read_text(encoding="utf-8")
+    official_runner = (BENCHMARK_DIR / "run_claude_goal_vs_mission.py").read_text(encoding="utf-8")
+    complex_plan = (BENCHMARK_DIR / "complex-validation-plan.md").read_text(encoding="utf-8")
+    runbook = (BENCHMARK_DIR / "official-goal-rerun-runbook.md").read_text(encoding="utf-8")
+    runner_module = _load_official_goal_runner()
+
+    assert "counter-balanced deterministically by task index" in protocol
+    assert "Automated Scoring (arm-blind)" in protocol
+    assert "Human Quality Rubric" in protocol
+    assert "score blind to arm label" in protocol
+    assert "--tasks-file" in protocol
+    assert "--run-id" in protocol
+    assert "workspace API usage limits" in complex_plan
+    assert "These are hypotheses to test, not results" in complex_plan
+    assert "run_status" in protocol
+    assert "blocked_reason" in protocol
+    assert "comparable_attempt" in protocol
+    assert "official-goal-rerun-runbook.md" in protocol
+    assert "tasks.quality.json" in protocol
+    assert "--mission-profile quality" in protocol
+    assert "Proceed only if both arm records have" in runbook
+    assert "Step 2d: Quality-Focused Critical Pilot" in runbook
+    assert "run_status=blocked" in runbook
+    assert "2026-07-01 09:00 JST" in runbook
+    assert 'parser.add_argument("--tasks-file"' in runner
+    assert 'parser.add_argument("--run-id"' in runner
+    assert 'ARMS = ("claude_code_goal_command", "mission")' in official_runner
+    assert 'parser.add_argument("--mission-max-iter"' in official_runner
+    assert '"--mission-profile"' in official_runner
+    assert 'MISSION_PROFILES = ("full", "light", "quality")' in official_runner
+    assert "quality_marker_score" in official_runner
+    assert '"--task-ids"' in official_runner
+    assert '"--stop-on-blocked"' in official_runner
+    assert '"--max-budget-usd-goal"' in official_runner
+    assert '"--max-budget-usd-mission"' in official_runner
+    assert '"run_status": evaluation["run_status"]' in official_runner
+    task_data = json.loads((BENCHMARK_DIR / "tasks.complex.json").read_text(encoding="utf-8"))
+    selected = runner_module.select_tasks(
+        task_data,
+        limit_tasks=10,
+        task_ids="complex-failing-test-triage,complex-review-thread-resolution",
+    )
+    assert [task["id"] for task in selected] == [
+        "complex-failing-test-triage",
+        "complex-review-thread-resolution",
+    ]
+    limited = runner_module.select_tasks(task_data, limit_tasks=1)
+    assert [task["id"] for task in limited] == ["complex-cross-file-feature"]
+    light_prompt = runner_module.build_prompt(
+        task_data["tasks"][1],
+        "mission",
+        "benchmarks/mission-vs-goal/run-output/test.md",
+        mission_profile="light",
+    )
+    assert "Mission profile: light" in light_prompt
+    assert "--max-iter 1" in light_prompt
+    assert "Lightweight benchmark profile" in light_prompt
+    light_summary = runner_module.summarize(
+        records=[],
+        tasks=selected,
+        run_id="test-light",
+        starting_commit="abcdef0",
+        tasks_path=BENCHMARK_DIR / "tasks.complex.json",
+        mission_profile="light",
+    )
+    assert light_summary["mission_profile"] == "light"
+    quality_data = json.loads((BENCHMARK_DIR / "tasks.quality.json").read_text(encoding="utf-8"))
+    quality_prompt = runner_module.build_prompt(
+        quality_data["tasks"][0],
+        "mission",
+        "benchmarks/mission-vs-goal/run-output/quality-test.md",
+        mission_profile="quality",
+    )
+    assert "Mission profile: quality" in quality_prompt
+    assert "Quality benchmark profile" in quality_prompt
+    assert "Evidence Map" in quality_prompt
+    marker_eval = runner_module.evaluate_quality_markers(
+        "Evidence Map\nRejected Hypotheses\nStop/Proceed Decision\nUnsupported Claims",
+        quality_data["tasks"][0],
+    )
+    assert marker_eval["quality_markers_total"] == 7
+    assert marker_eval["quality_marker_score"] == 0.57
+    assert marker_eval["quality_markers_matched"] == [
+        "Evidence Map",
+        "Rejected Hypotheses",
+        "Stop/Proceed Decision",
+        "Unsupported Claims",
+    ]
+    quality_summary = runner_module.summarize(
+        records=[
+            {
+                "arm": "claude_code_goal_command",
+                "completion": True,
+                "validator_pass": True,
+                "human_quality_score": 4.0,
+                "intervention_count": 0,
+                "evidence_completeness": 4.0,
+                "elapsed_minutes": 1.0,
+                "quality_marker_score": 0.57,
+            },
+            {
+                "arm": "mission",
+                "completion": True,
+                "validator_pass": True,
+                "human_quality_score": 5.0,
+                "intervention_count": 0,
+                "evidence_completeness": 5.0,
+                "elapsed_minutes": 2.0,
+                "quality_marker_score": 1.0,
+            },
+        ],
+        tasks=quality_data["tasks"][:1],
+        run_id="test-quality",
+        starting_commit="abcdef0",
+        tasks_path=BENCHMARK_DIR / "tasks.quality.json",
+        mission_profile="quality",
+    )
+    assert quality_summary["mission_profile"] == "quality"
+    assert quality_summary["arms"]["claude_code_goal_command"]["average_quality_marker_score"] == 0.57
+    assert quality_summary["arms"]["mission"]["average_quality_marker_score"] == 1.0
+    blocked = runner_module.classify_run_status(
+        stdout="API Error: 400 You have reached your specified workspace API usage limits.",
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=False,
+        validator_pass=False,
+    )
+    assert blocked == {
+        "run_status": "blocked",
+        "blocked_reason": "api_spend_limit",
+        "failure_kind": "api_spend_limit",
+        "comparable_attempt": False,
+    }
+    max_budget = runner_module.classify_run_status(
+        stdout='{"subtype":"error_max_budget_usd"}',
+        stderr="",
+        timed_out=False,
+        returncode=1,
+        output_exists=True,
+        validator_pass=False,
+    )
+    assert max_budget == {
+        "run_status": "blocked",
+        "blocked_reason": "max_budget_usd",
+        "failure_kind": "max_budget_usd",
+        "comparable_attempt": False,
+    }
+    completed_without_limit_text = runner_module.classify_run_status(
+        stdout="Artifact complete. Rejected hypothesis: a prior quota issue was not the current cause.",
+        stderr="",
+        timed_out=False,
+        returncode=0,
+        output_exists=True,
+        validator_pass=True,
+    )
+    assert completed_without_limit_text == {
+        "run_status": "completed",
+        "blocked_reason": None,
+        "failure_kind": None,
+        "comparable_attempt": True,
+    }
+
+
+def test_mission_vs_goal_report_template_rejects_unsupported_claims():
+    template = (BENCHMARK_DIR / "report-template.md").read_text(encoding="utf-8")
+
+    assert "internal pilot, not a general model benchmark" in template
+    assert "not model intelligence" in template
+    assert "`mission` is X% smarter than `/goal`" in template
+    assert "`mission` always beats goal-based workflows" in template

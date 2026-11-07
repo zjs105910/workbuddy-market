@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mission vs goal benchmark result",
+  "type": "object",
+  "required": [
+    "benchmark",
+    "run_id",
+    "task_id",
+    "arm",
+    "model",
+    "model_id",
+    "started_at",
+    "completed_at",
+    "starting_commit",
+    "completion",
+    "validator_pass",
+    "human_quality_score",
+    "quality_score_method",
+    "intervention_count",
+    "evidence_completeness",
+    "elapsed_minutes",
+    "artifacts",
+    "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "benchmark": {
+      "const": "mission-vs-goal-pilot"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "arm": {
+      "enum": [
+        "goal_only",
+        "claude_code_goal_command",
+        "mission"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Truthful model identifier recorded verbatim per run (no 'unknown' fallback)."
+    },
+    "arm_order": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1 if this arm ran first for its task; used for run-order counterbalancing."
+    },
+    "mission_profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "full",
+        "light",
+        "quality",
+        null
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "starting_commit": {
+      "type": "string",
+      "minLength": 7
+    },
+    "run_status": {
+      "enum": [
+        "completed",
+        "failed",
+        "blocked"
+      ]
+    },
+    "blocked_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "api_usage_limit",
+        "api_spend_limit",
+        "max_budget_usd",
+        "timeout",
+        null
+      ]
+    },
+    "failure_kind": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "api_usage_limit",
+        "api_spend_limit",
+        "max_budget_usd",
+        "timeout",
+        "validator",
+        "command_error",
+        "missing_artifact",
+        null
+      ]
+    },
+    "comparable_attempt": {
+      "type": "boolean"
+    },
+    "completion": {
+      "type": "boolean"
+    },
+    "validator_pass": {
+      "type": "boolean"
+    },
+    "human_quality_score": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "quality_score_method": {
+      "enum": [
+        "blind_human",
+        "label_hidden_human",
+        "automated_heuristic_not_blind_human",
+        "automated_heuristic_form_stripped_not_blind_human",
+        "automated_heuristic_form_stripped_gradient_v2_not_blind_human",
+        "automated_heuristic_form_stripped_gradient_v2_not_blind_human_regex_v3"
+      ]
+    },
+    "validator_fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "#247: 両アーム共通の必須見出しの充足率 (0..1)。gradient v2 スコアの部分点項。"
+    },
+    "missing_arm_specific_headings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "#248: アーム固有見出しの欠落 (情報のみ、validator gate には使わない)。"
+    },
+    "quality_marker_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "quality_markers_matched": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "quality_markers_missing": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "intervention_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resume_success": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "evidence_completeness": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "elapsed_minutes": {
+      "type": "number",
+      "minimum": 0
+    },
+    "run_index": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "#249: --repeats N の何回目か (1..N)。反復なしは 1。"
+    },
+    "mission_review_tier": {
+      "type": ["string", "null"],
+      "description": "#250: mission arm の実行後 state から抽出した review_tier。goal arm / 抽出不能は null。"
+    },
+    "mission_iterations": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "#250: mission arm の iteration 数。goal arm / 抽出不能は null。"
+    },
+    "mission_complexity": {
+      "type": ["string", "null"],
+      "description": "#250: mission arm の complexity。goal arm / 抽出不能は null。"
+    },
+    "mission_passes": {
+      "type": ["boolean", "null"],
+      "description": "#250: mission arm の passes。goal arm / 抽出不能は null。"
+    },
+    "mission_halt_category": {
+      "type": ["string", "null"],
+      "description": "#250: mission arm の halt_category。goal arm / halt なし / 抽出不能は null。"
+    },
+    "measurement_observations": {
+      "type": "object",
+      "description": "#390: versioned mission-state observations. Goal records explicitly use not-applicable; the reducer never reopens raw state."
+    },
+    "diff_review_observations": {
+      "type": "object",
+      "description": "#275: additive versioned per-iteration activity, wall-clock availability, cost availability, and verified bounded-context observations."
+    },
+    "total_cost_usd": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "#238: claude CLI が報告した総コスト (USD)。blocked/failed でも消費額を第一級フィールドで残し、全損コストを集計可能にする。"
+    },
+    "max_budget_usd_effective": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The resolved per-record budget after arm-specific, common, and default precedence."
+    },
+    "burn_rate_usd_per_min": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Blocked-run spend rate (total_cost_usd / elapsed_minutes); null otherwise."
+    },
+    "token_estimate": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "notes": {
+      "type": "string"
+    },
+    "quality_marker_recall": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "forbidden_markers_matched": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "quality_marker_score_raw": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

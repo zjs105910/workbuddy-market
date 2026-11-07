@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"codex-session-fixture"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item-1","item_type":"reasoning","text":"Working"}}
+{"type":"item.completed","item":{"id":"item-2","item_type":"assistant_message","text":"{\"rules\":[]}"}}
+{"type":"turn.completed","usage":{"input_tokens":20,"cached_input_tokens":5,"output_tokens":8}}

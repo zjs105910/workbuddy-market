@@ -1,0 +1,277 @@
+---
+name: nfl-data
+description: |
+  NFL data via ESPN public endpoints plus an nflverse backend for schedules, weekly rosters, play-by-play, and normalized player/team stat tables. Zero config, no API keys.
+
+  Use when: user asks about NFL scores, standings, team rosters, schedules, game stats, box scores, play-by-play, injuries, transactions, betting futures, depth charts, team/player statistics, NFL news, or which players are trending in fantasy adds/drops.
+  Don't use when: user asks about football/soccer (use football-data), college football (use cfb-data), or other sports.
+license: MIT
+metadata:
+  author: machina-sports
+  version: "0.1.0"
+---
+
+# NFL Data
+
+Before writing queries, consult `references/api-reference.md` for endpoints, ID conventions, and data shapes.
+
+## Setup
+
+Before first use, check if the CLI is available:
+```bash
+which sports-skills || pip install sports-skills
+```
+If `pip install` fails (package not found or Python version error), install from GitHub:
+```bash
+pip install git+https://github.com/machina-sports/sports-skills.git
+```
+The package requires Python 3.10+. If your default Python is older, use a specific version:
+```bash
+python3 --version  # check version
+# If < 3.10, try: python3.12 -m pip install sports-skills
+# On macOS with Homebrew: /opt/homebrew/bin/python3.12 -m pip install sports-skills
+```
+No API keys required.
+
+For nflverse-backed commands (`get_nflverse_*`), install the NFL extra:
+```bash
+pip install sports-skills[nfl]
+```
+On Python 3.10+ this installs `nflreadpy` (the preferred backend) plus `pyarrow`, which is needed for most nflverse data beyond schedules. On Python 3.9 it installs `nfl-data-py` instead, since `nflreadpy` requires 3.10+.
+
+The `nfl-data-py` backend is a reduced fallback: it cannot serve `get_nflverse_team_stats`, which returns an explanatory error there. Use Python 3.10+ for full nflverse coverage.
+
+## Quick Start
+
+Prefer the CLI — it avoids Python import path issues:
+```bash
+sports-skills nfl get_scoreboard
+sports-skills nfl get_standings --season=2025
+sports-skills nfl get_teams
+```
+
+Python SDK (alternative):
+```python
+from sports_skills import nfl
+
+scores = nfl.get_scoreboard({})
+standings = nfl.get_standings({"params": {"season": "2025"}})
+```
+
+## CRITICAL: Before Any Query
+
+CRITICAL: Before calling any data endpoint, verify:
+- Season year is derived from the system prompt's `currentDate` — never hardcoded.
+- If only a team name is provided, call `get_teams` to resolve the team ID before using team-specific commands.
+
+## Choosing the Season
+
+Derive the current year from the system prompt's date (e.g., `currentDate: 2026-02-16` → current year is 2026).
+
+- **If the user specifies a season**, use it as-is.
+- **If the user says "current", "this season", or doesn't specify**: The NFL season runs September–February. If the current month is March–August, use `season = current_year` (upcoming season). If September–February, the active season started in the previous calendar year if you're in Jan/Feb, otherwise current year.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `get_scoreboard` | Live/recent NFL scores |
+| `get_standings` | Standings by conference and division |
+| `get_teams` | All 32 NFL teams |
+| `get_team_roster` | Full roster for a team |
+| `get_team_schedule` | Schedule for a specific team; reports coverage limits |
+| `get_game_summary` | Detailed box score and scoring plays |
+| `get_leaders` | NFL statistical leaders |
+| `get_news` | NFL news articles |
+| `get_play_by_play` | Full play-by-play for a game |
+| `get_win_probability` | Win probability chart data |
+| `get_schedule` | One season week or ESPN's current window; never a whole season |
+| `get_injuries` | Injury reports with provider-native or unresolved identity |
+| `get_transactions` | Recent transactions |
+| `get_futures` | Futures/odds markets |
+| `get_depth_chart` | Depth chart for a team |
+| `get_team_stats` | Team statistical profile |
+| `get_player_stats` | Player statistical profile |
+| `get_nflverse_schedule` | nflverse-backed schedules/results table (carries `espn_event_id`) |
+| `get_nflverse_weekly_rosters` | nflverse-backed weekly rosters |
+| `get_nflverse_player_stats` | nflverse-backed player stats — season totals by default |
+| `get_nflverse_team_stats` | nflverse-backed team stats — season totals by default |
+| `get_nflverse_play_by_play` | nflverse-backed play-by-play rows |
+| `get_fantasy_trending` | Sleeper fantasy trending adds/drops (popularity counts, Sleeper player IDs) |
+
+See `references/api-reference.md` for full parameter lists and return shapes.
+
+Do not infer a bye from an empty `get_schedule` response: inspect its
+`coverage` block, whose completeness is `unknown` or `partial`, never
+`complete`. For a whole team season use `get_team_schedule`; season-only
+`get_schedule` is refused because ESPN's scoreboard mixes and truncates it.
+An absent or unresolved injury record is not evidence that a player is healthy.
+
+## Fantasy Trending (Sleeper)
+
+`get_fantasy_trending` reads Sleeper's public trending endpoint: the NFL players
+most added (or dropped) in Sleeper fantasy leagues over a recent window.
+
+```bash
+sports-skills nfl get_fantasy_trending --trend_type=add --lookback_hours=24 --limit=10
+sports-skills nfl get_fantasy_trending --trend_type=drop
+```
+
+- `trend_type`: `add` (default) or `drop`. `lookback_hours`: whole hours, 1-168 (default 24). `limit`: 1-100 (default 10).
+- `count` is the add/drop tally Sleeper's trending API reports for the player over the window. It is a **popularity signal, not a projection, ranking, or betting edge** — say so when reporting it.
+- Player IDs are `sleeper_player_id`, Sleeper's own namespace — keep them as the identifier. There is no mapping to ESPN athlete IDs or nflverse GSIS IDs: do not attach one, and do not present a name or team match against another provider as the same confirmed player.
+- `name_resolved: false` means Sleeper's player catalog had no name for that ID. `team` and `position` are resolved separately and may still be filled in. If the catalog itself could not be fetched, `catalog_status` is `unavailable` and `warnings[]` says why; counts and IDs are still valid.
+- Report freshness from `source.trending_fetched_at`. Trending results are cached in memory for 5 minutes, within one process only — each new CLI call fetches them again. Sleeper's player catalog (trimmed to IDs, names, teams and positions) is also saved under `$XDG_CACHE_HOME/sports-skills/sleeper/` (default `~/.cache/...`) and reused across processes until 24 hours after it was fetched, since Sleeper asks clients to fetch it at most once a day. That disk cache is best effort: if it cannot be written, the call still succeeds and the next process fetches the catalog again.
+
+
+## Shaping Wide nflverse Results
+
+nflverse tables are wide: one week of `get_nflverse_player_stats` is ~960 rows with
+100+ stat columns (millions of characters). Every `get_nflverse_*` command accepts
+`sort_by`, `descending`, `limit` and `fields` so you can ask for just the rows you need:
+
+```bash
+# Week 5 passing leaders, 5 rows, 2 stat columns
+sports-skills nfl get_nflverse_player_stats --season=2025 --week=5 --position=QB \
+  --sort_by=passing_yards --limit=5 --fields=passing_yards,attempts
+```
+
+- `sort_by`: one column to sort by. Numbers (and numeric strings) sort numerically; missing values always go last.
+- `descending`: `true` (default) or `false`; only used with `sort_by`.
+- `limit`: positive integer, applied after sorting.
+- `fields`: comma-separated keep-list. The identity columns below and the `sort_by` column are always kept.
+- An unknown `sort_by`/`fields` column returns an error listing the valid columns.
+- With any of these set, the response adds `total_rows` (matching rows before `limit`) and `returned_rows`. With none set, output is unchanged. They are applied after the fetch, so they never change the upstream request or its replay entry.
+- Stat columns inside `stats` (e.g. `passing_yards`) are addressable directly; `fields` keeps `stats` as an object holding only the selected keys.
+
+| Command | Always kept by `fields` |
+|---------|-------------------------|
+| `get_nflverse_player_stats` | `player_id`, `player_name`, `position`, `team`, `week` |
+| `get_nflverse_team_stats` | `team`, `season`, `week`, `game_id` |
+| `get_nflverse_play_by_play` | `play_id`, `game_id` |
+| `get_nflverse_weekly_rosters` | `player_id`, `player_name`, `team`, `position` |
+| `get_nflverse_schedule` | `game_id`, `week`, `away_team`, `home_team` |
+
+## Using ESPN and nflverse Together
+
+The two backends use different identifier systems. `get_nflverse_schedule` is the
+bridge: each event carries `espn_event_id`, which is exactly the ESPN event ID.
+
+To combine nflverse analytics (EPA, win probability, betting lines) with ESPN
+detail (box scores, drives) for the same game:
+1. Call `get_nflverse_schedule(season=..., week=...)`.
+2. Read `espn_event_id` off the event you want.
+3. Pass it as `event_id` to `get_game_summary`, `get_play_by_play`, or
+   `get_win_probability`.
+
+Two things that do not line up automatically:
+- **Team abbreviations.** ESPN uses `LAR` and `WSH`; nflverse uses `LA` and `WAS`.
+  The `get_nflverse_*` functions accept either and translate. Going the other way
+  (nflverse → ESPN), resolve via `get_teams`.
+- **Player IDs.** ESPN athlete IDs and nflverse GSIS IDs (`00-0033873`) are
+  unrelated, and no crosswalk is available. Match on name plus team instead.
+
+Field to watch on schedule rows: `total` is the combined points actually scored,
+while `total_line` is the betting over/under. Use `total_line` for market work.
+
+## Examples
+
+Example 1: Today's scores
+User says: "What are today's NFL scores?"
+Actions:
+1. Call `get_scoreboard()`
+Result: All live and recent NFL games with scores and status
+
+Example 2: Conference standings
+User says: "Show me the AFC standings"
+Actions:
+1. Derive season year from `currentDate`
+2. Call `get_standings(season=<derived_year>)`
+3. Filter results for AFC conference
+Result: AFC standings table with W-L-T, PCT, PF, PA per team
+
+Example 3: Team roster
+User says: "Who's on the Chiefs roster?"
+Actions:
+1. Call `get_team_roster(team_id="12")`
+Result: Full Chiefs roster with name, position, jersey number, height, weight
+
+Example 4: Super Bowl box score
+User says: "How did the Super Bowl go?"
+Actions:
+1. Call `get_schedule(week=23)` to find the Super Bowl event_id
+2. Call `get_game_summary(event_id=<id>)` for full box score
+Result: Complete box score with passing/rushing/receiving stats and scoring plays
+
+Example 5: Injury report
+User says: "Who's injured on the Chiefs?"
+Actions:
+1. Call `get_injuries()`
+2. Filter results for Kansas City Chiefs (team_id=12)
+Result: Chiefs injury list with player name, position, status, and injury type
+
+Example 6: Player statistics
+User says: "Show me Patrick Mahomes' stats this season"
+Actions:
+1. Derive season year from `currentDate`
+2. Call `get_player_stats(player_id="3139477", season_year=<derived_year>)`
+Result: Season stats by category with value, rank, and per-game averages
+
+Example 7: nflverse weekly rosters
+User says: "Give me the Week 1 Chiefs roster from the data table backend"
+Actions:
+1. Derive season year from `currentDate`
+2. Call `get_nflverse_weekly_rosters(season=<derived_year>, week=1, team="KC")`
+Result: Weekly roster rows normalized for team, player, position, jersey, and status
+
+Example 8: nflverse play-by-play
+User says: "Pull Bills Week 3 play-by-play"
+Actions:
+1. Derive season year from `currentDate`
+2. Call `get_nflverse_play_by_play(season=<derived_year>, week=3, team="BUF")`
+Result: Play rows with game_id, down/distance, description, EPA, WP/WPA, and score state
+
+Example 9: Fantasy waiver-wire buzz
+User says: "Who are fantasy players picking up this week?"
+Actions:
+1. Call `get_fantasy_trending(trend_type="add", lookback_hours=24, limit=10)`
+2. Report name, team, position and count, with `source.trending_fetched_at`
+Result: The most-added players on Sleeper, described as popularity among Sleeper users rather than a recommendation
+
+## Commands that DO NOT exist — never call these
+
+- ~~`get_odds`~~ / ~~`get_betting_odds`~~ — not available. For prediction market odds, use the polymarket or kalshi skill.
+- ~~`search_teams`~~ — does not exist. Use `get_teams` instead.
+- ~~`get_box_score`~~ — does not exist. Use `get_game_summary` instead.
+- ~~`get_player_ratings`~~ — does not exist. Use `get_player_stats` instead.
+
+If a command is not listed in the Commands table above, it does not exist.
+
+## Error Handling
+
+When a command fails, **do not surface raw errors to the user**. Instead:
+1. Catch silently and try alternatives
+2. If team name given instead of ID, use `get_teams` to find the ID first
+3. Only report failure with a clean message after exhausting alternatives
+
+## Troubleshooting
+
+Error: `sports-skills` command not found
+Cause: Package not installed
+Solution: Run `pip install sports-skills`. If not on PyPI, install from GitHub: `pip install git+https://github.com/machina-sports/sports-skills.git`
+
+Error: nflverse backend unavailable
+Cause: Optional NFL backend extra not installed
+Solution: Install `sports-skills[nfl]` so the nflverse provider (`nflreadpy` or compatibility fallback) is available
+
+Error: Team not found by ID
+Cause: Wrong or outdated ESPN team ID used
+Solution: Call `get_teams` to get the current list of all 32 NFL teams with their IDs
+
+Error: No data returned for a future game
+Cause: ESPN only returns data for completed or in-progress games
+Solution: Use `get_schedule` to see upcoming game details; `get_scoreboard` only covers active/recent games
+
+Error: Postseason week number returns no results
+Cause: Postseason uses unified week numbers (19-23) that differ from regular season
+Solution: Use week 19 for Wild Card, 20 for Divisional, 21 for Conference Championship, 23 for Super Bowl

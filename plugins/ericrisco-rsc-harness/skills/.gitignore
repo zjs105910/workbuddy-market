@@ -1,0 +1,38 @@
+.DS_Store
+node_modules/
+.env
+.env.local
+*.log
+.rsc/
+# .claude/ is the same kind of thing as .rsc/: wiring rsc GENERATES for this machine —
+# settings.json with absolute paths, symlinked skill dirs, the installed developer agent.
+# Left untracked-but-not-ignored it also makes rsc's own ship-guard treat every rsc-wired
+# repo as having an abandoned diff, which blocks switching branches.
+.claude/
+
+# Per-tool ignores already exist inside each skill's _TEMPLATE/.gitignore.
+
+# build artifacts
+.coverage
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Working documentation lives in the RSC container, NOT here.
+# This repo stays clean so whoever clones it starts coding, not reading.
+# Migrated 2026-09-04 to https://github.com/ericrisco/RSC → 02-DOCS/
+#   docs/        -> RSC 02-DOCS/raw/migrated/docs/
+#   skill-build/ -> RSC 02-DOCS/raw/migrated/skill-build/
+#   02-DOCS/     -> RSC 02-DOCS/ (wiki/sdd, wiki/brand, wiki/stack, raw/…)
+# The contributor-facing standard stays in this repo: scripts/skill-rubric.md.
+docs/
+skill-build/
+02-DOCS/
+
+node_modules/
+coverage/
+
+# Worktrees created for isolated feature work — the directory is scratch, never content.
+.worktrees/

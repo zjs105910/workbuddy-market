@@ -1,0 +1,12 @@
+<svg viewBox="0 0 1280 640" width="1280" height="640" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>planning-with-files social preview</title>
+  <rect width="1280" height="640" fill="#0d1117"/>
+  <text x="80" y="190" font-size="72" font-weight="700" fill="#f0f6fc">planning-with-files</text>
+  <text x="80" y="250" font-size="30" font-style="italic" fill="#8b949e">Your agent's context window dies. The plan does not.</text>
+  <g font-family="'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace" font-size="34">
+    <text x="80" y="350" fill="#3fb950">✓ task_plan.md</text>
+    <text x="80" y="405" fill="#3fb950">✓ findings.md</text>
+    <text x="80" y="460" fill="#3fb950">✓ progress.md</text>
+  </g>
+  <text x="80" y="560" font-size="24" fill="#8b949e">survives /clear · 60+ agents via the Agent Skills standard · MIT</text>
+</svg>

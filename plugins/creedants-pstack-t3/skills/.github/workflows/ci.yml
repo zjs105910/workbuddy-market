@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pyyaml
+      - run: python3 -m unittest discover -s tests -v
+      - name: Generated skills match the sources
+        run: |
+          python3 scripts/build.py
+          git diff --exit-code -- skills docs/skills.md
+          test -z "$(git status --porcelain -- skills docs/skills.md)"

@@ -1,0 +1,70 @@
+---
+name: reflect
+description: Spawn three parallel review children over the active T3 thread, surface learnings, and route each to a concrete edit on an existing skill. Use when the user says reflect.
+---
+
+# Reflect
+
+Read [the pstack-t3 runtime](../pstack-runtime/SKILL.md) before spawning workers, choosing models, scheduling, or isolating work. It maps those steps onto T3's orchestrator tools.
+
+Mine the current conversation for durable learnings, then route them into skill edits.
+
+## When to invoke
+
+Invoke when the user says "reflect" or "/reflect". Skip when the conversation is trivial, off-topic, or already covered by an existing skill the parent followed correctly. One-offs are not learnings.
+
+## Process
+
+[The runtime's Modes section](../pstack-runtime/SKILL.md#modes) sets the mode lines of every brief this skill writes and how its spawns run in light mode.
+
+### 1. Locate the active thread
+
+The parent finds its own T3 thread before fanning out. The session is a T3 thread, and the reviewers read it with `t3_thread_read` (see the runtime's [History section](../pstack-runtime/SKILL.md#history)). Stay inside the current project. Do not read threads from other projects. That reads private chats from unrelated work.
+
+Use the thread id if the host already names it. Otherwise call `t3_thread_list` with `statuses: ["running"]` and take the newest candidates. For each candidate, call `t3_thread_read` with `view: "messages"` and `limit: 1`, and check that the first user message is the conversation's opening user prompt. Take the matching `threadId`. Child task threads this session spawned are threads too. List them with `t3_thread_list` and `includeSubagents: true` when a reviewer needs a child's work.
+
+If no thread resolves, write a tight digest of the session and pass that instead.
+
+### 2. Spawn three reviewers in parallel
+
+One message, three `delegate_task` calls with `mode: "async"` and `role: "review"`, each with the target resolved from the role below per the [runtime's Roles section](../pstack-runtime/SKILL.md#roles). Omit `target` for an `inherit` seat. If T3 rejects a target, fall back per the runtime and say which seat changed. Reviewers need MCP access for context lookups (tickets, chat threads, observability traces referenced in the thread). The templates already forbid edits, so keep the child's tools and let the brief carry the read-only constraint.
+
+| Lens | Role | Prompt template |
+|---|---|---|
+| Judgment | `reflect judgment, divergent, synthesizer` | `references/judgment-reviewer.md` |
+| Tooling | `reflect tooling` | `references/tooling-reviewer.md` |
+| Divergent | `reflect judgment, divergent, synthesizer` | `references/divergent-reviewer.md` |
+
+Pass each template verbatim, substituting the thread id or digest where marked. Reviewers return findings in their final message, which arrives as the task's `summary`.
+
+### 3. Synthesize
+
+One `delegate_task` call with `role: "review"` and the target from the `reflect judgment, divergent, synthesizer` role. The synthesizer's quality check includes spot-verifying citations, which can require MCP access, so it keeps its tools and the template carries the read-only constraint. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
+
+### 4. Structural enforcement check
+
+Sanity-check the synthesizer's Accepted list. For any item that would be enforced more reliably by a lint rule, script, metadata flag, or runtime check, move it from Accepted to Backlog. See the **encode-lessons-in-structure** principle skill.
+
+### 5. Apply
+
+Before applying any Accepted edit, present the synthesizer's full Accepted/Rejected/Backlog output to the user and wait for explicit approval. The user picks which subset to apply and may redirect routings. Skill changes affect every future agent in the org. Do not auto-apply.
+
+Backlog items file to whatever devex / backlog tracker your team uses automatically. Only the Accepted list waits for approval.
+
+For each approved Accepted item, follow the Routing field exactly:
+
+- Trivial existing-skill edit (a one-line bullet, a tightened sentence, a stale fact corrected): parent does directly.
+- Substantive existing-skill edit (a new section, a new pattern table, more than ~10 lines): hand to the [`pstack-author-skill`](../pstack-author-skill/SKILL.md) skill and run its draft / test / iterate loop.
+- `tune description: <skill path>` (the skill exists but didn't trigger when it should have): hand to `pstack-author-skill` and run its description loop.
+- `new skill via pstack-author-skill: <kebab-name>`: hand creation to `pstack-author-skill`. Do not invent the shape ad hoc.
+
+If your environment ships a SKILL.md validator, run it on every touched skill before declaring done. Skip this step if it doesn't.
+
+### 6. Summarize for the user
+
+Short list, no preamble:
+
+- Edits applied: `<skill path>`. What changed, one line each.
+- New skills created: `<skill path>`. One line each (rare).
+- Backlog filed to the devex tracker: `<issue title>` (`<tags>`). One line each.
+- Dropped: one line per rejected finding + reason from the synthesizer.

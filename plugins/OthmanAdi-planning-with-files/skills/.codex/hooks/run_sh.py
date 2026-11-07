@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""planning-with-files: cross-platform front door for shell-backed Codex hooks.
+
+The three shell-only hooks (session-start, user-prompt-submit, pre-compact) are
+routed here by both the POSIX ``command`` and Windows ``commandWindows``
+manifest entries. For example, Windows invokes:
+
+    cmd /c .codex\\hooks\\pwf-hook.cmd run_sh.py session-start.sh
+
+The shared adapter runs the same ``.sh`` producer everywhere. On Windows it
+locates Git for Windows ``sh.exe`` and puts its coreutils on PATH; on POSIX it
+uses ``sh``. This wrapper serializes producer output as event-appropriate Codex
+JSON and always exits 0.
+"""
+from __future__ import annotations
+
+import json
+import sys
+
+import codex_hook_adapter as adapter
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        return
+    script_name = sys.argv[1]
+    payload = adapter.load_payload()
+    root = adapter.effective_plan_root(adapter.cwd_from_payload(payload))
+    if root is None:
+        return
+    session_id = adapter.session_id_from_payload(payload)
+    if not adapter.is_session_attached(root, session_id):
+        return
+    if adapter.session_plan_requires_binding(root):
+        if script_name == "user-prompt-submit.sh":
+            adapter.emit_json({
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": adapter.SESSION_PLAN_BINDING_NOTICE,
+                }
+            })
+        return
+    stdout, _ = adapter.run_shell_script(
+        script_name,
+        root,
+        session_id=session_id,
+    )
+    if not stdout:
+        return
+
+    context_events = {
+        "session-start.sh": "SessionStart",
+        "user-prompt-submit.sh": "UserPromptSubmit",
+    }
+    if script_name in context_events:
+        result = {
+            "hookSpecificOutput": {
+                "hookEventName": context_events[script_name],
+                "additionalContext": stdout,
+            }
+        }
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        return
+
+    if script_name == "pre-compact.sh":
+        result = {
+            "continue": True,
+            "systemMessage": stdout,
+        }
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        return
+
+    sys.stdout.write(stdout + "\n")
+
+
+if __name__ == "__main__":
+    raise SystemExit(adapter.main_guard(main))

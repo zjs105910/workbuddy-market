@@ -1,0 +1,418 @@
+"""Football data — standings, schedules, match stats, xG, transfers, and more.
+
+Wraps ESPN, Understat, FPL, Transfermarkt, and openfootball.
+No API keys required. Zero config.
+"""
+
+from __future__ import annotations
+
+from sports_skills._response import wrap
+from sports_skills.football._connector import (
+    get_competition_seasons as _get_competition_seasons,
+)
+from sports_skills.football._connector import (
+    get_competitions as _get_competitions,
+)
+from sports_skills.football._connector import (
+    get_current_season as _get_current_season,
+)
+from sports_skills.football._connector import (
+    get_daily_schedule as _get_daily_schedule,
+)
+from sports_skills.football._connector import (
+    get_event_lineups as _get_event_lineups,
+)
+from sports_skills.football._connector import (
+    get_event_players_statistics as _get_event_players_statistics,
+)
+from sports_skills.football._connector import (
+    get_event_statistics as _get_event_statistics,
+)
+from sports_skills.football._connector import (
+    get_event_summary as _get_event_summary,
+)
+from sports_skills.football._connector import (
+    get_event_timeline as _get_event_timeline,
+)
+from sports_skills.football._connector import (
+    get_event_xg as _get_event_xg,
+)
+from sports_skills.football._connector import (
+    get_head_to_head as _get_head_to_head,
+)
+from sports_skills.football._connector import (
+    get_match_forecast as _get_match_forecast,
+)
+from sports_skills.football._connector import (
+    get_missing_players as _get_missing_players,
+)
+from sports_skills.football._connector import (
+    get_player_profile as _get_player_profile,
+)
+from sports_skills.football._connector import (
+    get_player_season_stats as _get_player_season_stats,
+)
+from sports_skills.football._connector import (
+    get_season_leaders as _get_season_leaders,
+)
+from sports_skills.football._connector import (
+    get_season_schedule as _get_season_schedule,
+)
+from sports_skills.football._connector import (
+    get_season_standings as _get_season_standings,
+)
+from sports_skills.football._connector import (
+    get_season_teams as _get_season_teams,
+)
+from sports_skills.football._connector import (
+    get_season_transfers as _get_season_transfers,
+)
+from sports_skills.football._connector import (
+    get_team_profile as _get_team_profile,
+)
+from sports_skills.football._connector import (
+    get_team_schedule as _get_team_schedule,
+)
+from sports_skills.football._connector import (
+    get_team_strength as _get_team_strength,
+)
+from sports_skills.football._connector import (
+    search_player as _search_player,
+)
+from sports_skills.football._connector import (
+    search_team as _search_team,
+)
+
+
+def _params(**kwargs):
+    """Build params dict, filtering out None values."""
+    return {"params": {k: v for k, v in kwargs.items() if v is not None}}
+
+
+def get_current_season(*, competition_id: str) -> dict:
+    """Detect current season for a competition.
+
+    Args:
+        competition_id: Competition slug from get_competitions() (e.g. "premier-league", "la-liga").
+    """
+    return wrap(_get_current_season(_params(competition_id=competition_id)))
+
+
+def get_competitions() -> dict:
+    """List available competitions with current season info."""
+    return wrap(_get_competitions(_params()))
+
+
+def get_competition_seasons(*, competition_id: str) -> dict:
+    """Get available seasons for a competition.
+
+    Args:
+        competition_id: Competition slug from get_competitions() (e.g. "premier-league", "la-liga").
+    """
+    return wrap(_get_competition_seasons(_params(competition_id=competition_id)))
+
+
+def get_season_schedule(*, season_id: str) -> dict:
+    """Get full season match schedule.
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons().
+    """
+    return wrap(_get_season_schedule(_params(season_id=season_id)))
+
+
+def get_season_standings(*, season_id: str) -> dict:
+    """Get league table for a season.
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons().
+    """
+    return wrap(_get_season_standings(_params(season_id=season_id)))
+
+
+def get_season_leaders(*, season_id: str) -> dict:
+    """Get top scorers/leaders for a season.
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons().
+    """
+    return wrap(_get_season_leaders(_params(season_id=season_id)))
+
+
+def get_season_teams(*, season_id: str) -> dict:
+    """Get teams in a season.
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons().
+    """
+    return wrap(_get_season_teams(_params(season_id=season_id)))
+
+
+def search_player(*, query: str) -> dict:
+    """Search for a football player by name.
+
+    Returns Transfermarkt and ESPN IDs for use with get_player_profile.
+
+    Args:
+        query: Player name to search for (e.g. "Hugo Souza", "Salah").
+    """
+    return wrap(_search_player(_params(query=query)))
+
+
+def search_team(*, query: str, competition_id: str | None = None) -> dict:
+    """Search for a team by name across all leagues.
+
+    Args:
+        query: Team name to search for (e.g. "Arsenal", "Real Madrid").
+        competition_id: Competition slug from get_competitions() (e.g. "premier-league", "la-liga"). Optional — narrows the search.
+    """
+    return wrap(_search_team(_params(query=query, competition_id=competition_id)))
+
+
+def get_team_profile(*, team_id: str, league_slug: str | None = None) -> dict:
+    """Get team profile with squad/roster.
+
+    Args:
+        team_id: ESPN team ID (numeric string), from search_team().
+        league_slug: ESPN league slug (e.g. "eng.1", "esp.1"); narrows the lookup to one league.
+    """
+    return wrap(_get_team_profile(_params(team_id=team_id, league_slug=league_slug)))
+
+
+def get_daily_schedule(*, date: str | None = None) -> dict:
+    """Get all matches for a specific date across all leagues.
+
+    Args:
+        date: Date string in YYYY-MM-DD format. Defaults to today.
+    """
+    return wrap(_get_daily_schedule(_params(date=date)))
+
+
+def get_event_summary(*, event_id: str) -> dict:
+    """Get match summary with basic info and scores.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_summary(_params(event_id=event_id)))
+
+
+def get_event_lineups(*, event_id: str) -> dict:
+    """Get match lineups.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_lineups(_params(event_id=event_id)))
+
+
+def get_event_statistics(*, event_id: str) -> dict:
+    """Get match team statistics.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_statistics(_params(event_id=event_id)))
+
+
+def get_event_timeline(*, event_id: str) -> dict:
+    """Get match timeline/key events.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_timeline(_params(event_id=event_id)))
+
+
+def get_team_schedule(
+    *,
+    team_id: str,
+    league_slug: str | None = None,
+    season_year: str | None = None,
+    competition_id: str | None = None,
+) -> dict:
+    """Get schedule for a specific team.
+
+    Args:
+        team_id: ESPN team ID (numeric string), from search_team().
+        league_slug: ESPN league slug (e.g. "eng.1", "esp.1"); narrows the lookup to one league.
+        season_year: 4-digit season year (e.g. "2025"). NOT a season/league slug.
+        competition_id: Competition slug from get_competitions() (e.g. "premier-league", "la-liga"). Optional — filters the schedule to one competition.
+    """
+    return wrap(
+        _get_team_schedule(
+            _params(
+                team_id=team_id,
+                league_slug=league_slug,
+                season_year=season_year,
+                competition_id=competition_id,
+            )
+        )
+    )
+
+
+def get_head_to_head(
+    *,
+    team_id: str,
+    team_id_2: str,
+    league_slug: str | None = None,
+    max_seasons: int | None = None,
+) -> dict:
+    """Get head-to-head history between two teams (via football-data.co.uk).
+
+    Covers European domestic leagues only (Premier League, Championship, La Liga,
+    Serie A, Bundesliga, Ligue 1, Eredivisie, Primeira Liga, Scottish Premiership,
+    Belgian Pro League, Turkish Super Lig). Returns per-meeting results plus an
+    aggregated win/draw/goal summary.
+
+    Args:
+        team_id: ESPN team ID of the first team (numeric string), from search_team().
+        team_id_2: ESPN team ID of the second team (numeric string).
+        league_slug: Optional league hint (e.g. "premier-league"); inferred from the
+            teams when omitted.
+        max_seasons: How many recent seasons to search (default 10, max 34).
+    """
+    return wrap(
+        _get_head_to_head(
+            _params(
+                team_id=team_id,
+                team_id_2=team_id_2,
+                league_slug=league_slug,
+                max_seasons=max_seasons,
+            )
+        )
+    )
+
+
+def get_team_strength(
+    *,
+    team_id: str,
+    team_id_2: str | None = None,
+    date: str | None = None,
+    league_slug: str | None = None,
+    max_seasons: int | None = None,
+) -> dict:
+    """Get a team's ClubElo strength rating, or compare two teams' Elo.
+
+    Free ClubElo data (European clubs only) — a strength / fixture-difficulty
+    control, not an official result. Returns each team's Elo rating, rank,
+    country, and tier; with two teams, also the Elo difference and favorite.
+    Teams that cannot be confidently matched to ClubElo are reported, not guessed.
+
+    Args:
+        team_id: ESPN team ID (numeric string), from search_team().
+        team_id_2: Optional second team ESPN ID — returns an Elo comparison.
+        date: Optional YYYY-MM-DD snapshot date (default today) for historical Elo.
+        league_slug: Optional league hint; inferred from the teams when omitted.
+        max_seasons: Optional seasons of history for the local-Elo fallback used
+            when ClubElo is unreachable (default 10, max 34). Ignored while
+            ClubElo is reachable.
+    """
+    return wrap(
+        _get_team_strength(
+            _params(
+                team_id=team_id,
+                team_id_2=team_id_2,
+                date=date,
+                league_slug=league_slug,
+                max_seasons=max_seasons,
+            )
+        )
+    )
+
+
+def get_match_forecast(
+    *,
+    team_id: str,
+    team_id_2: str | None = None,
+    league_slug: str | None = None,
+) -> dict:
+    """Get ClubElo win/draw/loss + scoreline forecasts for a team's upcoming fixtures.
+
+    Free ClubElo forecast (European clubs only). ClubElo only forecasts about a week
+    ahead, so this is empty between matchdays or in the off-season. Each fixture
+    includes win/draw/loss probabilities (from the team's perspective) and the most
+    likely scorelines.
+
+    Args:
+        team_id: ESPN team ID (numeric string), from search_team().
+        team_id_2: Optional opponent ESPN ID — filters to fixtures against that team.
+        league_slug: Optional league hint; inferred from the team when omitted.
+    """
+    return wrap(
+        _get_match_forecast(
+            _params(team_id=team_id, team_id_2=team_id_2, league_slug=league_slug)
+        )
+    )
+
+
+def get_event_xg(*, event_id: str) -> dict:
+    """Get expected goals (xG) data from Understat.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_xg(_params(event_id=event_id)))
+
+
+def get_event_players_statistics(*, event_id: str) -> dict:
+    """Get player-level match statistics.
+
+    Args:
+        event_id: ESPN match/event ID (numeric string), from schedules or get_daily_schedule().
+    """
+    return wrap(_get_event_players_statistics(_params(event_id=event_id)))
+
+
+def get_missing_players(*, season_id: str) -> dict:
+    """Get injured/missing/doubtful players (PL only via FPL).
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons(). Premier League seasons only.
+    """
+    return wrap(_get_missing_players(_params(season_id=season_id)))
+
+
+def get_season_transfers(
+    *, season_id: str, tm_player_ids: list[str] | None = None
+) -> dict:
+    """Get season transfers via Transfermarkt.
+
+    Args:
+        season_id: Season ID in "{competition}-{year}" form (e.g. "premier-league-2025"), from get_competition_seasons().
+        tm_player_ids: Optional comma-separated Transfermarkt player IDs to filter by.
+    """
+    return wrap(
+        _get_season_transfers(_params(season_id=season_id, tm_player_ids=tm_player_ids))
+    )
+
+
+def get_player_profile(
+    *, player_id: str | None = None, fpl_id: str | None = None, tm_player_id: str | None = None
+) -> dict:
+    """Get player profile. At least one ID required.
+
+    Args:
+        player_id: ESPN athlete ID (any league).
+        fpl_id: FPL player ID (Premier League players only).
+        tm_player_id: Transfermarkt player ID (any league).
+    """
+    return wrap(
+        _get_player_profile(_params(player_id=player_id, fpl_id=fpl_id, tm_player_id=tm_player_id))
+    )
+
+
+def get_player_season_stats(*, player_id: str, league_slug: str | None = None) -> dict:
+    """Get a player's recent gamelog (ESPN "Last 5 Matches") with per-match stats.
+
+    Returns appearances, goals, assists, shots, shots on target, fouls,
+    offsides, and cards for each of the last ~5 matches the player played,
+    across competitions (league, cups, continental). It is not a season total.
+
+    Args:
+        player_id: ESPN athlete ID.
+        league_slug: sports-skills league slug (e.g. "serie-a-brazil",
+            "premier-league") or ESPN's own code ("bra.1", "eng.1").
+            Defaults to "eng.1".
+    """
+    return wrap(_get_player_season_stats(_params(player_id=player_id, league_slug=league_slug)))

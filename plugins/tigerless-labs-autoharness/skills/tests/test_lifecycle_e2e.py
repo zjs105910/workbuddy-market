@@ -1,0 +1,97 @@
+"""Full skill-lifecycle sandbox: birth → use → compete → archive → restore, driven through
+the real dispatch + spawn + promoter + lifecycle. Only the reflector model is a canned stub
+(fake_spawn stages one intent); everything else is the production path on an isolated tmp dir.
+
+This is the deterministic counterpart to the live host runbook (experiments/E7_plugin_e2e):
+it monitors every lifecycle transition on disk. The live run only adds "real Claude Code
+hooks/MCP/recall actually fire".
+"""
+import json
+
+import pytest
+
+from autoharness import config
+from autoharness.hook import capture, dispatch, spawn
+from autoharness.lib import counters, intent_queue, layer, ledger, sidecar, skill_store
+
+LEARNED = "---\nname: learned\ndescription: Use when doing a specific repeatable thing.\n---\n# Learned\nSteps.\n"
+WEAK = "---\nname: weak\ndescription: Use when the rare side note applies.\n---\n# Weak\nx.\n"
+
+
+@pytest.fixture(autouse=True)
+def _small_isolated(monkeypatch):
+    monkeypatch.delenv(config.CHILD_SESSION_ENV, raising=False)
+    monkeypatch.setattr(config, "REFLECT_EVERY_N", 2)
+    monkeypatch.setattr(config, "MATURITY_THRESHOLD", {layer.GLOBAL: 2, layer.PROJECT: 2})
+    monkeypatch.setattr(config, "CAPACITY", {layer.GLOBAL: 5, layer.PROJECT: 1})
+
+
+def _roots(tmp_path):
+    return {layer.GLOBAL: tmp_path / "g", layer.PROJECT: tmp_path / "p"}
+
+
+def _transcript(tmp_path):
+    p = tmp_path / "transcript.jsonl"
+    lines = []
+    for i in range(4):
+        lines.append(json.dumps({"type": "user", "message": {"role": "user", "content": f"q{i}"}}))
+        lines.append(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": f"a{i}"}}))
+    p.write_text("\n".join(lines) + "\n")
+    return p
+
+
+def test_full_skill_lifecycle_through_dispatch(tmp_path, capsys):
+    roots = _roots(tmp_path)
+    proot = roots[layer.PROJECT]
+    transcript = _transcript(tmp_path)
+    stop = {"hook_event_name": "Stop", "session_id": "s1", "transcript_path": str(transcript)}
+
+    def land_learned(event, result, rts):  # stands in for the spawned reflector
+        def fake_spawn(argv, env, bundle):
+            intent_queue.append(env[config.RUN_ID_ENV],
+                                {"action": "create", "name": "learned", "level": "project",
+                                 "body": LEARNED, "reason": "captured repeat", "evidence": "slice"},
+                                rts[layer.PROJECT])
+        spawn.run(capture.window(event["transcript_path"])[0],
+                  dispatch._run_id(result), roots=rts, spawn_fn=fake_spawn)
+
+    # BEAT 1 — birth: tool calls accumulate activity; the Stop at threshold triggers reflection
+    act = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1"}
+    dispatch.dispatch(act, roots=roots)
+    dispatch.dispatch(stop, roots=roots, reflect=land_learned)            # Stop 1: activity 1 < N, no trigger
+    assert skill_store.read_body("project", "learned", proot) is None
+    dispatch.dispatch(act, roots=roots)
+    dispatch.dispatch(stop, roots=roots, reflect=land_learned)            # Stop 2: activity 2 ≥ N → land
+    assert skill_store.read_body("project", "learned", proot) is not None
+    assert sidecar.is_agent_created("project", "learned", proot)
+    assert ledger.read("project", "learned", proot)[0]["action"] == "create"
+    assert counters.request_count(layer.PROJECT, proot) == 2              # denominator grew per Stop
+
+    # BEAT 2 — use: PreToolUse(Skill) bumps the numerator
+    for _ in range(2):
+        dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "Skill",
+                           "tool_input": {"name": "learned"}}, roots=roots)
+    sc = sidecar.read("project", "learned", proot)
+    assert sc["use"] == 2 and sc["view"] == 0
+
+    # BEAT 3 — compete: a weak unused peer; MNG recompute (SessionStart) archives the loser.
+    # learned landed with a real anchor (=2), so two more turns first to graduate it out of probation.
+    for _ in range(2):
+        dispatch.dispatch(stop, roots=roots, reflect=lambda *a: None)
+    skill_store.write_body("project", "weak", WEAK, proot)
+    sidecar.create("project", "weak", anchor=0, root=proot)              # mature (denom 4), zero calls
+    req = counters.request_count(layer.PROJECT, proot)
+    mat = config.MATURITY_THRESHOLD[layer.PROJECT]
+    for name in ("learned", "weak"):                                    # both past probation: capacity decides
+        den = req - sidecar.read("project", name, proot)["anchor"]
+        assert den >= mat, f"{name} still in probation: denominator {den} < maturity {mat}"
+    out = dispatch.dispatch({"hook_event_name": "SessionStart"}, roots=roots)
+    archived = out["result"]["archived"]["project"]
+    assert "weak" in archived and "learned" not in archived            # lowest rate sheds, adhered-to kept
+    assert not skill_store.exists("project", "weak", proot)             # moved out of live tree
+    assert (layer.archive_dir("project", proot) / "weak").exists()
+    assert skill_store.exists("project", "learned", proot)
+
+    # BEAT 4 — restore: archival is reversible
+    skill_store.restore("project", "weak", proot)
+    assert skill_store.exists("project", "weak", proot)

@@ -1,0 +1,1 @@
+- runtime: follow T3 nightly 2908. Verification surfaces gain the preview tab, image, and clean-state rules, the tool-lookup rule covers Pi and every host with a tool search, and setup step 2 gives a concrete check for a missing Claude 5.5 model.

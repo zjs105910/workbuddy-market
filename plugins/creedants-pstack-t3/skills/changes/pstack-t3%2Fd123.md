@@ -1,0 +1,1 @@
+- brigade-admin: the skill defines `<store>`, `<root>`, and `<project>`, and its first service records its three schedules as `intake`, `morning`, and `evening`. poteto-help lists `$brigade-admin`.

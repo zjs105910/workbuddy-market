@@ -1,0 +1,91 @@
+{
+  "description": "Codex lifecycle hooks for planning-with-files plugin installs",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/run_sh.py\" session-start.sh",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA==",
+            "statusMessage": "Loading planning context"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/run_sh.py\" user-prompt-submit.sh",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA=="
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/pre_tool_use.py\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA==",
+            "statusMessage": "Checking plan before tool use"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/permission_request.py\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA=="
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/post_tool_use.py\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA==",
+            "statusMessage": "Reviewing changes against plan"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/run_sh.py\" pre-compact.sh",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA==",
+            "statusMessage": "Preparing planning context before compact"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/.codex/hooks/stop.py\"",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand JgAgACgASgBvAGkAbgAtAFAAYQB0AGgAIAAkAGUAbgB2ADoAUABMAFUARwBJAE4AXwBSAE8ATwBUACAAJwAuAGMAbwBkAGUAeABcAGgAbwBvAGsAcwBcAHAAdwBmAC0AaABvAG8AawAuAGMAbQBkACcAKQAgAHAAbAB1AGcAaQBuAF8AZABpAHMAcABhAHQAYwBoAC4AcAB5AA==",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

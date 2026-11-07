@@ -1,0 +1,1554 @@
+"""Shared ESPN HTTP infrastructure for US sports modules.
+
+Provides caching, rate limiting, retry logic, and parameterized
+ESPN API request functions. Used by nfl, nba, nhl, mlb, wnba modules.
+"""
+
+from __future__ import annotations
+
+import datetime
+import gzip
+import html
+import json
+import logging
+import math
+import os
+import re
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
+from sports_skills import _replay
+
+logger = logging.getLogger("sports_skills._espn_base")
+
+
+# ============================================================
+# ESPN Status Map (common across all US sports)
+# ============================================================
+
+ESPN_STATUS_MAP = {
+    "STATUS_SCHEDULED": "not_started",
+    "STATUS_IN_PROGRESS": "live",
+    "STATUS_HALFTIME": "halftime",
+    "STATUS_FINAL": "closed",
+    "STATUS_FULL_TIME": "closed",
+    "STATUS_POSTPONED": "postponed",
+    "STATUS_CANCELED": "cancelled",
+    "STATUS_SUSPENDED": "suspended",
+    "STATUS_END_PERIOD": "period_break",
+    "STATUS_DELAYED": "delayed",
+    "STATUS_RAIN_DELAY": "delayed",
+    "STATUS_FIRST_HALF": "1st_half",
+    "STATUS_SECOND_HALF": "2nd_half",
+}
+
+
+# ============================================================
+# Module-Level Cache (TTL-based)
+# ============================================================
+
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def _cache_get(key):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry is None:
+            return None
+        value, expiry = entry
+        if time.monotonic() > expiry:
+            del _cache[key]
+            return None
+        return value
+
+
+def _cache_set(key, value, ttl=300):
+    with _cache_lock:
+        if len(_cache) > 500:
+            now = time.monotonic()
+            expired = [k for k, (_, exp) in _cache.items() if now > exp]
+            for k in expired:
+                del _cache[k]
+        _cache[key] = (value, time.monotonic() + ttl)
+
+
+# ============================================================
+# Rate Limiter (Token Bucket)
+# ============================================================
+
+
+class RateLimiter:
+    def __init__(self, max_tokens=9, refill_rate=9.0 / 60.0):
+        self.max_tokens = max_tokens
+        self.tokens = max_tokens
+        self.refill_rate = refill_rate
+        self.last_refill = time.monotonic()
+        self.lock = threading.Lock()
+
+    def acquire(self):
+        with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.last_refill
+            self.tokens = min(self.max_tokens, self.tokens + elapsed * self.refill_rate)
+            self.last_refill = now
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return
+        time.sleep(max(0, (1 - self.tokens) / self.refill_rate))
+        self.acquire()
+
+
+_espn_rate_limiter = RateLimiter(max_tokens=2, refill_rate=2.0)
+
+
+# ============================================================
+# HTTP Helpers — Retry, Error Handling
+# ============================================================
+
+def _default_user_agent():
+    """Build the outbound User-Agent for ESPN requests.
+
+    The interpreter version is derived rather than hardcoded so the string never
+    misreports the client. Operators can override it via
+    ``SPORTS_SKILLS_USER_AGENT`` without waiting on a release.
+    """
+    override = os.environ.get("SPORTS_SKILLS_USER_AGENT")
+    if override:
+        return override
+    try:
+        pkg_version = _pkg_version("sports-skills")
+    except PackageNotFoundError:
+        pkg_version = "dev"
+    return (
+        f"Python-urllib/{sys.version_info.major}.{sys.version_info.minor}"
+        f" (+sports-skills/{pkg_version}; https://github.com/machina-sports/sports-skills)"
+    )
+
+
+_USER_AGENT = _default_user_agent()
+
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
+
+# Both hosts serve the identical /apis/site/v2/sports/... surface — same paths,
+# same query semantics, same response shape — so the second is a drop-in mirror
+# when the first refuses a request.
+_SITE_API_HOSTS = ("site.api.espn.com", "site.web.api.espn.com")
+
+# Status codes where a different host may still serve the request. A 404 is not
+# included: a missing resource is missing on every host.
+_HOST_FALLBACK_CODES = {401, 403, 451}
+
+_MAX_RETRIES = 2
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 4.0
+
+
+def _unwrap_json_error(text):
+    """Pull the human-readable sentence out of a JSON error envelope.
+
+    Upstream 4xx bodies are JSON like ``{"error":{"message":"No stats found.",
+    "code":404}}``. Handed to an agent verbatim that reads as data rather than as
+    a failure, so lift the message out and drop the wrapper.
+    """
+    if not text.lstrip().startswith(("{", "[")):
+        return None
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    seen = payload
+    for _ in range(4):
+        if isinstance(seen, list):
+            seen = seen[0] if seen else None
+        if not isinstance(seen, dict):
+            break
+        for key in ("message", "detail", "error_description", "reason"):
+            value = seen.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        seen = seen.get("error") or seen.get("errors")
+    return None
+
+
+def _summarize_http_error(code, url, body):
+    """Collapse an upstream error body into one informative line.
+
+    Upstream error responses are HTML pages. Passing them through as ``message``
+    is useless to a calling agent, so reduce them to the status, the host, the
+    page title, and any provider reference id worth quoting in a support report.
+    """
+    host = urllib.parse.urlsplit(url).netloc or "upstream"
+    text = html.unescape((body or "").strip())
+    if not text:
+        return f"HTTP {code} from {host}"
+    head = text[:200].lstrip().lower()
+    if not (head.startswith(("<!doctype", "<html")) or "<html" in head):
+        detail = _unwrap_json_error(text)
+        return f"HTTP {code} from {host}: {detail}" if detail else text[:300]
+    parts = [f"HTTP {code} from {host}"]
+    title = re.search(r"<title>(.*?)</title>", text, re.IGNORECASE | re.DOTALL)
+    if title and title.group(1).strip():
+        parts.append(title.group(1).strip())
+    ref = re.search(r"Reference\s*#\s*([\w.-]+)", text)
+    if ref:
+        parts.append(f"reference {ref.group(1)}")
+    return " — ".join(parts)
+
+
+def _is_retryable(exc):
+    """Check if an exception is worth retrying (transient failures only)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _RETRYABLE_CODES
+    if isinstance(exc, (urllib.error.URLError, OSError, TimeoutError)):
+        return True
+    return False
+
+
+def _http_fetch(
+    url,
+    headers=None,
+    rate_limiter=None,
+    timeout=30,
+    max_retries=_MAX_RETRIES,
+    decode_gzip=False,
+    ssl_context=None,
+):
+    """HTTP fetch honouring ``SPORTS_SKILLS_REPLAY`` (see ``_replay``).
+
+    Returns (data_bytes, None) on success or (None, error_dict) on failure.
+    In replay mode no network call, rate-limit wait, or retry happens.
+    """
+    return _replay.fetch(
+        url,
+        lambda: _live_http_fetch(
+            url,
+            headers=headers,
+            rate_limiter=rate_limiter,
+            timeout=timeout,
+            max_retries=max_retries,
+            decode_gzip=decode_gzip,
+            ssl_context=ssl_context,
+        ),
+    )
+
+
+def _live_http_fetch(
+    url,
+    headers=None,
+    rate_limiter=None,
+    timeout=30,
+    max_retries=_MAX_RETRIES,
+    decode_gzip=False,
+    ssl_context=None,
+):
+    """Core HTTP fetch with retry + exponential backoff.
+
+    Returns (data_bytes, None) on success or (None, error_dict) on failure.
+    Only retries on transient errors (5xx, 429, timeouts, connection errors).
+    Client errors (4xx except 429) fail immediately.
+    """
+    last_error = None
+    for attempt in range(1 + max_retries):
+        if rate_limiter:
+            rate_limiter.acquire()
+        req = urllib.request.Request(url)
+        for key, value in (headers or {}).items():
+            req.add_header(key, value)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as resp:
+                raw = resp.read()
+                if decode_gzip and resp.headers.get("Content-Encoding") == "gzip":
+                    raw = gzip.decompress(raw)
+                return raw, None
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode() if e.fp else ""
+            except Exception:
+                pass
+            last_error = {
+                "error": True,
+                "status_code": e.code,
+                "message": _summarize_http_error(e.code, url, body),
+            }
+            if not _is_retryable(e):
+                logger.debug("HTTP %d (non-retryable) for %s", e.code, url)
+                return None, last_error
+            logger.debug(
+                "HTTP %d (retryable, attempt %d/%d) for %s",
+                e.code,
+                attempt + 1,
+                1 + max_retries,
+                url,
+            )
+        except Exception as e:
+            last_error = {"error": True, "message": str(e)}
+            if not _is_retryable(e):
+                logger.debug("Non-retryable error for %s: %s", url, e)
+                return None, last_error
+            logger.debug(
+                "Retryable error (attempt %d/%d) for %s: %s",
+                attempt + 1,
+                1 + max_retries,
+                url,
+                e,
+            )
+
+        if attempt < max_retries:
+            delay = min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY)
+            if isinstance(last_error, dict) and last_error.get("status_code") == 429:
+                delay = min(delay * 2, _RETRY_MAX_DELAY * 2)
+            time.sleep(delay)
+
+    if max_retries > 0:
+        logger.warning(
+            "All %d attempts failed for %s: %s",
+            1 + max_retries,
+            url,
+            last_error.get("message", ""),
+        )
+    else:
+        logger.debug("Request failed for %s: %s", url, last_error.get("message", ""))
+    return None, last_error
+
+
+# ============================================================
+# ESPN API Request Functions (parameterized by sport)
+# ============================================================
+
+
+def espn_request(sport_path, resource="scoreboard", params=None, max_retries=_MAX_RETRIES):
+    """ESPN public site API request. Rate-limited and cached.
+
+    Args:
+        sport_path: e.g. "football/nfl", "basketball/nba", "hockey/nhl"
+        resource: API resource, e.g. "scoreboard", "teams", "teams/12/roster"
+        params: Optional query parameters dict.
+        max_retries: Set to 0 for exploratory/probing requests.
+    """
+    cache_key = f"espn:{sport_path}:{resource}:{json.dumps(params or {}, sort_keys=True)}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    query = "?" + urllib.parse.urlencode(params) if params else ""
+    headers = {"User-Agent": _USER_AGENT}
+    err = None
+    for host in _SITE_API_HOSTS:
+        url = f"https://{host}/apis/site/v2/sports/{sport_path}/{resource}{query}"
+        raw, err = _http_fetch(
+            url, headers=headers, rate_limiter=_espn_rate_limiter, max_retries=max_retries
+        )
+        if err:
+            # Only worth another host when this one refused to serve us at all.
+            # A 404 means the resource genuinely does not exist anywhere.
+            if err.get("status_code") in _HOST_FALLBACK_CODES:
+                logger.debug(
+                    "HTTP %s from %s; trying mirror host", err.get("status_code"), host
+                )
+                continue
+            return err
+        try:
+            data = json.loads(raw.decode())
+            _cache_set(cache_key, data, ttl=120)
+            return data
+        except (json.JSONDecodeError, ValueError):
+            return {"error": True, "message": "ESPN returned invalid JSON"}
+    return err
+
+
+#: ``season_type`` values accepted by team schedules -> ESPN ``seasontype`` codes.
+_SCHEDULE_SEASON_TYPES = {
+    "preseason": ("1",),
+    "1": ("1",),
+    "regular": ("2",),
+    "2": ("2",),
+    "postseason": ("3",),
+    "playoffs": ("3",),
+    "3": ("3",),
+    "playin": ("5",),
+    "play-in": ("5",),
+    "5": ("5",),
+}
+
+
+def espn_team_schedule(sport_path, team_id, season=None, season_type=None, all_types=("2", "3")):
+    """ESPN team schedule, optionally for a given season type.
+
+    ESPN's ``teams/{id}/schedule`` returns regular-season games only unless
+    ``seasontype=3`` is sent, so playoff/bowl/tournament games are missed.
+    ``season_type`` is ``regular``, ``postseason`` (alias ``playoffs``),
+    ``preseason``, ``playin`` (NBA play-in, ESPN type 5), ``all`` (the
+    ``all_types`` codes, merged in date order) or an ESPN code 1/2/3/5.
+    Omitted, the request is unchanged (no ``seasontype``). Returns the raw ESPN
+    payload with ``events`` merged across season types, or an error dict.
+    """
+    params = {}
+    if season:
+        params["season"] = season
+    if season_type is None or season_type == "":
+        codes = (None,)
+    else:
+        key = str(season_type).strip().lower()
+        codes = tuple(all_types) if key == "all" else _SCHEDULE_SEASON_TYPES.get(key)
+        if codes is None:
+            return {
+                "error": True,
+                "message": (
+                    f"Unknown season_type '{season_type}'. Use one of: "
+                    "regular, postseason, preseason, playin, all (or ESPN codes 1, 2, 3, 5)."
+                ),
+            }
+    merged = None
+    seen = set()
+    for code in codes:
+        req = dict(params)
+        if code:
+            req["seasontype"] = code
+        data = espn_request(sport_path, f"teams/{team_id}/schedule", req or None)
+        if data.get("error"):
+            return data
+        if merged is None:
+            merged = dict(data)
+            merged["events"] = []
+        for event in data.get("events", []):
+            key = event.get("id")
+            if key is not None and key in seen:
+                continue
+            seen.add(key)
+            merged["events"].append(event)
+    if len(codes) > 1:
+        merged["events"].sort(key=lambda e: e.get("date") or "")
+    return merged
+
+
+def espn_web_request(sport_path, resource, params=None, *, timeout=30, max_retries=_MAX_RETRIES):
+    """ESPN web API (standings, season lists). Different host from site API.
+
+    Args:
+        sport_path: e.g. "football/nfl", "basketball/nba"
+        resource: API resource, e.g. "standings"
+        params: Optional query parameters dict.
+        timeout: Seconds per attempt.
+        max_retries: Retries on transient errors; 0 for an optional extra request.
+    """
+    cache_key = f"espn_web:{sport_path}:{resource}:{json.dumps(params or {}, sort_keys=True)}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    url = f"https://site.web.api.espn.com/apis/v2/sports/{sport_path}/{resource}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(
+        url, headers=headers, rate_limiter=_espn_rate_limiter, timeout=timeout, max_retries=max_retries
+    )
+    if err:
+        return err
+    try:
+        data = json.loads(raw.decode())
+        _cache_set(cache_key, data, ttl=300)
+        return data
+    except (json.JSONDecodeError, ValueError):
+        return {"error": True, "message": "ESPN web API returned invalid JSON"}
+
+
+def espn_fitt_request(sport_path, resource, params=None):
+    """ESPN FITT API request (BPI/power index data). Rate-limited and cached.
+
+    Uses a different URL path from the standard site API:
+    https://site.web.api.espn.com/apis/fitt/v3/sports/{sport_path}/{resource}
+
+    Args:
+        sport_path: e.g. "basketball/mens-college-basketball"
+        resource: API resource, e.g. "powerindex"
+        params: Optional query parameters dict.
+    """
+    cache_key = f"espn_fitt:{sport_path}:{resource}:{json.dumps(params or {}, sort_keys=True)}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    url = f"https://site.web.api.espn.com/apis/fitt/v3/sports/{sport_path}/{resource}"
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(url, headers=headers, rate_limiter=_espn_rate_limiter)
+    if err:
+        return err
+    try:
+        data = json.loads(raw.decode())
+        _cache_set(cache_key, data, ttl=300)
+        return data
+    except (json.JSONDecodeError, ValueError):
+        return {"error": True, "message": "ESPN FITT API returned invalid JSON"}
+
+
+def espn_summary(sport_path, event_id, max_retries=_MAX_RETRIES):
+    """ESPN game summary endpoint (box score, stats, play-by-play summary).
+
+    Args:
+        sport_path: e.g. "football/nfl", "basketball/nba"
+        event_id: ESPN event ID.
+        max_retries: Set to 0 for exploratory requests.
+
+    Returns parsed JSON dict on success, None on failure.
+    """
+    if not event_id:
+        return None
+    cache_key = f"espn_summary:{sport_path}:{event_id}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached if cached else None
+    url = (
+        f"https://site.web.api.espn.com/apis/site/v2/sports/{sport_path}"
+        f"/summary?event={event_id}"
+    )
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(
+        url, headers=headers, rate_limiter=_espn_rate_limiter, max_retries=max_retries
+    )
+    if err:
+        logger.debug(
+            "ESPN summary failed for %s/%s: %s",
+            sport_path,
+            event_id,
+            err.get("message", ""),
+        )
+        _cache_set(cache_key, {}, ttl=60)
+        return None
+    try:
+        data = json.loads(raw.decode())
+        _cache_set(cache_key, data, ttl=300)
+        return data
+    except (json.JSONDecodeError, ValueError):
+        _cache_set(cache_key, {}, ttl=60)
+        return None
+
+
+# ============================================================
+# Athlete $ref resolver (shared across NHL, MLB, WNBA, NBA)
+# ============================================================
+
+def normalize_score(score):
+    """Competitor score as ESPN's string.
+
+    Scoreboards send ``"27"``; ``teams/{id}/schedule`` sends
+    ``{"value": 27.0, "displayValue": "27"}``. Both come back as ``"27"``.
+    """
+    if isinstance(score, dict):
+        return score.get("displayValue", "0")
+    return score
+
+
+def normalize_odds(odds_list):
+    """Normalize ESPN odds data from a competition into a structured format.
+
+    ESPN scoreboard endpoints return DraftKings odds with moneyline, spread,
+    and total (over/under) including opening and closing lines. This function
+    extracts all available data instead of just the summary string.
+
+    Args:
+        odds_list: The ``comp.get("odds", [])`` array from an ESPN competition.
+
+    Returns:
+        A dict with structured odds if data is present, or ``None`` if the
+        odds list is empty or contains no usable data.
+    """
+    if not odds_list:
+        return None
+
+    o = odds_list[0]  # ESPN provides one provider (DraftKings)
+    if o is None:
+        return None
+
+    ml = o.get("moneyline", {})
+    ps = o.get("pointSpread", {})
+    tot = o.get("total", {})
+    home_odds = o.get("homeTeamOdds", {})
+    away_odds = o.get("awayTeamOdds", {})
+
+    # Determine favorite
+    favorite = None
+    if home_odds.get("favorite"):
+        favorite = "home"
+    elif away_odds.get("favorite"):
+        favorite = "away"
+
+    result = {
+        "provider": o.get("provider", {}).get("name", ""),
+        "details": o.get("details", ""),
+        "spread": o.get("spread", ""),
+        "over_under": o.get("overUnder", ""),
+        "favorite": favorite,
+    }
+
+    # Moneyline (closing lines) — includes draw for soccer 3-way markets
+    if ml:
+        result["moneyline"] = {
+            "home": ml.get("home", {}).get("close", {}).get("odds", ""),
+            "away": ml.get("away", {}).get("close", {}).get("odds", ""),
+        }
+        draw_ml = ml.get("draw", {}).get("close", {}).get("odds", "")
+        if draw_ml:
+            result["moneyline"]["draw"] = draw_ml
+
+    # Spread with juice (closing lines)
+    if ps:
+        result["spread_line"] = {
+            "home": {
+                "line": ps.get("home", {}).get("close", {}).get("line", ""),
+                "odds": ps.get("home", {}).get("close", {}).get("odds", ""),
+            },
+            "away": {
+                "line": ps.get("away", {}).get("close", {}).get("line", ""),
+                "odds": ps.get("away", {}).get("close", {}).get("odds", ""),
+            },
+        }
+
+    # Total (over/under with juice, closing lines)
+    if tot:
+        result["total"] = {
+            "over": {
+                "line": tot.get("over", {}).get("close", {}).get("line", ""),
+                "odds": tot.get("over", {}).get("close", {}).get("odds", ""),
+            },
+            "under": {
+                "line": tot.get("under", {}).get("close", {}).get("line", ""),
+                "odds": tot.get("under", {}).get("close", {}).get("odds", ""),
+            },
+        }
+
+    # Opening lines (line movement)
+    open_ml_home = ml.get("home", {}).get("open", {}).get("odds", "")
+    open_ml_away = ml.get("away", {}).get("open", {}).get("odds", "")
+    open_ml_draw = ml.get("draw", {}).get("open", {}).get("odds", "")
+    open_spread_home = ps.get("home", {}).get("open", {}).get("line", "")
+    open_spread_away = ps.get("away", {}).get("open", {}).get("line", "")
+    open_total_over = tot.get("over", {}).get("open", {}).get("line", "")
+
+    if any([open_ml_home, open_ml_away, open_spread_home, open_total_over]):
+        result["open"] = {}
+        if open_ml_home or open_ml_away:
+            open_ml = {"home": open_ml_home, "away": open_ml_away}
+            if open_ml_draw:
+                open_ml["draw"] = open_ml_draw
+            result["open"]["moneyline"] = open_ml
+        if open_spread_home or open_spread_away:
+            result["open"]["spread"] = {
+                "home": open_spread_home,
+                "away": open_spread_away,
+            }
+        if open_total_over:
+            result["open"]["total"] = open_total_over
+
+    return result
+
+
+def _american_odds(value):
+    """Parse an ESPN American price ("-298", "+240", -298) to a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value).strip().replace("+", "")
+        if not text:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+    if number != number or number in (float("inf"), float("-inf")) or number == 0:
+        return None
+    return int(number) if float(number).is_integer() else number
+
+
+def _dig(container, *keys):
+    """Walk optional nested containers; a missing or wrong-shaped level is None.
+
+    Every pickcenter container is optional and ESPN publishes the absent ones
+    as ``null`` rather than omitting them, so ``{"moneyline": null}`` and
+    ``{"moneyline": {"home": null}}`` are both ordinary payloads. Reading them
+    positionally would raise on a game that simply has no published line.
+    """
+    for key in keys:
+        if not isinstance(container, dict):
+            return None
+        container = container.get(key)
+    return container
+
+
+# Where a pickcenter entry carries a home/away moneyline pair, best first.
+# Closing/current lines beat the opening line, which only moves in when the
+# provider published nothing newer.
+_MONEYLINE_LEVELS = (
+    ("close", lambda e: (_dig(e, "moneyline", "home", "close", "odds"),
+                         _dig(e, "moneyline", "away", "close", "odds"))),
+    ("current", lambda e: (_dig(e, "homeTeamOdds", "moneyLine"),
+                           _dig(e, "awayTeamOdds", "moneyLine"))),
+    ("open", lambda e: (_dig(e, "moneyline", "home", "open", "odds"),
+                        _dig(e, "moneyline", "away", "open", "odds"))),
+)
+
+
+def normalize_summary_odds(summary_data):
+    """Home/away moneyline from an ESPN summary's ``pickcenter`` block.
+
+    Scoreboard events carry ``competitions[].odds``; the summary endpoint
+    carries ``pickcenter`` instead, which ``normalize_odds`` never sees. Both
+    sides always come from ONE provider entry — stitching a home price from one
+    bookmaker onto an away price from another fabricates a market that nobody
+    quotes. Providers are tried in ESPN's own ``priority`` order.
+
+    Returns ``{provider, provider_id, home_odds, away_odds, line, captured_at,
+    source}`` or ``None`` when no provider publishes a complete pair. ESPN
+    stamps pickcenter with no capture time, so ``captured_at`` is always None
+    rather than an invented "now".
+    """
+    entries = (summary_data or {}).get("pickcenter") or []
+    if not isinstance(entries, list):
+        return None
+
+    ordered = sorted(
+        (e for e in entries if isinstance(e, dict)),
+        key=lambda e: _american_odds(_dig(e, "provider", "priority")) or 99,
+    )
+    for entry in ordered:
+        for line, read in _MONEYLINE_LEVELS:
+            home, away = read(entry)
+            home_odds = _american_odds(home)
+            away_odds = _american_odds(away)
+            if home_odds is None or away_odds is None:
+                continue
+            provider = _dig(entry, "provider") or {}
+            if not isinstance(provider, dict):
+                provider = {}
+            return {
+                "provider": provider.get("name", ""),
+                "provider_id": str(provider.get("id", "")),
+                "home_odds": home_odds,
+                "away_odds": away_odds,
+                "line": line,
+                "captured_at": None,
+                "source": "espn_pickcenter",
+            }
+    return None
+
+
+def _resolve_athlete_ref(ref_url: str) -> dict:
+    """Follow an ESPN athlete $ref URL and return name + athlete_id.
+
+    ESPN's core leaders API returns athlete data as a $ref link rather than
+    inline. This helper fetches the ref and extracts the name and ID, with
+    caching so repeated calls for the same athlete are free.
+
+    Returns {"name": str, "id": str}. Empty strings on failure.
+    """
+    if not ref_url:
+        return {"name": "", "id": ""}
+
+    # Extract ID directly from URL (e.g. .../athletes/12345)
+    athlete_id = ""
+    match = re.search(r'/athletes/(\d+)', ref_url)
+    if match:
+        athlete_id = match.group(1)
+
+    cache_key = f"athlete_ref:{ref_url}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        # Migrate: old cache entries are bare strings
+        if isinstance(cached, str):
+            return {"name": cached, "id": athlete_id}
+        return cached
+
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(ref_url, headers=headers, timeout=5)
+    if err:
+        result = {"name": "", "id": athlete_id}
+        _cache_set(cache_key, result, ttl=60)
+        return result
+
+    try:
+        data = json.loads(raw.decode())
+        name = data.get("displayName") or data.get("fullName") or ""
+        if not athlete_id:
+            athlete_id = str(data.get("id", ""))
+        result = {"name": name, "id": athlete_id}
+        _cache_set(cache_key, result, ttl=3600)
+        return result
+    except (json.JSONDecodeError, ValueError):
+        result = {"name": "", "id": athlete_id}
+        _cache_set(cache_key, result, ttl=60)
+        return result
+
+
+# ============================================================
+# Core API support (team/player stats, futures)
+# ============================================================
+
+CORE_LEAGUE_MAP = {
+    "football/nfl": ("football", "nfl"),
+    "basketball/nba": ("basketball", "nba"),
+    "basketball/wnba": ("basketball", "wnba"),
+    "hockey/nhl": ("hockey", "nhl"),
+    "baseball/mlb": ("baseball", "mlb"),
+    "football/college-football": ("football", "college-football"),
+    "basketball/mens-college-basketball": ("basketball", "mens-college-basketball"),
+}
+
+
+def epoch_seconds(iso):
+    """Epoch seconds for an ISO-8601 instant with an offset (``"2025-09-27T02:15:00Z"``).
+
+    ``None`` when the value is empty, unparseable or has no offset.
+    """
+    if not iso:
+        return None
+    try:
+        instant = datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if instant.tzinfo is None:
+        return None
+    return int(instant.timestamp())
+
+
+def _current_year():
+    """Return the current year (UTC)."""
+    return datetime.datetime.utcnow().year
+
+
+def fill_team_divisions(groups, division_data):
+    """Set ``division`` on each standings entry from a ``level=3`` standings payload.
+
+    ESPN's default standings are conference tables with no division; with
+    ``level=3`` each conference nests its divisions. Only the entries change,
+    so the groups keep their conference shape and order. A team missing from
+    ``division_data`` (or an error dict) gets its group's division, else ``""``.
+    """
+    divisions = {}
+    for conference in division_data.get("children", []):
+        for division in conference.get("children", []):
+            for entry in division.get("standings", {}).get("entries", []):
+                divisions[str(entry.get("team", {}).get("id", ""))] = division.get("name", "")
+    for group in groups:
+        for entry in group["entries"]:
+            entry["division"] = group.get("division") or divisions.get(entry["team"]["id"], "")
+
+
+_STANDINGS_SEASON_TYPES = {"1": "preseason", "2": "regular", "3": "postseason", "4": "offseason", "5": "playin"}
+
+
+def event_season_type(espn_event):
+    """``preseason`` / ``regular`` / ``postseason`` / ``playin`` for an ESPN event.
+
+    Team schedules carry ``seasonType``; scoreboards carry ``season.type``.
+    ``""`` when neither is present.
+    """
+    season_type, season = espn_event.get("seasonType"), espn_event.get("season")
+    code = season_type.get("id") if isinstance(season_type, dict) else season_type
+    if not code and isinstance(season, dict):
+        code = season.get("type")
+    return _STANDINGS_SEASON_TYPES.get(str(code or ""), "")
+
+
+def _now():
+    """Current time as epoch seconds (a seam for tests)."""
+    return time.time()
+
+
+def _tables(data):
+    """Every standings table of an ESPN standings payload, outermost first.
+
+    The root carries its own table when ESPN is filtered to one conference
+    (college ``group=``); otherwise tables sit under ``children`` (and, with
+    ``level=3``, their children).
+    """
+    tables = []
+    nodes = [data]
+    while nodes:
+        node = nodes.pop(0)
+        if not isinstance(node, dict):
+            continue
+        if isinstance(node.get("standings"), dict) and node["standings"]:
+            tables.append(node["standings"])
+        nodes.extend(node.get("children") or [])
+    return tables
+
+
+def _standings_table(data):
+    """The first standings table of an ESPN standings payload (``{}`` if none)."""
+    for child in data.get("children") or []:
+        if isinstance(child, dict) and child.get("standings"):
+            return child["standings"]
+    return data.get("standings") or {}
+
+
+def standings_season(data):
+    """Season, season type and season status of an ESPN standings payload.
+
+    The standings tables say which season and season type their rows describe;
+    the top-level ``season`` is ESPN's *current* season, which can differ (MLB
+    reports 2027 over 2026 tables in the offseason). ``season_status`` compares
+    now with that season's regular-season dates: ``not_started``,
+    ``in_progress`` or ``complete`` (``""`` when ESPN sends no dates).
+    """
+    table = _standings_table(data)
+    year = table.get("season") or (data.get("season") or {}).get("year", "")
+    season_type = _STANDINGS_SEASON_TYPES.get(str(table.get("seasonType", "")), "")
+    status = ""
+    for entry in data.get("seasons") or []:
+        if not isinstance(entry, dict) or entry.get("year") != year:
+            continue
+        for kind in entry.get("types") or []:
+            if not isinstance(kind, dict) or str(kind.get("id")) != "2":
+                continue
+            start, end = epoch_seconds(kind.get("startDate")), epoch_seconds(kind.get("endDate"))
+            now = _now()
+            if start and now < start:
+                status = "not_started"
+            elif end and now >= end:
+                status = "complete"
+            elif start:
+                status = "in_progress"
+    return {"season": year, "season_type": season_type, "season_status": status}
+
+
+def _record(stats):
+    """``(wins, losses)`` of a standings row, or ``None`` when it has neither.
+
+    CFB rows have no ``losses`` stat, only the ``overall`` record ("12-2").
+    """
+    try:
+        if "wins" in stats and "losses" in stats:
+            return float(stats["wins"].get("value") or 0), float(stats["losses"].get("value") or 0)
+        overall = str((stats.get("overall") or {}).get("displayValue", ""))
+        wins, losses = overall.split("-")[:2]
+        return float(wins), float(losses)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _no_games_played(data):
+    """True when every standings row has zero wins and zero losses."""
+    rows = [e for table in _tables(data) for e in (table.get("entries") or []) if isinstance(e, dict)]
+    if not rows:
+        return False
+    for entry in rows:
+        stats = {s.get("name"): s for s in entry.get("stats") or [] if isinstance(s, dict)}
+        if _record(stats) != (0, 0):
+            return False
+    return True
+
+
+def default_standings_season(data, requested, load):
+    """Fall back to the last season with standings when none was requested.
+
+    Between seasons ESPN's default standings are the upcoming season: a table
+    of zeros, or preseason records. When the caller named no season and that
+    season has no regular-season games yet (ESPN's dates say it has not
+    started, the table is preseason, or no team has a win or a loss),
+    ``load(year)`` fetches the prior season, which is kept only if it really
+    is that season.
+
+    Returns ``(data, defaulted_from)``; ``defaulted_from`` is the season that
+    was skipped, or ``None`` when ``data`` is unchanged.
+    """
+    if requested not in (None, ""):
+        return data, None
+    info = standings_season(data)
+    year = info["season"]
+    if not isinstance(year, int):
+        return data, None
+    upcoming = (
+        info["season_status"] == "not_started"
+        or info["season_type"] == "preseason"
+        or (info["season_status"] != "complete" and _no_games_played(data))
+    )
+    if not upcoming:
+        return data, None
+    prior = load(year - 1)
+    if not isinstance(prior, dict) or prior.get("error") or standings_season(prior)["season"] != year - 1:
+        return data, None
+    return prior, year
+
+
+def standings_fields(data, requested, defaulted_from):
+    """``season``/``season_type``/``season_status`` (and the default note) for a response."""
+    info = standings_season(data)
+    if requested not in (None, ""):
+        try:
+            info["season"] = int(requested)
+        except (TypeError, ValueError):
+            info["season"] = requested
+    if defaulted_from:
+        info["defaulted_from"] = defaulted_from
+        info["note"] = (
+            f"The {defaulted_from} standings have no regular-season games yet; returned {info['season']}. "
+            f"Pass season={defaulted_from} for the upcoming season's table."
+        )
+    return info
+
+
+def fetch_season(loader, season_year, explicit):
+    """Fetch a season-scoped resource, stepping back a year for an implied season.
+
+    Season-scoped stats endpoints are empty until a season has been played, so a
+    season derived from the calendar (rather than requested by the caller) points
+    at a year with no data for months every offseason. When the season was
+    implied, retry the prior year and report the substitution; when the caller
+    named a season, return its error untouched rather than answering about a
+    different year.
+
+    Args:
+        loader: callable taking a year and returning an ESPN response dict.
+        season_year: the season to try first.
+        explicit: True when the caller supplied the season.
+
+    Returns:
+        ``(data, season_used, note)`` where note is None unless a year was
+        substituted.
+    """
+    data = loader(season_year)
+    if explicit or not isinstance(data, dict) or not data.get("error"):
+        return data, season_year, None
+    prior = season_year - 1
+    fallback = loader(prior)
+    if not isinstance(fallback, dict) or fallback.get("error"):
+        return data, season_year, None
+    note = (
+        f"season {season_year} has no data yet; returned {prior}. "
+        f"Pass the season explicitly to query {season_year}."
+    )
+    logger.debug("season %s empty; fell back to %s", season_year, prior)
+    return fallback, prior, note
+
+
+def _resolve_team_ref(ref_url: str) -> str:
+    """Follow an ESPN team $ref URL and return the team's displayName.
+
+    Same pattern as ``_resolve_athlete_ref`` but for team references.
+    Returns empty string on any failure (safe fallback).
+    """
+    if not ref_url:
+        return ""
+
+    cache_key = f"team_ref:{ref_url}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(ref_url, headers=headers, timeout=5)
+    if err:
+        _cache_set(cache_key, "", ttl=60)
+        return ""
+
+    try:
+        data = json.loads(raw.decode())
+        name = data.get("displayName") or data.get("name") or ""
+        _cache_set(cache_key, name, ttl=3600)
+        return name
+    except (json.JSONDecodeError, ValueError):
+        _cache_set(cache_key, "", ttl=60)
+        return ""
+
+
+def espn_core_request(sport_path, resource_path, ttl=300):
+    """ESPN Core API request. Rate-limited and cached.
+
+    Args:
+        sport_path: e.g. "football/nfl", "basketball/nba"
+        resource_path: Path after the league, e.g. "seasons/2025/futures"
+        ttl: Cache TTL in seconds.
+    """
+    mapping = CORE_LEAGUE_MAP.get(sport_path)
+    if not mapping:
+        return {"error": True, "message": f"Unknown sport path for core API: {sport_path}"}
+    sport, league = mapping
+
+    cache_key = f"espn_core:{sport}:{league}:{resource_path}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    url = (
+        f"https://sports.core.api.espn.com/v2/sports/{sport}"
+        f"/leagues/{league}/{resource_path}"
+    )
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(url, headers=headers, rate_limiter=_espn_rate_limiter)
+    if err:
+        return err
+    try:
+        data = json.loads(raw.decode())
+        _cache_set(cache_key, data, ttl=ttl)
+        return data
+    except (json.JSONDecodeError, ValueError):
+        return {"error": True, "message": "ESPN core API returned invalid JSON"}
+
+
+def _core_path(ref_url):
+    """The path after ``/leagues/<league>/`` of a core API ``$ref`` URL (``""`` if none)."""
+    parts = str(ref_url or "").split("/leagues/", 1)
+    if len(parts) < 2 or "/" not in parts[1]:
+        return ""
+    return parts[1].split("/", 1)[1].split("?", 1)[0]
+
+
+def espn_week_rankings(sport_path, season, week):
+    """The polls of one regular-season week of a past or current season.
+
+    The site API's ``rankings`` ignores the season once a week is given (it
+    returns that week of the current season), so the week is read from the core
+    API instead: one request for the poll list, one per poll, and one for the
+    team list the polls' team links are resolved against. Returns the site
+    API's shape (``{"rankings": [...]}``) so the league normalizers apply.
+    """
+    listing = espn_core_request(sport_path, f"seasons/{season}/types/2/weeks/{week}/rankings", ttl=3600)
+    if listing.get("error"):
+        return listing
+    teams_data = espn_request(sport_path, "teams", {"limit": 1000})
+    if teams_data.get("error"):
+        return teams_data
+    teams = {}
+    for sport in teams_data.get("sports", []):
+        for league in sport.get("leagues", []):
+            for wrapper in league.get("teams", []):
+                team = wrapper.get("team", {})
+                logo = (team.get("logos") or [{}])[0].get("href", "")
+                teams[str(team.get("id", ""))] = {**team, "logo": team.get("logo") or logo}
+    rankings = []
+    for item in listing.get("items") or []:
+        path = _core_path((item or {}).get("$ref"))
+        if not path:
+            continue
+        poll = espn_core_request(sport_path, path, ttl=3600)
+        if poll.get("error"):
+            return poll
+        ranks = []
+        for rank in poll.get("ranks") or []:
+            ref = str((rank.get("team") or {}).get("$ref", ""))
+            team_id = ref.split("/teams/")[-1].split("?")[0] if "/teams/" in ref else ""
+            ranks.append(
+                {
+                    **rank,
+                    "team": teams.get(team_id, {"id": team_id}),
+                    "recordSummary": (rank.get("record") or {}).get("summary", ""),
+                }
+            )
+        rankings.append({**poll, "ranks": ranks})
+    return {"rankings": rankings, "week": int(week)}
+
+
+# ============================================================
+# Shared Normalizers — Injuries, Transactions, Stats, Futures, Depth Charts
+# ============================================================
+
+
+def _as_dict(value):
+    """``value`` when it is a dict, else ``{}`` (ESPN sends null for absent objects)."""
+    return value if isinstance(value, dict) else {}
+
+
+def normalize_injuries(data):
+    """Normalize ESPN injuries response (shared across all US sports).
+
+    Input: full response from ``espn_request(SPORT_PATH, "injuries")``.
+
+    ``athlete_id`` is ESPN's own ``athlete.id`` (as a string) or None; a
+    record without one is ``unresolved``. Names are never hashed or fuzzily
+    joined into an id.
+    """
+    teams = []
+    records = native = 0
+    team_entries = _as_dict(data).get("injuries")
+    for team_entry in team_entries if isinstance(team_entries, list) else []:
+        if not isinstance(team_entry, dict):
+            continue
+        injuries = []
+        injury_entries = team_entry.get("injuries")
+        for inj in injury_entries if isinstance(injury_entries, list) else []:
+            if not isinstance(inj, dict):
+                continue
+            athlete = _as_dict(inj.get("athlete"))
+            details = _as_dict(inj.get("details"))
+            inj_type = _as_dict(inj.get("type"))
+            athlete_id = athlete.get("id")
+            athlete_id = str(athlete_id) if type(athlete_id) in (str, int) else None
+            if not athlete_id or athlete_id != athlete_id.strip():
+                athlete_id = None
+            injuries.append({
+                "name": athlete.get("displayName", ""),
+                "position": _as_dict(athlete.get("position")).get("abbreviation", ""),
+                "status": inj.get("status", ""),
+                "type": inj_type.get("description", inj_type.get("name", "")),
+                "detail": details.get("detail", ""),
+                "side": details.get("side", ""),
+                "return_date": details.get("returnDate", ""),
+                "athlete_id": athlete_id,
+                "identity_status": "provider-native" if athlete_id else "unresolved",
+                "id_namespace": "espn" if athlete_id else None,
+            })
+            records += 1
+            native += athlete_id is not None
+        teams.append({
+            "team": team_entry.get("displayName", ""),
+            "team_id": str(team_entry.get("id", "")),
+            "injuries": injuries,
+            "count": len(injuries),
+        })
+    return {
+        "teams": teams,
+        "count": len(teams),
+        "identity_summary": {"records": records, "provider_native": native, "unresolved": records - native},
+        "caveats": [
+            "A player absent from this report is not confirmed healthy; it lists only what ESPN publishes.",
+            "Records without athlete_id are unresolved and are not matched to other sources by name.",
+        ],
+    }
+
+
+def normalize_transactions(data):
+    """Normalize ESPN transactions response (shared across all US sports).
+
+    Input: full response from ``espn_request(SPORT_PATH, "transactions")``.
+    """
+    transactions = []
+    for txn in data.get("transactions", []):
+        team = txn.get("team", {})
+        transactions.append({
+            "date": txn.get("date", ""),
+            "team": team.get("displayName", ""),
+            "team_abbreviation": team.get("abbreviation", ""),
+            "description": txn.get("description", ""),
+        })
+    return {"transactions": transactions, "count": len(transactions)}
+
+
+def normalize_core_stats(data):
+    """Normalize ESPN core API team/player statistics.
+
+    Input: parsed JSON from the core API statistics endpoint.
+    Works for both team and player stats — same structure.
+    """
+    splits = data.get("splits", {})
+    categories = []
+    for cat in splits.get("categories", []):
+        stats = []
+        for stat in cat.get("stats", []):
+            entry = {
+                "name": stat.get("name", ""),
+                "display_name": stat.get("displayName", ""),
+                "abbreviation": stat.get("abbreviation", ""),
+                "value": stat.get("value"),
+                "display_value": stat.get("displayValue", ""),
+            }
+            if "rank" in stat:
+                entry["rank"] = stat["rank"]
+                entry["rank_display"] = stat.get("rankDisplayValue", "")
+            if "perGameValue" in stat:
+                entry["per_game"] = stat["perGameValue"]
+                entry["per_game_display"] = stat.get("perGameDisplayValue", "")
+            stats.append(entry)
+        categories.append({
+            "name": cat.get("displayName", cat.get("name", "")),
+            "stats": stats,
+        })
+    return {"categories": categories, "count": len(categories)}
+
+
+def _future_group_priority(group):
+    provider = group.get("provider")
+    priority = provider.get("priority") if isinstance(provider, dict) else None
+    try:
+        priority = float(priority)
+    except (TypeError, ValueError):
+        return math.inf
+    return priority if math.isfinite(priority) else math.inf
+
+
+def _preferred_future_group(item):
+    """Return the one usable sportsbook group a futures market reports.
+
+    ESPN returns a group per sportsbook, and a market carrying two of them
+    lists every competitor twice at different prices. The lowest finite
+    numeric `priority` wins; numeric strings are accepted, while missing or
+    invalid priorities sort last. Original response order breaks all ties.
+    Groups without mapping-shaped book entries cannot be selected.
+    """
+    candidates = []
+    for index, group in enumerate(item.get("futures", []) or []):
+        if not isinstance(group, dict):
+            continue
+        books = group.get("books")
+        if not isinstance(books, list) or not any(isinstance(book, dict) for book in books):
+            continue
+        candidates.append((index, group))
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda candidate: (_future_group_priority(candidate[1]), candidate[0]),
+    )[1]
+
+
+def normalize_futures(data, limit=25):
+    """Normalize ESPN core API futures response.
+
+    Resolves athlete/team $ref links for each book entry.
+
+    Args:
+        data: Parsed JSON from the core API futures endpoint.
+        limit: Max entries per futures market.
+    """
+    futures = []
+    for item in data.get("items", []):
+        entries = []
+        future_group = _preferred_future_group(item)
+        if future_group is not None:
+            usable_books = [book for book in future_group["books"] if isinstance(book, dict)]
+            for book in usable_books[:limit]:
+                athlete_ref = book.get("athlete", {})
+                team_ref = book.get("team", {})
+                name = ""
+                athlete_id = ""
+                if isinstance(athlete_ref, dict) and athlete_ref.get("$ref"):
+                    resolved = _resolve_athlete_ref(athlete_ref["$ref"])
+                    name = resolved["name"]
+                    athlete_id = resolved["id"]
+                elif isinstance(team_ref, dict) and team_ref.get("$ref"):
+                    name = _resolve_team_ref(team_ref["$ref"])
+                entry = {
+                    "name": name,
+                    "value": book.get("value", ""),
+                }
+                if athlete_id:
+                    entry["id"] = athlete_id
+                entries.append(entry)
+        market = {
+            "id": item.get("id", ""),
+            "name": item.get("displayName", item.get("name", "")),
+            "entries": entries,
+            "count": len(entries),
+        }
+        provider = future_group.get("provider") if future_group else None
+        provider_name = provider.get("name", "") if isinstance(provider, dict) else ""
+        if provider_name:
+            market["provider"] = provider_name
+        futures.append(market)
+    return {"futures": futures, "count": len(futures)}
+
+
+def normalize_depth_chart(data):
+    """Normalize ESPN depth chart response (shared across NFL, NBA, MLB).
+
+    Input: full response from ``espn_request(SPORT_PATH, "teams/{id}/depthcharts")``.
+    """
+    charts = []
+    for chart in data.get("depthchart", []):
+        positions = []
+        for pos_key, pos_data in chart.get("positions", {}).items():
+            pos_info = pos_data.get("position", {})
+            athletes = []
+            for i, ath in enumerate(pos_data.get("athletes", [])):
+                athletes.append({
+                    "depth": i + 1,
+                    "id": str(ath.get("id", "")),
+                    "name": ath.get("displayName", ""),
+                })
+            positions.append({
+                "key": pos_key,
+                "name": pos_info.get("displayName", pos_info.get("name", pos_key)),
+                "abbreviation": pos_info.get("abbreviation", pos_key.upper()),
+                "athletes": athletes,
+            })
+        charts.append({
+            "name": chart.get("name", ""),
+            "positions": positions,
+            "count": len(positions),
+        })
+    return {"charts": charts, "count": len(charts)}
+
+
+def normalize_boxscore(boxscore):
+    """Normalize an ESPN summary box score into per-team aggregates + player tables.
+
+    ESPN splits the box score into two parallel arrays:
+
+    - ``boxscore["teams"][]``   — flat team-aggregate stats, each entry shaped
+      ``{"name": ..., "label": ..., "displayValue": ...}`` with **no athletes**.
+    - ``boxscore["players"][]`` — the per-player stat tables, each with a
+      ``statistics`` group carrying ``labels`` and an ``athletes`` list.
+
+    Player rows live ONLY under ``players``. Earlier code read ``athletes`` from
+    ``teams`` (which never has them) and always produced an empty box score while
+    silently discarding the team ``displayValue`` totals. This helper reads both
+    sub-trees and matches them by team id.
+
+    Returns a list of per-team dicts: ``team``, ``team_stats`` (label -> value),
+    and ``statistics`` (player stat groups with populated ``athletes``).
+    """
+    # ESPN may send ``"boxscore": null`` (e.g. not-yet-started games); guard so
+    # the normalizer degrades to an empty box score instead of raising.
+    boxscore = boxscore or {}
+    teams = boxscore.get("teams", [])
+    players_by_team = {}
+    for pt in boxscore.get("players", []):
+        tid = str(pt.get("team", {}).get("id", ""))
+        if tid:
+            players_by_team[tid] = pt
+
+    result = []
+    for bt in teams:
+        team = bt.get("team", {})
+        tid = str(team.get("id", ""))
+
+        # Team-aggregate stats (flat displayValue list)
+        team_stats = {}
+        for s in bt.get("statistics", []):
+            label = s.get("label") or s.get("name", "")
+            if label:
+                team_stats[label] = s.get("displayValue", "")
+
+        # Per-player stat tables (from the parallel "players" array)
+        statistics = []
+        for stat_group in players_by_team.get(tid, {}).get("statistics", []):
+            labels = stat_group.get("labels", [])
+            athletes_stats = []
+            for ath in stat_group.get("athletes", []):
+                athlete = ath.get("athlete", {})
+                athletes_stats.append({
+                    "name": athlete.get("displayName", ""),
+                    "position": athlete.get("position", {}).get("abbreviation", ""),
+                    "starter": ath.get("starter", False),
+                    "did_not_play": ath.get("didNotPlay", False),
+                    "stats": dict(zip(labels, ath.get("stats", []))),
+                })
+            totals = stat_group.get("totals", [])
+            statistics.append({
+                "category": stat_group.get("name", ""),
+                "labels": labels,
+                "athletes": athletes_stats,
+                "totals": dict(zip(labels, totals)) if totals else {},
+            })
+
+        result.append({
+            "team": {
+                "id": tid,
+                "name": team.get("displayName", ""),
+                "abbreviation": team.get("abbreviation", ""),
+            },
+            "team_stats": team_stats,
+            "statistics": statistics,
+        })
+    return result
+
+
+def normalize_scoring_plays(summary_data, competitors=None):
+    """Normalize scoring plays from an ESPN game summary.
+
+    Prefers the curated top-level ``scoringPlays`` array (present for some sports,
+    e.g. football/soccer). When it is absent — as it is for NBA, NHL, MLB, and
+    college basketball summaries — derives scoring plays from the ``plays`` array
+    by filtering on the ``scoringPlay`` flag. Both code paths emit the same shape,
+    so consumers no longer get a silently-empty list for sports ESPN doesn't curate.
+
+    ``competitors`` is the connector's normalized competitors list (each entry
+    shaped ``{"team": {"id", "name", "abbreviation"}, ...}``). It backfills team
+    identity for plays-derived entries, which carry only ``team.id``. Building the
+    lookup here keeps the per-connector call sites free of duplicated glue.
+    """
+    # Guard against ESPN sending ``null`` for the whole summary or the plays list
+    # (e.g. not-yet-started games) so we degrade to an empty list, never raise.
+    summary_data = summary_data or {}
+    team_lookup = {}
+    for c in competitors or []:
+        team = c.get("team", {})
+        tid = str(team.get("id", ""))
+        if tid:
+            team_lookup[tid] = {
+                "name": team.get("name", ""),
+                "abbreviation": team.get("abbreviation", ""),
+            }
+    source = summary_data.get("scoringPlays")
+    if not source:
+        source = [p for p in (summary_data.get("plays") or []) if p.get("scoringPlay")]
+
+    scoring_plays = []
+    for sp in source:
+        team = sp.get("team", {})
+        tid = str(team.get("id", ""))
+        info = team_lookup.get(tid, {})
+        scoring_plays.append({
+            "period": sp.get("period", {}).get("number", ""),
+            "clock": sp.get("clock", {}).get("displayValue", ""),
+            "type": sp.get("type", {}).get("text", ""),
+            "text": sp.get("text", ""),
+            "team": {
+                "id": tid,
+                "name": team.get("displayName") or team.get("name") or info.get("name", ""),
+                "abbreviation": team.get("abbreviation") or info.get("abbreviation", ""),
+            },
+            "home_score": sp.get("homeScore", ""),
+            "away_score": sp.get("awayScore", ""),
+        })
+    return scoring_plays
+
+
+def _resolve_leaders(categories: list) -> list:
+    """Normalize a list of ESPN core API leader categories.
+
+    Handles the $ref athlete pattern and sport-agnostic value extraction.
+    Returns a list of dicts with name, category, displayName, value, rank.
+    """
+    result = []
+    for cat in categories:
+        leaders_list = []
+        for leader in cat.get("leaders", []):
+            athlete = leader.get("athlete", {})
+            if isinstance(athlete, dict):
+                ref_url = athlete.get("$ref", "")
+                name = athlete.get("displayName") or athlete.get("fullName") or ""
+                athlete_id = str(athlete.get("id", ""))
+                if (not name or not athlete_id) and ref_url:
+                    resolved = _resolve_athlete_ref(ref_url)
+                    if not name:
+                        name = resolved["name"]
+                    if not athlete_id:
+                        athlete_id = resolved["id"]
+            else:
+                name = ""
+                athlete_id = ""
+
+            # Use numeric value over displayValue — displayValue can be
+            # a full stat line string (e.g. MLB batting: "179-541, 53 HR...")
+            raw_value = leader.get("value")
+            display_value = leader.get("displayValue", "")
+            if raw_value is not None:
+                # Format nicely: integers as int, rates as 3dp
+                try:
+                    fv = float(raw_value)
+                    value = str(int(fv)) if fv == int(fv) else f"{fv:.3f}"
+                except (ValueError, TypeError):
+                    value = display_value
+            else:
+                value = display_value
+
+            leaders_list.append({
+                "rank": leader.get("rank", ""),
+                "id": athlete_id,
+                "name": name,
+                "value": value,
+            })
+        result.append({
+            "name": cat.get("displayName", cat.get("name", "")),
+            "leaders": leaders_list,
+        })
+    return result

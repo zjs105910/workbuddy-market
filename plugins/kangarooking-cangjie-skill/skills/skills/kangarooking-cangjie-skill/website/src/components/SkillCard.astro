@@ -1,0 +1,45 @@
+---
+import type { RegistryEntry } from "@/lib/catalog";
+import { getEntrypointCount, getOutputMode, searchableText } from "@/lib/catalog";
+import { withBase } from "@/lib/urls";
+
+interface Props {
+  entry: RegistryEntry;
+  filterable?: boolean;
+}
+
+const { entry, filterable = false } = Astro.props;
+const qualityLabel = {
+  verified: "已验证",
+  community: "社区收录",
+  experimental: "实验性",
+}[entry.quality];
+const outputMode = getOutputMode(entry);
+const entrypointCount = getEntrypointCount(entry);
+const countLabel =
+  outputMode === "single"
+    ? `1 入口 · ${entry.capability_count ?? "?"} 能力`
+    : outputMode === "pack"
+      ? `${entrypointCount} 入口 · ${entry.capability_count ?? "?"} 能力`
+      : `${entry.skill_count} Skills`;
+---
+
+<article
+  class="skill-card"
+  data-skill-card={filterable ? "" : undefined}
+  data-search={filterable ? searchableText(entry) : undefined}
+  data-domains={filterable ? entry.domains.join("|") : undefined}
+  data-quality={filterable ? entry.quality : undefined}
+  data-source={filterable ? entry.source_type : undefined}
+>
+  <div class="card-topline">
+    <span class:list={["quality-badge", `quality-${entry.quality}`]}>{qualityLabel}</span>
+    <span class="skill-count">{countLabel}</span>
+  </div>
+  <h3><a href={withBase(`/skills/${entry.slug}`)}>{entry.name}</a></h3>
+  <p>{entry.summary}</p>
+  <div class="tag-list" aria-label="领域">
+    {entry.domains.map((domain) => <span>{domain}</span>)}
+  </div>
+  <a class="card-link" href={withBase(`/skills/${entry.slug}`)} aria-label={`查看 ${entry.name}`}>查看详情 <span>→</span></a>
+</article>

@@ -1,0 +1,98 @@
+name: Pipeline artifacts checks
+
+# 校验流水线产物：books/ 下的 Skill 包格式、Capability Bundle schema、
+# capability-destinations 不变量与编译器自身的确定性（方案 §11.5 CI 扩展）。
+# 这是 registry-check 之外对 books/、schemas/contracts、scripts/ 的第一层实质校验。
+
+on:
+  pull_request:
+    paths:
+      - "books/**"
+      - "schemas/**"
+      - "scripts/**"
+      - "tests/**"
+      - "benchmarks/**"
+      - "methodology/**"
+      - "extractors/**"
+      - "SKILL.md"
+      - ".github/workflows/pipeline-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "books/**"
+      - "schemas/**"
+      - "scripts/**"
+      - "tests/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pyyaml jsonschema referencing
+      - name: Python regression tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Doctor（跳过可选 tokenizer 依赖）
+        run: python3 scripts/cangjie.py doctor || true
+      - name: Validate skill packs (books/)
+        run: |
+          shopt -s nullglob
+          dirs=(books/*/)
+          if [ ${#dirs[@]} -gt 0 ]; then
+            python3 scripts/validate_skill_pack.py "${dirs[@]}"
+          else
+            echo "no books to validate"
+          fi
+      - name: Validate Capability Bundles against schema
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+          import yaml
+          from jsonschema import Draft202012Validator
+          from referencing import Registry, Resource
+
+          cap = json.loads(Path("schemas/capability.schema.json").read_text())
+          bun = json.loads(Path("schemas/capability-bundle.schema.json").read_text())
+          reg = Registry().with_resources([
+              (cap["$id"], Resource.from_contents(cap)),
+              (bun["$id"], Resource.from_contents(bun)),
+          ])
+          validator = Draft202012Validator(bun, registry=reg)
+          failed = False
+          for f in Path("books").glob("*/.cangjie/capabilities/verified.yaml"):
+              errors = list(validator.iter_errors(yaml.safe_load(f.read_text())))
+              print(f"{f}: {len(errors)} errors")
+              for e in errors[:10]:
+                  print("  -", "/".join(map(str, e.path)), e.message[:160])
+              failed = failed or bool(errors)
+          sys.exit(1 if failed else 0)
+          EOF
+      - name: Compile determinism smoke（同一 Bundle 重复编译字节一致）
+        run: |
+          python3 - <<'EOF'
+          import hashlib, sys
+          from pathlib import Path
+          sys.path.insert(0, "scripts")
+          from compile_single import build_tree
+          from compile_pack import compile_pack_tree
+
+          bundles = list(Path("books").glob("*/.cangjie/capabilities"))
+          for b in bundles:
+              for build in (lambda: build_tree(b, "single"), lambda: compile_pack_tree(b)):
+                  h1 = hashlib.sha256(repr(sorted(build().items())).encode()).hexdigest()
+                  h2 = hashlib.sha256(repr(sorted(build().items())).encode()).hexdigest()
+                  assert h1 == h2, f"non-deterministic compile for {b}"
+              print(f"{b}: deterministic OK")
+          if not bundles:
+              print("no bundles to check")
+          EOF

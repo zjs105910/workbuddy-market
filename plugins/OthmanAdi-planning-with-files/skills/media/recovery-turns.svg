@@ -1,0 +1,11 @@
+<svg viewBox="0 0 860 190" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Turns to resume after a context wipe: 5.0 with planning-with-files vs 13.3 for a raw agent (internal benchmark v1)</title>
+  <text x="20" y="26" font-size="15" font-weight="600" fill="#8b949e">After a context wipe, how many turns until the agent is back on track?</text>
+  <text x="20" y="45" font-size="12" fill="#8b949e" opacity="0.85">Internal benchmark v1 (Test 5, 2026-07-06) · author-run · harness-authored tasks · deterministic grading · forced-recovery task, T=3 per arm · lower is better</text>
+  <text x="238" y="93" font-size="13" font-weight="600" fill="#8b949e" text-anchor="end">with planning-with-files</text>
+  <rect x="250" y="81" width="191" height="16" rx="2" fill="#2da44e"/><text x="449" y="93" font-size="12" fill="#2da44e" font-weight="600">5.0 turns</text>
+  <text x="238" y="119" font-size="13" fill="#8b949e" text-anchor="end">raw agent, no planning method</text>
+  <rect x="250" y="107" width="508" height="16" rx="2" fill="#8b949e"/><text x="766" y="119" font-size="12" fill="#8b949e">13.3 turns</text>
+  <text x="20" y="152" font-size="11" fill="#8b949e" opacity="0.8">Session hard-stopped at ~50% done; fresh session told only "Continue the work in this directory." All arms finished (77/77 pytest-green); the difference is re-orientation cost.</text>
+  <text x="20" y="168" font-size="11" fill="#8b949e" opacity="0.8">Scale: 13.3 turns = full bar width. Full method, all seven arms measured, and disclosed limits: docs/evals.md (Test 5).</text>
+</svg>

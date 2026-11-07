@@ -1,0 +1,581 @@
+{
+ "sources": {
+  "shots": {
+   "owner": "short-drama-storyboard",
+   "artifact": "剧集/EP001/storyboard/shots.jsonl"
+  },
+  "screenplay-index": {
+   "owner": "short-drama-write",
+   "artifact": "剧集/EP001/screenplay-index.jsonl"
+  },
+  "short-drama": {
+   "owner": "short-drama",
+   "artifact": "short-drama.json"
+  }
+ },
+ "episode_id": "EP001",
+ "dispositions": [
+  {
+   "block_id": "BLK-EP001-SC001-H01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-001",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-A01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-001",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-P01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-001",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-A02",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-002",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-D01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-002",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-D02",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-003",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-A03",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-004",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-D03",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-005",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-D04",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-005",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-D05",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-006",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC001-A04",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-007",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-H01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-008",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-008",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-008",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P02",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-009",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A02",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-009",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-D01",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-009",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A03",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-010",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P03",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-010",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A04",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-010",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P04",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-011",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P05",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-011",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A05",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-012",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-D02",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-012",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A06",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-013",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P06",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-013",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-D03",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-013",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A07",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-014",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P07",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-014",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A08",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-014",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P08",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-014",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P09",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-015",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P10",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-015",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A09",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-015",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P11",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-016",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P12",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-016",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A10",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-017",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P16",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-017",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-D04",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-017",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A11",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-018",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P14",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-019",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-P15",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-019",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-D05",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-020",
+     "authority": "candidate"
+    }
+   ]
+  },
+  {
+   "block_id": "BLK-EP001-SC002-A12",
+   "status": "covered",
+   "reason": "由该镜连续覆盖，动作与反应未被切断",
+   "shot_refs": [
+    {
+     "src": "shots",
+     "record_id": "SHOT-EP001-020",
+     "authority": "candidate"
+    }
+   ]
+  }
+ ],
+ "episode_duration": {
+  "shot_seconds_total": 94.8,
+  "counted_shot_ids": [
+   "SHOT-EP001-001",
+   "SHOT-EP001-002",
+   "SHOT-EP001-003",
+   "SHOT-EP001-004",
+   "SHOT-EP001-005",
+   "SHOT-EP001-006",
+   "SHOT-EP001-007",
+   "SHOT-EP001-008",
+   "SHOT-EP001-009",
+   "SHOT-EP001-010",
+   "SHOT-EP001-011",
+   "SHOT-EP001-012",
+   "SHOT-EP001-013",
+   "SHOT-EP001-014",
+   "SHOT-EP001-015",
+   "SHOT-EP001-016",
+   "SHOT-EP001-017",
+   "SHOT-EP001-018",
+   "SHOT-EP001-019",
+   "SHOT-EP001-020"
+  ],
+  "unresolved_durations": [],
+  "target_ref": {
+   "src": "short-drama",
+   "field": "/format/target_seconds_per_episode"
+  },
+  "target_seconds": 90,
+  "delta_seconds": 4.8,
+  "disposition": "within_creator_tolerance",
+  "rationale": "按 format.pacing 从剧本逐块折算，落在 90 秒目标的 +5.3%，未超出创作者容差"
+ }
+}

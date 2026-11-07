@@ -1,0 +1,46 @@
+{
+  "name": "shadowclone",
+  "version": "0.0.26",
+  "description": "Set up and maintain portable coding-agent skills with explicit local consent.",
+  "author": {
+    "name": "Shadowclone",
+    "url": "https://shadowclone.co"
+  },
+  "homepage": "https://shadowclone.co",
+  "repository": "https://github.com/theonly1me/shadowclone",
+  "license": "MIT",
+  "keywords": [
+    "coding-agents",
+    "skills",
+    "local-first",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Shadowclone",
+    "shortDescription": "Set up portable skills for your coding agents",
+    "longDescription": "Set up Shadowclone locally, choose consent settings, build a skill constellation, and keep guidance synchronized across supported coding agents.",
+    "developerName": "Shadowclone",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Local setup",
+      "Portable skills",
+      "Agent guidance"
+    ],
+    "websiteURL": "https://shadowclone.co",
+    "privacyPolicyURL": "https://github.com/theonly1me/shadowclone/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/theonly1me/shadowclone/blob/main/LICENSE",
+    "supportURL": "https://github.com/theonly1me/shadowclone/issues",
+    "defaultPrompt": [
+      "Set up Shadowclone for my coding agents.",
+      "Open my Shadowclone skill constellation."
+    ],
+    "brandColor": "#A98AE2",
+    "composerIcon": "./assets/shadowclone-mark.svg",
+    "logo": "./assets/shadowclone-mark.svg",
+    "screenshots": [
+      "./assets/agent-builds.jpg"
+    ]
+  }
+}

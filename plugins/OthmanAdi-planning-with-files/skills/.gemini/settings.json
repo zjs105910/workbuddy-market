@@ -1,0 +1,57 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "name": "planning-session-start",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/session-start.sh",
+            "timeout": 15000,
+            "description": "Check for previous planning session and recover context"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "planning-before-agent",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/before-agent.sh",
+            "timeout": 5000,
+            "description": "Inject task_plan.md context into the user turn"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "write_file|edit_file|replace|create_file|patch",
+        "hooks": [
+          {
+            "name": "planning-after-tool",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/after-tool.sh",
+            "timeout": 5000,
+            "description": "Remind agent to update progress after file changes"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "name": "planning-session-end",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/session-end.sh",
+            "timeout": 10000,
+            "description": "Check all phases are complete before session ends"
+          }
+        ]
+      }
+    ]
+  }
+}

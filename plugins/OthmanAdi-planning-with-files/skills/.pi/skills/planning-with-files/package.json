@@ -1,0 +1,56 @@
+{
+  "name": "planning-with-files",
+  "version": "3.23.0",
+  "description": "Official Planning with Files skill for AI coding agents. Keeps persistent project planning files and injects selected plan context. Automatic recovery reads project files only; explicit local session catchup has no network upload path. Includes scripts, templates, and a Pi Coding Agent extension.",
+  "keywords": [
+    "planning-with-files",
+    "planning",
+    "manus",
+    "agent",
+    "agent-skills",
+    "claude-code",
+    "claude-skills",
+    "coding-agent",
+    "context-engineering",
+    "session-recovery",
+    "long-running-agents",
+    "pi-coding-agent"
+  ],
+  "pi": {
+    "skills": [
+      "SKILL.md"
+    ],
+    "extensions": [
+      "extensions/planning-with-files/index.ts"
+    ]
+  },
+  "scripts": {
+    "prepack": "node scripts/verify-shell-line-endings.mjs"
+  },
+  "files": [
+    "README.md",
+    "SKILL.md",
+    "examples.md",
+    "reference.md",
+    "scripts/",
+    "templates/",
+    "extensions/",
+    "!**/node_modules",
+    "!**/__pycache__",
+    "!**/*.pyc",
+    "!extensions/planning-with-files/package-lock.json"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OthmanAdi/planning-with-files.git"
+  },
+  "author": "Ahmad Othman Ammar Adi",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/OthmanAdi/planning-with-files/issues"
+  },
+  "homepage": "https://github.com/OthmanAdi/planning-with-files#readme"
+}

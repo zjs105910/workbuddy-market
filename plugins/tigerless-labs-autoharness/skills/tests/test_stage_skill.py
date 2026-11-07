@@ -1,0 +1,416 @@
+import json
+
+from autoharness import config
+from autoharness.lib import intent_queue, layer
+from autoharness.stage_skill import server
+
+GOOD_BODY = "---\nname: foo\ndescription: Use when formatting a date as ISO.\n---\n# Foo\nUse strftime.\n"
+RUN = "run1"
+
+
+def _params(**kw):
+    base = {"action": "create", "name": "foo", "body": GOOD_BODY,
+            "reason": "captured repeat", "evidence": "led slice"}
+    base.update(kw)
+    return base
+
+
+def _errs(v):
+    return {e[0] for e in v["errors"]}
+
+
+def _queue(tmp_path):
+    return intent_queue.read(RUN, tmp_path)
+
+
+def test_tool_schema_advertises_contract():
+    assert server.TOOL_SCHEMA["properties"]["action"]["enum"] == list(server._ACTIONS)
+    assert set(server.TOOL_SCHEMA["required"]) == {"action", "name", "reason", "evidence"}
+
+
+def test_create_appends_and_no_tree_write(tmp_path):
+    v = server.stage(_params(), run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]
+    got = _queue(tmp_path)
+    assert got == [{"action": "create", "name": "foo", "level": "project",
+                    "body": GOOD_BODY, "reason": "captured repeat", "evidence": "led slice"}]
+    assert not layer.skills_dir("project", tmp_path).exists()  # tool cannot touch the skill tree
+
+
+def test_default_level_project(tmp_path):
+    v = server.stage(_params(), run_id=RUN, root=tmp_path)
+    assert v["ok"] and _queue(tmp_path)[0]["level"] == "project"
+
+
+def test_explicit_global_level(tmp_path):
+    v = server.stage(_params(level="global"), run_id=RUN, root=tmp_path)
+    assert v["ok"] and _queue(tmp_path)[0]["level"] == "global"
+
+
+def test_unknown_action_rejected_zero_append(tmp_path):
+    v = server.stage(_params(action="frobnicate"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_missing_led_rejected(tmp_path):
+    for kw in ({"reason": ""}, {"evidence": "  "}):
+        v = server.stage(_params(**kw), run_id=RUN, root=tmp_path)
+        assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_missing_name_rejected(tmp_path):
+    v = server.stage(_params(name=""), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_create_requires_body(tmp_path):
+    p = _params()
+    del p["body"]
+    v = server.stage(p, run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_create_rejects_delta(tmp_path):
+    v = server.stage(_params(old_string="a", new_string="b"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_patch_appends_old_new_no_body(tmp_path):
+    v = server.stage({"action": "patch", "name": "foo", "old_string": "x", "new_string": "y",
+                      "reason": "r", "evidence": "e"}, run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]
+    got = _queue(tmp_path)[0]
+    assert got["old_string"] == "x" and got["new_string"] == "y" and "body" not in got
+
+
+def test_patch_requires_both_delta(tmp_path):
+    v = server.stage({"action": "patch", "name": "foo", "old_string": "x",
+                      "reason": "r", "evidence": "e"}, run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_patch_rejects_body(tmp_path):
+    v = server.stage({"action": "patch", "name": "foo", "body": GOOD_BODY,
+                      "old_string": "x", "new_string": "y", "reason": "r", "evidence": "e"},
+                     run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_delete_appends_no_body(tmp_path):
+    v = server.stage({"action": "delete", "name": "foo", "reason": "r", "evidence": "e"},
+                     run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]
+    assert _queue(tmp_path)[0] == {"action": "delete", "name": "foo", "reason": "r", "evidence": "e"}
+
+
+def test_delete_rejects_body(tmp_path):
+    v = server.stage({"action": "delete", "name": "foo", "body": GOOD_BODY,
+                      "reason": "r", "evidence": "e"}, run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_bad_level_rejected_zero_append(tmp_path):
+    v = server.stage(_params(level="planetary"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_frontmatter_feedback_blocks_append(tmp_path):
+    v = server.stage(_params(body="# no frontmatter\njust text\n"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "structure" in _errs(v)
+    assert _queue(tmp_path) == []  # bad structure -> zero append
+
+
+def test_oversize_body_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "STAGE_MAX_BODY_BYTES", 10)
+    v = server.stage(_params(), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "size" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_unsafe_run_id_surfaced_not_crash(tmp_path):
+    v = server.stage(_params(), run_id="../evil", root=tmp_path)
+    assert not v["ok"] and "queue" in _errs(v)
+
+
+def test_stage_never_writes_skill_tree_any_action(tmp_path):
+    server.stage(_params(), run_id=RUN, root=tmp_path)
+    server.stage({"action": "delete", "name": "foo", "reason": "r", "evidence": "e"},
+                 run_id=RUN, root=tmp_path)
+    assert not layer.skills_dir("project", tmp_path).exists()
+    assert not layer.archive_dir("project", tmp_path).exists()
+
+
+# --- files (folder-skill subfiles) ---
+
+FILES_BODY = ("---\nname: foo\ndescription: Use when formatting a date as ISO.\n---\n# Foo\n"
+              "Run scripts/run.sh; details in references/notes.md\n")
+GOOD_FILES = {"scripts/run.sh": "echo hi\n", "references/notes.md": "notes\n"}
+
+
+def test_tool_schema_advertises_files():
+    assert server.TOOL_SCHEMA["properties"]["files"]["type"] == "object"
+
+
+def test_create_with_files_appends_verbatim(tmp_path):
+    v = server.stage(_params(body=FILES_BODY, files=GOOD_FILES), run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]
+    assert _queue(tmp_path)[0]["files"] == GOOD_FILES
+    assert not layer.skills_dir("project", tmp_path).exists()  # still zero tree write
+
+
+def test_intent_without_files_carries_no_files_key(tmp_path):
+    server.stage(_params(), run_id=RUN, root=tmp_path)
+    assert "files" not in _queue(tmp_path)[0]
+
+
+def test_files_on_patch_rejected(tmp_path):
+    v = server.stage({"action": "patch", "name": "foo", "old_string": "x", "new_string": "y",
+                      "reason": "r", "evidence": "e", "files": GOOD_FILES},
+                     run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_files_on_delete_rejected(tmp_path):
+    v = server.stage({"action": "delete", "name": "foo", "reason": "r", "evidence": "e",
+                      "files": GOOD_FILES}, run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_files_non_dict_rejected(tmp_path):
+    v = server.stage(_params(body=FILES_BODY, files=["scripts/run.sh"]), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+
+
+def test_files_path_gate_red_team(tmp_path):
+    for bad in ("../x", "/etc/passwd", "scripts/../SKILL.md", "SKILL.md",
+                ".sidecar.json", ".ledger.jsonl", "bin/x.sh"):
+        v = server.stage(_params(body=FILES_BODY, files={bad: "x"}), run_id=RUN, root=tmp_path)
+        assert not v["ok"] and "files" in _errs(v), bad
+    assert _queue(tmp_path) == []  # every attempt: zero append
+
+
+def test_files_non_string_content_rejected(tmp_path):
+    v = server.stage(_params(body=FILES_BODY, files={"scripts/run.sh": 7}), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+
+
+def test_files_count_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "STAGE_MAX_FILES", 1)
+    v = server.stage(_params(body=FILES_BODY, files=GOOD_FILES), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+
+
+def test_files_per_file_size_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "STAGE_MAX_FILE_BYTES", 3)
+    v = server.stage(_params(body=FILES_BODY, files=GOOD_FILES), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+
+
+def test_files_total_size_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "STAGE_MAX_FILES_TOTAL_BYTES", 10)
+    v = server.stage(_params(body=FILES_BODY, files=GOOD_FILES), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+
+
+def test_unpointed_subfile_instant_feedback(tmp_path):
+    v = server.stage(_params(files=GOOD_FILES), run_id=RUN, root=tmp_path)  # GOOD_BODY: no pointers
+    assert not v["ok"] and "structure" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+# --- MCP stdio shell (zero-dep, hand-rolled JSON-RPC) ---
+
+def _req(method, req_id=1, params=None):
+    r = {"jsonrpc": "2.0", "method": method}
+    if req_id is not None:
+        r["id"] = req_id
+    if params is not None:
+        r["params"] = params
+    return r
+
+
+def test_handle_initialize_advertises_server(tmp_path):
+    out = server.handle(_req("initialize"), run_id=RUN, root=tmp_path)
+    assert out["result"]["serverInfo"]["name"] == server.TOOL_NAME
+    assert out["result"]["protocolVersion"]
+
+
+def test_handle_tools_list_carries_schema(tmp_path):
+    out = server.handle(_req("tools/list"), run_id=RUN, root=tmp_path)
+    tool = out["result"]["tools"][0]
+    assert tool["name"] == server.TOOL_NAME
+    assert tool["inputSchema"] is server.TOOL_SCHEMA
+
+
+def test_handle_tools_call_routes_to_stage_and_appends(tmp_path):
+    out = server.handle(_req("tools/call", params={"name": server.TOOL_NAME,
+                                                    "arguments": _params()}),
+                        run_id=RUN, root=tmp_path)
+    assert out["result"]["isError"] is False
+    assert intent_queue.read(RUN, tmp_path)  # the call really appended one intent
+
+
+def test_handle_tools_call_bad_schema_is_error_not_crash(tmp_path):
+    out = server.handle(_req("tools/call", params={"name": server.TOOL_NAME,
+                                                   "arguments": {"action": "frobnicate"}}),
+                        run_id=RUN, root=tmp_path)
+    assert out["result"]["isError"] is True
+
+
+def test_handle_unknown_tool_rejected(tmp_path):
+    out = server.handle(_req("tools/call", params={"name": "evil", "arguments": {}}),
+                        run_id=RUN, root=tmp_path)
+    assert "error" in out
+
+
+def test_handle_notification_returns_none(tmp_path):
+    assert server.handle(_req("notifications/initialized", req_id=None),
+                         run_id=RUN, root=tmp_path) is None
+
+
+def test_serve_loops_stdin_to_stdout(tmp_path):
+    import io
+    stdin = io.StringIO(json.dumps(_req("initialize")) + "\n\n")
+    stdout = io.StringIO()
+    server.serve(stdin=stdin, stdout=stdout)
+    line = stdout.getvalue().strip()
+    assert json.loads(line)["result"]["serverInfo"]["name"] == server.TOOL_NAME
+
+
+# --- remove_file (single-subfile deletion) ---
+
+def _remove(**kw):
+    base = {"action": "remove_file", "name": "foo", "path": "scripts/run.sh",
+            "reason": "r", "evidence": "e"}
+    base.update(kw)
+    return base
+
+
+def test_tool_schema_advertises_remove_file():
+    assert "remove_file" in server.TOOL_SCHEMA["properties"]["action"]["enum"]
+    assert server.TOOL_SCHEMA["properties"]["path"]["type"] == "string"
+
+
+def test_remove_file_appends_intent(tmp_path):
+    v = server.stage(_remove(), run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]
+    assert _queue(tmp_path) == [{"action": "remove_file", "name": "foo",
+                                 "path": "scripts/run.sh", "reason": "r", "evidence": "e"}]
+    assert not layer.skills_dir("project", tmp_path).exists()  # still zero tree write
+
+
+def test_remove_file_requires_path(tmp_path):
+    p = _remove()
+    del p["path"]
+    v = server.stage(p, run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_remove_file_rejects_body_delta_files(tmp_path):
+    for kw in ({"body": GOOD_BODY}, {"old_string": "a", "new_string": "b"}, {"files": GOOD_FILES}):
+        v = server.stage(_remove(**kw), run_id=RUN, root=tmp_path)
+        assert not v["ok"] and "schema" in _errs(v), kw
+    assert _queue(tmp_path) == []
+
+
+def test_path_on_other_actions_rejected(tmp_path):
+    v = server.stage(_params(path="scripts/run.sh"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "schema" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_remove_file_path_gate_red_team(tmp_path):
+    for bad in ("../x", "/etc/passwd", "scripts/../SKILL.md", "SKILL.md",
+                ".sidecar.json", "bin/x.sh"):
+        v = server.stage(_remove(path=bad), run_id=RUN, root=tmp_path)
+        assert not v["ok"] and "files" in _errs(v), bad
+    assert _queue(tmp_path) == []
+
+
+def test_remove_file_evidence_slice_denied(tmp_path):
+    v = server.stage(_remove(path="references/evidence-a1b2c3d4.md"), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+def test_files_carrying_evidence_slice_denied(tmp_path):
+    body = FILES_BODY + "See references/evidence-ffff.md\n"  # pointed at, still denied
+    files = {**GOOD_FILES, "references/evidence-ffff.md": "forged"}
+    v = server.stage(_params(body=body, files=files), run_id=RUN, root=tmp_path)
+    assert not v["ok"] and "files" in _errs(v)
+    assert _queue(tmp_path) == []
+
+
+# --- absorbed_into (Phase 12, direction D): delete-only field, fail-closed at the promoter ---
+
+def test_delete_accepts_absorbed_into(tmp_path):
+    r = server.stage({"action": "delete", "name": "n", "reason": "r", "evidence": "e",
+                      "absorbed_into": "umbrella"}, run_id="r1", root=tmp_path)
+    assert r["ok"]
+
+
+def test_absorbed_into_rejected_on_non_delete(tmp_path):
+    for action, extra in (("create", {"body": "b", "level": "project"}),
+                          ("patch", {"old_string": "a", "new_string": "b"}),
+                          ("remove_file", {"path": "references/x.md"})):
+        r = server.stage({"action": action, "name": "n", "reason": "r", "evidence": "e",
+                          "absorbed_into": "u", **extra}, run_id="r1", root=tmp_path)
+        assert not r["ok"], action
+
+
+def test_stage_rejects_an_over_budget_description_on_the_spot(tmp_path):
+    # the promoter runs after the child session exits, so a gate enforced only there is one the model
+    # can never learn from. hermes validates inside skill_manage and hands the error back; the same
+    # rule has to hold at our tool boundary or every over-long description is silently lost.
+    long = "Use when an iframe widget's rounded corners look wrong against the host container " * 2
+    assert len(long) > config.INDEX_DESC_MAX_CHARS
+    body = f"---\nname: foo\ndescription: {long}\n---\n# Foo\nRule.\n"
+    out = server.stage({"action": "create", "name": "foo", "level": "project", "body": body,
+                        "reason": "r", "evidence": "e"}, run_id="rb1", root=tmp_path)
+    assert not out["ok"]
+    assert any(f[0] == "description" for f in out["errors"])
+    assert not list(intent_queue.read("rb1", tmp_path))  # nothing queued
+
+
+def test_stage_accepts_a_description_inside_the_budget(tmp_path):
+    body = "---\nname: foo\ndescription: Use when an iframe widget clips on mobile.\n---\n# Foo\nRule.\n"
+    out = server.stage({"action": "create", "name": "foo", "level": "project", "body": body,
+                        "reason": "r", "evidence": "e"}, run_id="rb2", root=tmp_path)
+    assert out["ok"] and len(list(intent_queue.read("rb2", tmp_path))) == 1
+
+
+def test_serve_without_run_id_env_uses_the_interactive_queue(tmp_path, monkeypatch):
+    # A live user session (/learn, or the model on its own) has no spawn-injected run id. The first
+    # real report from such a session was "unsafe run id" — the tool refused, and the learn skill had
+    # never been able to land anything. Absence of the env must mean "the interactive queue", not "no".
+    import io
+    monkeypatch.delenv(config.RUN_ID_ENV, raising=False)
+    monkeypatch.setenv(config.PROJECT_ROOT_ENV, str(tmp_path))
+    req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+           "params": {"name": "stage_skill", "arguments": _params()}}
+    out = io.StringIO()
+    server.serve(stdin=io.StringIO(json.dumps(req) + "\n"), stdout=out)
+    reply = json.loads(out.getvalue().strip().splitlines()[-1])
+    assert "unsafe" not in json.dumps(reply)
+    assert len(list(intent_queue.read(config.INTERACTIVE_RUN_ID, tmp_path))) == 1
+
+
+def test_unusable_names_are_rejected_at_stage_time(tmp_path):
+    # the model hears it while it can still rename, instead of a promoter verdict it never reads
+    for bad in ["a" * 101, "../escape", "con"]:
+        v = server.stage(_params(name=bad), run_id=RUN, root=tmp_path)
+        assert not v["ok"] and "schema" in _errs(v), bad
+
+
+def test_existing_unusual_names_can_still_be_updated(tmp_path):
+    # the new-name limits apply to create only; a legacy skill named `con` can still be maintained
+    v = server.stage(_params(action="patch", name="con", body=None, old_string="a", new_string="b"),
+                     run_id=RUN, root=tmp_path)
+    assert v["ok"], v["errors"]

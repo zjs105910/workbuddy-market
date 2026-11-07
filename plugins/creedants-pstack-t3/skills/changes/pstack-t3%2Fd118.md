@@ -1,0 +1,1 @@
+- docs: the runtime and setup skill state how `roles.py` compares model families after normalizing ids, and what `show`, `validate`, and `write` do with a `review backups` seat that `backup` would drop.

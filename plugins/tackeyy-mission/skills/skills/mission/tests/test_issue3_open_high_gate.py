@@ -1,0 +1,123 @@
+"""Issue #3: push-score の --open-high フラグと mark-passes の High 件数 gate のテスト。"""
+import json
+
+
+def _push_score(push_provenance_score, state_dir, iteration=1, composite=4.5, min_item=4.0,
+                open_high=0, items=None):
+    items = items or {
+        "mission_achievement": min_item,
+        "accuracy": (3 * composite - min_item) / 2,
+        "completeness": (3 * composite - min_item) / 2,
+    }
+    return push_provenance_score(state_dir.parent, iteration=iteration, items=items, open_high=open_high)
+
+
+def test_push_score_saves_open_high(state_dir, run_cli, push_provenance_score):
+    """push-score --open-high N が score_history に保存される。"""
+    _push_score(push_provenance_score, state_dir, open_high=2)
+    data = json.loads((state_dir.parent / ".mission-state" / "sessions" / "test.json").read_text())
+    latest = data["score_history"][-1]
+    assert latest["open_high"] == 2
+
+
+def test_push_score_open_high_default_zero(state_dir, run_cli, push_provenance_score):
+    """--open-high を指定しない場合は 0 で保存される (後方互換)。"""
+    _push_score(push_provenance_score, state_dir, composite=4.25, min_item=4.0)
+    data = json.loads((state_dir.parent / ".mission-state" / "sessions" / "test.json").read_text())
+    latest = data["score_history"][-1]
+    assert latest.get("open_high", 0) == 0
+
+
+def test_mark_passes_rejects_when_open_high_nonzero(state_dir, run_cli, read_state, push_provenance_score):
+    """open_high > 0 なら mark-passes は exit 2。"""
+    _push_score(push_provenance_score, state_dir, open_high=2)
+    r = run_cli("mark-passes", cwd=state_dir.parent)
+    assert r.returncode == 2, f"expected exit 2, got {r.returncode}\nstderr: {r.stderr}"
+    assert "未解決 High" in r.stderr, f"stderr: {r.stderr}"
+    s = read_state(state_dir)
+    assert s["passes"] is False
+
+
+def test_mark_passes_passes_when_open_high_zero(state_dir, run_cli, read_state, push_provenance_score):
+    """open_high=0 なら mark-passes は通過する。"""
+    _push_score(push_provenance_score, state_dir, open_high=0, composite=4.25, min_item=4.0)
+    r = run_cli("mark-passes", cwd=state_dir.parent)
+    assert r.returncode == 0, f"expected 0, got {r.returncode}\nstderr: {r.stderr}"
+    s = read_state(state_dir)
+    assert s["passes"] is True
+
+
+def test_mark_passes_rejects_active_legacy_score_without_open_high(state_dir, run_cli):
+    """Active legacy score は open_high の既定値で provenance gate を迂回できない。"""
+    sf = state_dir / "sessions" / "test.json"
+    data = json.loads(sf.read_text())
+    data["score_history"].append({
+        "iteration": 1,
+        "composite": 4.5,
+        "min_item": 4.0,
+        "items": {"mission_achievement": 4.5},
+        "timestamp": "2026-01-01T00:00:00Z",
+        # open_high フィールドなし
+    })
+    sf.write_text(json.dumps(data))
+    before = sf.read_bytes()
+
+    r = run_cli("mark-passes", cwd=state_dir.parent)
+    assert r.returncode == 2, f"stderr: {r.stderr}"
+    assert "provenance" in r.stderr
+    assert sf.read_bytes() == before
+
+
+def test_stats_reads_terminal_legacy_score_without_open_high(state_dir, run_cli):
+    """Read-only stats keeps already-terminal legacy score records inspectable."""
+    current = json.loads((state_dir / "sessions" / "test.json").read_text())
+    historical = {
+        **current,
+        "session_id": "terminal-legacy",
+        "mission_id": "terminal-legacy",
+        "phase": "done",
+        "passes": True,
+        "loop_active": False,
+        "terminal_outcome": "completed_pass",
+        "score_history": [{
+            "iteration": 1,
+            "composite": 4.5,
+            "min_item": 4.0,
+            "items": {"mission_achievement": 4.5},
+            "timestamp": "2026-01-01T00:00:00Z",
+        }],
+    }
+    legacy_path = state_dir / "sessions" / "terminal-legacy.json"
+    legacy_path.write_text(json.dumps(historical))
+    before = legacy_path.read_bytes()
+
+    result = run_cli("stats", "--root", str(state_dir.parent), "--json", cwd=state_dir.parent)
+
+    assert result.returncode == 0, result.stderr
+    assert legacy_path.read_bytes() == before
+
+
+def test_mark_passes_force_bypasses_open_high_gate(state_dir, run_cli, read_state, push_provenance_score):
+    """(c) --force バイパス: open_high=2 でも --force --reason "x" なら exit0 かつ passes=True."""
+    _push_score(push_provenance_score, state_dir, open_high=2)
+    r = run_cli("mark-passes", "--force", "--reason", "emergency override for test", "--approved-by-user",
+                cwd=state_dir.parent)
+    assert r.returncode == 2, f"CLI force requires a registered typed verifier, got {r.returncode}\nstderr: {r.stderr}"
+    s = read_state(state_dir)
+    assert s["passes"] is False
+
+
+def test_push_score_rejects_negative_open_high(state_dir, run_cli):
+    """(d) 負値 reject: push-score --open-high -1 が exit2 で拒否される (Fix #4 対応)."""
+    items = {"mission_achievement": 4.5, "accuracy": 4.0}
+    r = run_cli(
+        "push-score",
+        "--iteration", "1",
+        "--composite", "4.5",
+        "--min-item", "4.0",
+        "--items", json.dumps(items),
+        "--open-high", "-1",
+        cwd=state_dir.parent,
+    )
+    assert r.returncode == 2, f"--open-high -1 は exit 2 で reject すべき, got {r.returncode}\nstderr: {r.stderr}"
+    assert "0 以上" in r.stderr or "open-high" in r.stderr, f"エラーメッセージ不正: {r.stderr}"

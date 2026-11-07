@@ -1,0 +1,31 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: validate frontmatter
+        run: npm run validate
+      - name: manifest is current
+        run: npm run manifest:check
+      - name: tests
+        run: npm test
+      - name: eval-lint
+        run: bash scripts/eval-lint.sh
+      - name: drift-check (every prose link in the catalog resolves)
+        run: npm run drift:check
+      - name: cleanup gate (no old marketplace-distribution residue)
+        # Unambiguous fingerprints of the retired plugin-marketplace model only.
+        # NOT bare "marketplace"/"npx skills" — those are legit words in skill
+        # content (terms-conditions, shopify, remotion-video, …).
+        run: |
+          ! grep -rIn -E "sync-bundles|\.claude-plugin/marketplace|/plugin install [^\"' ]*@rsc-skills" . \
+            --exclude-dir=node_modules --exclude-dir=.git \
+            --exclude-dir=docs --exclude-dir=skill-build --exclude-dir=.github
