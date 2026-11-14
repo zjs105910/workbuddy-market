@@ -1,0 +1,54 @@
+{
+  "name": "opencode-planning-with-files",
+  "version": "1.2.0",
+  "description": "Native OpenCode plugin for planning-with-files: per-turn plan injection, write reminders, compaction flush, a session-idle completion gate, and pwf_init / pwf_status / pwf_check tools.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "planning-with-files",
+    "planning",
+    "ai-agents",
+    "coding-agent",
+    "long-running-agents",
+    "context-engineering"
+  ],
+  "author": "Ahmad Othman Ammar Adi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OthmanAdi/planning-with-files.git",
+    "directory": ".opencode/packages/opencode-planning-with-files"
+  },
+  "homepage": "https://github.com/OthmanAdi/planning-with-files/blob/master/docs/opencode.md",
+  "bugs": {
+    "url": "https://github.com/OthmanAdi/planning-with-files/issues"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.18.16",
+    "@opencode/plugin": "2.0.21"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,123 @@
+.detail {
+  background: linear-gradient(150deg, #1d1b2a, #151720 55%);
+  border: 1px solid #53446799;
+  border-radius: 14px;
+  padding: 24px;
+  position: sticky;
+  top: 24px;
+  box-shadow:
+    0 12px 40px #0003,
+    inset 0 1px #d2b9ff0a;
+}
+
+.detail h2 {
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.detail-description {
+  color: #a5afc5;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 14px 0 24px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.behavior {
+  padding: 21px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.behavior p:last-child {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0;
+  color: #c3c5d0;
+  white-space: pre-line;
+}
+
+.skill-status {
+  font-size: 11px;
+  color: #8fcaba;
+  margin: 18px 0;
+  line-height: 1.6;
+}
+
+.detail .primary-button {
+  width: 100%;
+}
+
+.detail .editor {
+  margin-top: 20px;
+}
+
+.detail summary {
+  color: #bdb5d2;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.detail textarea {
+  margin-top: 12px;
+  min-height: 200px;
+  font:
+    11px / 1.65 ui-monospace,
+    monospace;
+}
+
+.detail .quiet-button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.owner-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.identity {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 26px 0;
+  border-top: 1px solid #292b3d;
+}
+
+.identity h2 {
+  font-size: 26px;
+}
+
+.identity p:last-child {
+  max-width: 580px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+.requirements {
+  margin: 0 0 22px;
+  padding: 18px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #141824;
+}
+
+.requirements h3 {
+  font-size: 12px;
+  margin: 0 0 10px;
+  color: #b6c4d4;
+}
+
+.requirements p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 7px 0 0;
+}

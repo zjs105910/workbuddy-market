@@ -1,0 +1,739 @@
+import {
+  appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+export const SESSION_RECORD_FIELDS = Object.freeze([
+  'schemaVersion', 'sessionId', 'target', 'event', 'branch', 'worktree', 'baselineHead', 'head',
+  'files', 'commits', 'ledger', 'timestamps', 'toolCalls', 'cost', 'editCount', 'concurrent',
+]);
+
+export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
+  enabled: true,
+  metrics: true,
+  compactionHint: true,
+  editThreshold: 20,
+  retentionDays: 30,
+  contextBytes: 4096,
+  lessonThreshold: 0.7,
+  lessonLimit: 5,
+});
+
+const SECRET_SHAPES = [
+  /\bsk-[A-Za-z0-9_-]{12,}\b/u,
+  /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u,
+  /\bgh[opusr]_[A-Za-z0-9]{20,}\b/u,
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/u,
+  /\b(?:password|passwd|api[_-]?key|access[_-]?token)\s*[:=]\s*\S+/iu,
+];
+
+function secretShaped(value) {
+  return typeof value === 'string' && SECRET_SHAPES.some((pattern) => pattern.test(value));
+}
+
+function cleanString(value, max = 1024) {
+  if (typeof value !== 'string' || secretShaped(value)) return null;
+  const clean = value.replace(/[\u0000-\u001f\u007f]/gu, '').trim();
+  return clean ? clean.slice(0, max) : null;
+}
+
+function cleanId(value, prefix = 'session') {
+  const clean = cleanString(value, 120);
+  if (clean && /^[A-Za-z0-9._-]+$/u.test(clean)) return clean;
+  const hash = createHash('sha256').update(String(value ?? randomUUID())).digest('hex').slice(0, 20);
+  return `${prefix}-${hash}`;
+}
+
+function git(cwd, args) {
+  try {
+    return { ok: true, out: execFileSync('git', args, { windowsHide: true, cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 2 * 1024 * 1024 }).trim() };
+  } catch {
+    return { ok: false, out: '' };
+  }
+}
+
+function relativeSlash(cwd, path) {
+  return relative(cwd, path).split(sep).join('/');
+}
+
+function ensureExcluded(cwd, root) {
+  const rel = relativeSlash(cwd, root);
+  if (!rel || rel.startsWith('../')) return false;
+  const tracked = git(cwd, ['ls-files', '--', rel]).out;
+  if (tracked) return false;
+  const gitPath = git(cwd, ['rev-parse', '--git-path', 'info/exclude']);
+  if (!gitPath.ok || !gitPath.out) return false;
+  const exclude = isAbsolute(gitPath.out) ? gitPath.out : resolve(cwd, gitPath.out);
+  mkdirSync(dirname(exclude), { recursive: true });
+  const pattern = `/${rel.replace(/\/$/u, '')}/`;
+  const current = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+  if (!current.split('\n').includes(pattern)) {
+    const prefix = current && !current.endsWith('\n') ? '\n' : '';
+    appendFileSync(exclude, `${prefix}${pattern}\n`);
+  }
+  return git(cwd, ['check-ignore', '-q', '--no-index', `${rel}/.rsc-probe`]).ok;
+}
+
+export function chooseMemoryRoot(cwd = process.cwd()) {
+  const project = resolve(cwd);
+  const inGit = git(project, ['rev-parse', '--is-inside-work-tree']).out === 'true';
+  if (!inGit) {
+    return { root: join(project, '.rsc', 'memory'), kind: 'local-state', reason: 'without-git', git: false };
+  }
+
+  // The harness itself commits `worklog/.gitkeep` so the folder exists in every clone. A placeholder
+  // is not the team committing its worklog, and reading it as one warned every teammate in every clone
+  // about a tracked worklog that was an empty file (team simulation D13).
+  const worklog = join(project, '02-DOCS', 'raw', 'worklog');
+  const local = join(project, '.rsc', 'memory');
+  const trackedFiles = existsSync(worklog)
+    ? git(project, ['ls-files', '--', '02-DOCS/raw/worklog']).out.split('\n').filter(Boolean) : [];
+  const trackedNotes = trackedFiles.filter((file) => !/(^|\/)\.(gitkeep|keep)$/u.test(file));
+  // A clone whose journal already lives in .rsc/memory keeps it there: moving would orphan its history.
+  const placeholderOnly = trackedFiles.length > 0 && trackedNotes.length === 0;
+  const settled = placeholderOnly && existsSync(join(local, 'sessions'));
+  if (existsSync(worklog) && !trackedNotes.length && !settled) {
+    const candidate = join(worklog, '.rsc-memory');
+    if (ensureExcluded(project, candidate)) {
+      return { root: candidate, kind: 'wiki-worklog', reason: 'untracked-worklog', git: true };
+    }
+  }
+
+  if (ensureExcluded(project, local)) {
+    const reason = trackedNotes.length ? 'tracked-worklog' : settled ? 'placeholder-worklog' : 'no-wiki';
+    return { root: local, kind: 'local-state', reason, git: true };
+  }
+
+  const gitRoot = git(project, ['rev-parse', '--git-path', 'rsc-memory']).out;
+  return {
+    root: isAbsolute(gitRoot) ? gitRoot : resolve(project, gitRoot || '.git/rsc-memory'),
+    kind: 'git-private-state', reason: 'local-state-tracked', git: true,
+  };
+}
+
+function ensureStore(root) {
+  for (const dir of ['sessions', 'anchors', 'lessons', 'presence']) mkdirSync(join(root, dir), { recursive: true });
+}
+
+function atomicJson(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
+}
+
+function readJson(path) {
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+}
+
+function iso(value) {
+  const parsed = new Date(value ?? Date.now());
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function settings(input = {}) {
+  const merged = { ...DEFAULT_MEMORY_SETTINGS };
+  for (const key of Object.keys(DEFAULT_MEMORY_SETTINGS)) {
+    if (Object.hasOwn(input, key)) merged[key] = input[key];
+  }
+  merged.retentionDays = Math.max(1, Number(merged.retentionDays) || DEFAULT_MEMORY_SETTINGS.retentionDays);
+  merged.contextBytes = Math.max(64, Number(merged.contextBytes) || DEFAULT_MEMORY_SETTINGS.contextBytes);
+  merged.lessonLimit = Math.max(0, Math.floor(Number(merged.lessonLimit) || 0));
+  merged.lessonThreshold = Math.min(1, Math.max(0, Number(merged.lessonThreshold) || 0));
+  merged.editThreshold = Math.max(1, Math.floor(Number(merged.editThreshold) || DEFAULT_MEMORY_SETTINGS.editThreshold));
+  return merged;
+}
+
+function parseStatus(output) {
+  const entries = output.split('\0').filter(Boolean);
+  const files = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    // `git()` trims command output, so a leading space in porcelain's XY column may be
+    // absent only for the first entry. Locate the separator instead of dropping a fixed
+    // three bytes; filenames must remain byte-for-byte identifiers, never content.
+    const separator = entry.indexOf(' ');
+    const status = separator === 1 ? entry.slice(0, 1) : entry.slice(0, 2);
+    const paths = [entry.slice(separator + 1).replace(/^ +/u, '')];
+    // In porcelain -z, rename/copy records carry the destination in this entry
+    // and the source in the next NUL-delimited entry. Both are touched paths.
+    if (/[RC]/u.test(status) && entries[index + 1]) paths.push(entries[++index]);
+    for (const path of paths) {
+      const clean = cleanString(path, 1000);
+      if (clean) files.push(clean);
+    }
+  }
+  return files;
+}
+
+function fingerprintFiles(worktree, files) {
+  return Object.fromEntries(files.map((path) => {
+    const result = git(worktree, ['hash-object', '--no-filters', '--', path]);
+    return [path, result.ok ? result.out : null];
+  }));
+}
+
+// `📥 docs(auto): sync desde rsc/knowledge` — written by knowledge-sync.mjs when it imports the team's
+// documents. Authored locally, but its content is other people's.
+const KNOWLEDGE_IMPORT = /^\S*\s*docs\(auto\): sync desde /u;
+
+function snapshot(cwd, baselineHead = null) {
+  const top = git(cwd, ['rev-parse', '--show-toplevel']);
+  if (!top.ok) return { git: false, branch: null, worktree: resolve(cwd), head: null, files: [], dirty: [], committed: [], fingerprints: {}, commits: [] };
+  const worktree = resolve(top.out);
+  const branch = cleanString(git(cwd, ['symbolic-ref', '--quiet', '--short', 'HEAD']).out, 255);
+  const head = cleanString(git(cwd, ['rev-parse', '--verify', 'HEAD']).out, 64);
+  const dirty = parseStatus(git(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).out);
+  let committed = [];
+  let commits = [];
+  if (baselineHead && head && git(cwd, ['cat-file', '-e', `${baselineHead}^{commit}`]).ok) {
+    // The session's OWN commits: the first-parent chain, merges left out. `baseline..head` after a
+    // `git merge origin/main` also walks every teammate commit the merge brought in, and the memory
+    // then told the next session it had done their work and should carry out their next step (team
+    // simulation, 2026-10-07). The files follow from those commits only — never `diff baseline..head`,
+    // which counts everything the merge changed. The knowledge-sync import commit is machine-made and
+    // carries other people's feature documents, so it is not the session's work either.
+    //
+    // A merge the session itself made IS its work, though (second team simulation: a session that
+    // merged main and resolved five conflicts was recorded as «no commits, files: none»). So merges on
+    // the first-parent chain stay, and from a merge only what the session resolved counts — the
+    // combined diff (`--cc`), never everything the merge brought in.
+    const own = git(cwd, ['log', '--first-parent', '--format=%H%x09%P%x09%s', `${baselineHead}..${head}`]).out
+      .split('\n').filter(Boolean).map((line) => line.split('\t'))
+      .filter(([, , subject = '']) => !KNOWLEDGE_IMPORT.test(subject));
+    commits = own.map(([sha]) => cleanString(sha, 64)).filter(Boolean);
+    const merges = new Set(own.filter(([, parents = '']) => parents.trim().split(/\s+/).length > 1).map(([sha]) => sha));
+    const touched = new Set();
+    for (const sha of commits) {
+      const args = merges.has(sha)
+        ? ['diff-tree', '--no-commit-id', '--name-only', '--cc', '-z', sha]
+        : ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', '--root', sha];
+      for (const item of git(cwd, args).out.split('\0')) {
+        const clean = cleanString(item, 1000);
+        if (clean) touched.add(clean);
+      }
+    }
+    committed = [...touched];
+  }
+  const files = [...new Set([...dirty, ...committed])].sort();
+  return { git: true, branch, worktree, head, files, dirty, committed, fingerprints: fingerprintFiles(worktree, dirty), commits };
+}
+
+function ledgerSnapshot(cwd) {
+  const roots = [
+    ['spec', join(cwd, '02-DOCS', 'wiki', 'sdd', 'specs')],
+    ['plan', join(cwd, '02-DOCS', 'wiki', 'sdd', 'plans')],
+    ['progress', join(cwd, '02-DOCS', 'wiki', 'sdd', 'progress')],
+  ];
+  const out = [];
+  for (const [type, root] of roots) {
+    if (!existsSync(root)) continue;
+    for (const name of readdirSync(root).filter((item) => item.endsWith('.md')).sort()) {
+      const path = join(root, name);
+      let body = '';
+      try { body = readFileSync(path, 'utf8'); } catch { continue; }
+      const rel = cleanString(relativeSlash(cwd, path), 1000);
+      if (!rel) continue;
+      const status = cleanString(body.match(/^status:\s*([a-z-]+)/imu)?.[1]?.toLowerCase(), 40) || 'unknown';
+      const openItems = (body.match(/^- \[ \]/gmu) || []).length;
+      out.push({ path: rel, type, status, openItems });
+    }
+  }
+  return out;
+}
+
+function sessionFiles(root) {
+  const dir = join(root, 'sessions');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => name.endsWith('.json')).map((name) => join(dir, name));
+}
+
+function lessonFiles(root) {
+  const dir = join(root, 'lessons');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => name.endsWith('.json')).map((name) => join(dir, name));
+}
+
+function prune(root, now, config) {
+  const cutoff = new Date(now).getTime() - config.retentionDays * 86400000;
+  for (const path of [...sessionFiles(root), ...readdirSync(join(root, 'anchors')).filter((name) => name.endsWith('.json')).map((name) => join(root, 'anchors', name))]) {
+    const value = readJson(path);
+    const updated = value?.timestamps?.updatedAt || value?.startedAt;
+    if (!updated || new Date(updated).getTime() < cutoff) rmSync(path, { force: true });
+  }
+  // Presence only means anything inside the active window; a day is generous and keeps the dir small.
+  const presenceCutoff = new Date(now).getTime() - 86400000;
+  for (const path of presenceFiles(root)) {
+    const value = readJson(path);
+    if (!value?.updatedAt || new Date(value.updatedAt).getTime() < presenceCutoff) rmSync(path, { force: true });
+  }
+}
+
+function presenceFiles(root) {
+  const dir = join(root, 'presence');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => name.endsWith('.json')).map((name) => join(dir, name));
+}
+
+const PRESENCE_FIELDS = ['schemaVersion', 'sessionId', 'target', 'branch', 'worktree', 'updatedAt'];
+
+/**
+ * "A session is here", written on every event from the first one (team simulation W2). The journal
+ * only writes a RECORD once there is work, so a session that had just started — or was still reading
+ * before its first edit — was invisible, and a second session opened twenty seconds later was never
+ * told to isolate. A record cannot carry this: resume would hand that empty record to the next
+ * session as "your continuation". So presence is its own tiny file: who and where, never what — no
+ * prompt, no file, no content (P3) — and it is removed when the session ends.
+ */
+function writePresence(root, storageId, presence) {
+  const value = Object.fromEntries(PRESENCE_FIELDS.map((key) => [key, presence[key] ?? null]));
+  if (Object.values(value).some((item) => secretShaped(item))) return;
+  atomicJson(join(root, 'presence', `${storageId}.json`), value);
+}
+
+function readPresence(root) {
+  return presenceFiles(root).map(readJson).filter((item) => item && item.schemaVersion === 1
+    && typeof item.sessionId === 'string' && typeof item.updatedAt === 'string'
+    && Object.keys(item).every((key) => PRESENCE_FIELDS.includes(key)));
+}
+
+// Where a session is, in the parent project's terms: the worktree under `<project>/.worktrees/` that
+// holds `path`, or null when `path` is not inside one.
+function nestedWorktreeOf(project, path) {
+  if (!path) return null;
+  const rel = relativeSlash(project, path);
+  if (!rel.startsWith('.worktrees/')) return null;
+  // git needs a directory to stand in: the file's own folder, or the nearest one that exists yet.
+  let probe = existsSync(path) && statSync(path).isDirectory() ? path : dirname(path);
+  while (!existsSync(probe)) {
+    const parent = dirname(probe);
+    if (parent === probe) return null;
+    probe = parent;
+  }
+  const top = git(probe, ['rev-parse', '--show-toplevel']);
+  if (!top.ok) return null;
+  const worktree = resolve(top.out);
+  return relativeSlash(project, worktree).startsWith('.worktrees/') ? worktree : null;
+}
+
+function noticeText(info) {
+  if (info.reason === 'placeholder-worklog') return null; // nothing the person needs to know
+  if (info.reason === 'tracked-worklog') return 'rsc memory: tracked worklog detected; using ignored local state instead.';
+  if (info.reason === 'untracked-worklog') return 'rsc memory: using the ignored wiki worklog store.';
+  if (info.reason === 'without-git') return 'rsc memory: running without git; branch and commit metadata are unavailable.';
+  if (info.reason === 'local-state-tracked') return 'rsc memory: .rsc memory was tracked; using git-private local state.';
+  // The ordinary case (no wiki worklog, local state) is not news: said to every new clone it was noise
+  // (second team simulation), like the placeholder case above.
+  return null;
+}
+
+function consumeNotice(info) {
+  const marker = join(info.root, `.notice-${info.reason}`);
+  if (existsSync(marker)) return null;
+  if (!noticeText(info)) return null;
+  writeFileSync(marker, `${iso()}\n`, { mode: 0o600 });
+  return noticeText(info);
+}
+
+function finiteOrNull(value, integer = false) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || (integer && !Number.isInteger(number))) return null;
+  return number;
+}
+
+function activeConcurrent(records, sessionId, target, worktree, now) {
+  const recent = new Date(now).getTime() - 2 * 60 * 60 * 1000;
+  return records.some((record) => (record?.sessionId !== sessionId || record?.target !== target) && record?.worktree === worktree
+    && !record?.timestamps?.completedAt && new Date(record?.timestamps?.updatedAt || 0).getTime() >= recent);
+}
+
+/** How long a session counts as "working here" after its last recorded event (team-safe-default B). */
+export const ACTIVE_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * Other sessions working in THIS checkout right now: any assistant with rsc, same worktree, an event
+ * in the last 30 minutes, not closed, and not the asking session itself. It answers WHO is working,
+ * never WHAT is in the project (constitution P3), reads only the local journal (no network, no
+ * content), and its worst failure is one worktree too many or too few.
+ *
+ * A session that only talks has no RECORD — the journal only writes when there is work — but it has a
+ * PRESENCE from its first event, so a session opened seconds after another one is still told to
+ * isolate (team simulation W2). Sessions are counted where they are NOW: one that moved into
+ * `.worktrees/<b>/` no longer counts in the main checkout.
+ */
+export function otherActiveSessions(input = {}) {
+  try {
+    const cwd = resolve(input.cwd || process.cwd());
+    const top = git(resolve(input.worktreeCwd || cwd), ['rev-parse', '--show-toplevel']);
+    if (!top.ok) return [];
+    const here = resolve(top.out);
+    const store = chooseMemoryRoot(cwd);
+    if (!existsSync(store.root)) return [];
+    const now = new Date(input.now || Date.now()).getTime();
+    const windowMs = Number.isFinite(input.windowMs) ? input.windowMs : ACTIVE_WINDOW_MS;
+    // Each session once, at its LATEST known position: its record (work) or its presence (any event),
+    // whichever is newer. A session that moved into a worktree is no longer here, whatever an older
+    // record of it says.
+    const latest = new Map();
+    for (const r of readRecords(store.root)) {
+      latest.set(`${r.target}--${r.sessionId}`, {
+        target: r.target, sessionId: r.sessionId, branch: r.branch, worktree: r.worktree,
+        updatedAt: r.timestamps?.updatedAt, completedAt: r.timestamps?.completedAt || null,
+      });
+    }
+    for (const p of readPresence(store.root)) {
+      const key = `${p.target}--${p.sessionId}`;
+      const known = latest.get(key);
+      const newer = !known || new Date(p.updatedAt).getTime() >= new Date(known.updatedAt || 0).getTime();
+      // A presence newer than the record's close means the session came back (resumed by id).
+      if (newer) latest.set(key, { ...p, completedAt: known?.completedAt && new Date(known.completedAt).getTime() >= new Date(p.updatedAt).getTime() ? known.completedAt : null });
+    }
+    const self = (s) => s.sessionId === cleanId(input.sessionId, 'session') && s.target === input.target;
+    return [...latest.values()]
+      .filter((s) => s.worktree === here)
+      .filter((s) => !self(s))
+      .filter((s) => !s.completedAt)
+      .filter((s) => now - new Date(s.updatedAt || 0).getTime() <= windowMs)
+      .map((s) => ({ target: s.target, sessionId: s.sessionId, branch: s.branch, updatedAt: s.updatedAt }));
+  } catch {
+    return [];
+  }
+}
+
+export function validateSessionRecord(record) {
+  const errors = [];
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return ['record: object required'];
+  for (const field of Object.keys(record)) if (!SESSION_RECORD_FIELDS.includes(field)) errors.push(`${field}: unknown field`);
+  for (const field of SESSION_RECORD_FIELDS) if (!Object.hasOwn(record, field)) errors.push(`${field}: required`);
+  if (record.schemaVersion !== 1) errors.push('schemaVersion: must be 1');
+  if (!Array.isArray(record.files) || !Array.isArray(record.commits) || !Array.isArray(record.ledger)) errors.push('files/commits/ledger: arrays required');
+  if (!record.timestamps || Object.keys(record.timestamps).some((key) => !['startedAt', 'updatedAt', 'completedAt'].includes(key))) errors.push('timestamps: closed schema required');
+  for (const item of record.ledger || []) {
+    if (!item || Object.keys(item).some((key) => !['path', 'type', 'status', 'openItems'].includes(key))) errors.push('ledger: closed schema required');
+  }
+  const walk = (value) => {
+    if (secretShaped(value)) errors.push('secret-shaped string rejected');
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(record);
+  return errors;
+}
+
+function readRecords(root) {
+  return sessionFiles(root).map(readJson).filter((record) => record && validateSessionRecord(record).length === 0);
+}
+
+export function capture(input = {}) {
+  const cwd = resolve(input.cwd || process.cwd());
+  // WHERE the journal lives and WHO the session is are two different questions. `cwd` answers the
+  // first — the nearest harness, so a child with no manifest of its own does not scatter journals.
+  // The second has to be asked of git from where the agent actually works: asked from the harness,
+  // every worktree nested under it came back as the harness itself, and a sibling's record then
+  // "matched exactly". See GHSA-8gjp-3r7c-33f4.
+  let here = resolve(input.worktreeCwd || cwd);
+  const config = settings(input.settings);
+  if (!config.enabled) return { record: null, path: null, notice: null, compactionHint: false };
+  const store = chooseMemoryRoot(cwd);
+  ensureStore(store.root);
+  const now = iso(input.now);
+  prune(store.root, now, config);
+  const sessionId = cleanId(input.sessionId, 'session');
+  const target = cleanId(input.target || 'unknown', 'target');
+  // Providers own their session-id namespaces. Prefixing the storage key prevents
+  // an identical id from two local assistants overwriting the other journal.
+  const storageId = `${target}--${sessionId}`;
+  const anchorPath = join(store.root, 'anchors', `${storageId}.json`);
+  const recordPath = join(store.root, 'sessions', `${storageId}.json`);
+  let anchor = readJson(anchorPath);
+  let existing = readJson(recordPath);
+  // A session that moved into `.worktrees/<b>/` is THERE, also on the events that do not say so.
+  // An edit names its file — the first sign of the move when the agent writes by absolute path and
+  // its cwd never changed — and `Stop`/`SessionEnd` name nothing, so the move is remembered on the
+  // anchor until the session edits the main checkout again. Without this the record stayed on the
+  // main checkout, open, and every later session there was told for half an hour that someone was
+  // working beside it (team simulation W1).
+  const projectTop = git(cwd, ['rev-parse', '--show-toplevel']);
+  const project = projectTop.ok ? resolve(projectTop.out) : cwd;
+  const fileHint = typeof input.filePath === 'string' && isAbsolute(input.filePath) ? resolve(input.filePath) : null;
+  let movedTo = anchor?.movedTo || null;
+  const fromFile = nestedWorktreeOf(project, fileHint);
+  if (fromFile) here = fromFile;
+  const nestedHere = nestedWorktreeOf(project, here);
+  if (nestedHere) movedTo = nestedHere;
+  else if (fileHint && !relativeSlash(project, fileHint).startsWith('..')) movedTo = null; // back in the main checkout
+  else if (movedTo && existsSync(movedTo)) here = movedTo;
+  else movedTo = null;
+  const firstSnapshot = snapshot(here, null);
+  // Presence: on every event, before any early return — the point is to be seen before there is work.
+  const ending = ['end', 'sessionEnd', 'stop'].includes(input.event);
+  if (ending) rmSync(join(store.root, 'presence', `${storageId}.json`), { force: true });
+  else {
+    writePresence(store.root, storageId, {
+      schemaVersion: 1, sessionId, target, branch: cleanString(firstSnapshot.branch, 255),
+      worktree: cleanString(firstSnapshot.worktree, 1000), updatedAt: now,
+    });
+  }
+  if (!anchor) {
+    anchor = {
+      sessionId,
+      startedAt: now,
+      baselineHead: cleanString(input.baselineHead, 64) || firstSnapshot.head,
+      baselineFiles: firstSnapshot.files,
+      baselineFingerprints: firstSnapshot.fingerprints,
+      ...(movedTo ? { movedTo } : {}),
+    };
+    atomicJson(anchorPath, anchor);
+  } else if ((anchor.movedTo || null) !== movedTo) {
+    const { movedTo: _previous, ...rest } = anchor;
+    anchor = movedTo ? { ...rest, movedTo } : rest;
+    atomicJson(anchorPath, anchor);
+  }
+  if (input.event === 'start' && !existing) return { record: null, path: null, notice: null, compactionHint: false };
+
+  const repo = snapshot(here, anchor.baselineHead);
+  // Count what CHANGED, not which tool changed it. `editDelta` is +1 per Edit/Write tool event, and
+  // on its own it was blind to everything done through the shell — a heredoc, `sed -i`, a script, a
+  // formatter — which is how automated sessions work. The session that found this had touched dozens
+  // of files and its record said editCount=1, so the compaction hint never reached the long sessions
+  // it exists for.
+  //
+  // `snapshot` already fingerprints every modified file on every event. Comparing those fingerprints
+  // with the previous event's counts a change from any source. `max`, not `+`: an Edit that changed a
+  // file shows up in BOTH signals, and must count once.
+  const previousFingerprints = anchor.lastFingerprints || anchor.baselineFingerprints || {};
+  const observed = Object.entries(repo.fingerprints || {})
+    .filter(([path, fingerprint]) => fingerprint && previousFingerprints[path] !== fingerprint).length;
+  const editDelta = Math.max(finiteOrNull(input.editDelta, true) || 0, observed);
+  const editCount = Math.max(0, (existing?.editCount || 0) + editDelta);
+  const baselineFiles = new Set(anchor.baselineFiles || []);
+  const newDirtyPath = repo.files.some((path) => !baselineFiles.has(path));
+  const baselineFingerprints = anchor.baselineFingerprints || {};
+  const dirtyChanged = Object.entries(baselineFingerprints)
+    .some(([path, fingerprint]) => repo.fingerprints[path] !== fingerprint);
+  const hasWork = Boolean(input.force === true || existing || editCount || newDirtyPath || dirtyChanged || repo.commits.length);
+  if (!hasWork) return { record: null, path: null, notice: null, compactionHint: false };
+
+  const records = readRecords(store.root);
+  const completed = ['end', 'sessionEnd', 'stop'].includes(input.event) ? now : (existing?.timestamps?.completedAt || null);
+  const cost = config.metrics
+    ? (Object.hasOwn(input, 'cost') ? finiteOrNull(input.cost) : (existing?.cost ?? null))
+    : null;
+  const toolCalls = config.metrics
+    ? (Object.hasOwn(input, 'toolCalls') ? finiteOrNull(input.toolCalls, true) : (existing?.toolCalls ?? null))
+    : null;
+  const record = {
+    schemaVersion: 1,
+    sessionId,
+    target: cleanString(input.target, 40) || existing?.target || 'unknown',
+    event: cleanString(input.event, 40) || 'capture',
+    branch: cleanString(repo.branch, 255),
+    worktree: cleanString(repo.worktree, 1000),
+    baselineHead: cleanString(anchor.baselineHead, 64),
+    head: cleanString(repo.head, 64),
+    // What THIS session touched: what it committed, plus what is dirty now and was not dirty — or not
+    // this content — when it started. The plain union listed whatever an install had left untracked,
+    // so a session that never opened `.rsc.json` reported it as its work (E2E 2026-10-07).
+    files: [...new Set([...repo.committed, ...repo.dirty.filter((path) => !baselineFiles.has(path)
+      || baselineFingerprints[path] !== repo.fingerprints[path])])].sort().filter((item) => !secretShaped(item)),
+    commits: repo.commits.filter((item) => !secretShaped(item)),
+    ledger: ledgerSnapshot(cwd),
+    timestamps: { startedAt: anchor.startedAt, updatedAt: now, completedAt: completed },
+    toolCalls,
+    cost,
+    editCount,
+    concurrent: activeConcurrent(records, sessionId, target, repo.worktree, now),
+  };
+  const errors = validateSessionRecord(record);
+  if (errors.length) return { record: null, path: null, notice: null, compactionHint: false, errors };
+  atomicJson(recordPath, record);
+  existing = record;
+  // Once per session, not once per turn. `editCount` only ever grows, so `editCount >= threshold`
+  // was true for every remaining event of a working afternoon — the twentieth edit turned a useful
+  // nudge into a line after every single turn, for good. Worse, compaction does not reset the
+  // count, so following the advice changed nothing and the hint kept coming.
+  //
+  // The flag lives on the ANCHOR and not on the record on purpose: the record's schema is closed
+  // and every field of it is required, so a new field there would fail validation on every record
+  // already written and `readRecords` would quietly drop the project's whole history.
+  let compactionHint = Boolean(config.compactionHint && editCount >= config.editThreshold);
+  if (compactionHint && anchor.compactionHintedAt) compactionHint = false;
+  // One anchor write per event at most, carrying both pieces of per-session state: the fingerprints
+  // the next event compares against, and the once-per-session hint mark. Written only when either
+  // actually changed, so a read-only shell command costs no extra disk.
+  const fingerprintsMoved = observed > 0 || !anchor.lastFingerprints;
+  if (compactionHint || fingerprintsMoved) {
+    atomicJson(anchorPath, {
+      ...anchor,
+      lastFingerprints: repo.fingerprints || {},
+      ...(compactionHint ? { compactionHintedAt: now } : {}),
+    });
+  }
+  return {
+    record,
+    path: recordPath,
+    notice: consumeNotice(store),
+    compactionHint,
+  };
+}
+
+function validAnchor(cwd, record) {
+  if (!record?.head) return true;
+  return git(cwd, ['cat-file', '-e', `${record.head}^{commit}`]).ok;
+}
+
+function selectedLessons(root, config) {
+  return lessonFiles(root).map(readJson).filter((lesson) => lesson?.approvedAt && lesson.confidence >= config.lessonThreshold
+    && !secretShaped(lesson.text) && !secretShaped(lesson.evidence))
+    .sort((a, b) => b.confidence - a.confidence || b.approvedAt.localeCompare(a.approvedAt))
+    .slice(0, config.lessonLimit);
+}
+
+function truncateUtf8(text, maxBytes) {
+  if (Buffer.byteLength(text) <= maxBytes) return text;
+  let output = '';
+  for (const character of text) {
+    if (Buffer.byteLength(output + character) > maxBytes) break;
+    output += character;
+  }
+  return output;
+}
+
+// WHAT the last session did, not only where it stopped: the subjects of its commits and the next step
+// its feature document wrote down. Read at resume time from git and the document — never from the
+// prompts, which the record promises not to keep — so the record's closed schema does not change.
+function subjects(cwd, commits) {
+  return commits.slice(0, 8).map((sha) => {
+    const out = git(cwd, ['log', '-1', '--format=%h %s', sha]);
+    return out.ok ? cleanString(out.out, 160) : cleanString(sha.slice(0, 7), 7);
+  }).filter((item) => item && !secretShaped(item));
+}
+
+// A document whose frontmatter says `status: done` is finished work, not a next step. On a closed
+// default branch the close travels by rsc/knowledge and is not in the checkout yet (knowledge-sync
+// `closeLanded`), so the exchange branch's copy is asked too — a local ref, no network.
+const isDone = (text) => /^status:[ \t]*done[ \t]*$/mu.test(String(text || '').replace(/\r\n/gu, '\n').match(/^---\n([\s\S]*?)\n---(?:\n|$)/u)?.[1] || '');
+
+function nextSteps(cwd, files) {
+  const out = [];
+  for (const rel of files.filter((f) => /^02-DOCS\/wiki\/(ftd|sdd\/(specs|plans|progress))\/[^/]+\.md$/u.test(f)).slice(0, 3)) {
+    let body = '';
+    try { body = readFileSync(join(cwd, rel), 'utf8'); } catch { continue; }
+    if (isDone(body)) continue;
+    const exchange = git(cwd, ['show', `refs/remotes/origin/rsc/knowledge:${rel}`]);
+    if (exchange.ok && isDone(exchange.out)) continue;
+    const section = body.match(/^##\s*(Next|Siguiente|Próximo)[^\n]*\n+([\s\S]*?)(?=\n##\s|$)/imu)?.[2];
+    const first = section?.split('\n').map((l) => l.replace(/^[-*]\s*/u, '').trim()).find(Boolean);
+    const open = (body.match(/^- \[ \]/gmu) || []).length;
+    if (first || open) out.push(`${rel}: ${first ? cleanString(first, 200) : 'no next step written'}${open ? ` (${open} open)` : ''}`);
+  }
+  return out;
+}
+
+function renderContext(record, match, lessons, config, cwd = process.cwd()) {
+  if (!record && !lessons.length) return '';
+  const done = record ? subjects(cwd, record.commits) : [];
+  const next = record ? nextSteps(cwd, record.files) : [];
+  const lines = record ? [
+    `[rsc local ${match} continuation]`,
+    `source: ${record.target}/${record.sessionId} (${record.timestamps.startedAt} → ${record.timestamps.updatedAt})`,
+    `branch: ${record.branch || 'unavailable'}`,
+    `worktree: ${record.worktree || 'unavailable'}`,
+    `head: ${record.head || 'unavailable'}`,
+    `done: ${done.length ? done.join(' | ') : 'no commits'}`,
+    `files: ${record.files.join(', ') || 'none'}`,
+    ...(next.length ? [`next: ${next.join(' | ')}`] : []),
+  ] : ['[rsc local approved lessons]'];
+  if (record?.ledger.length) lines.push(`ledger: ${record.ledger.map((item) => `${item.path}=${item.status}/${item.openItems}`).join(', ')}`);
+  // Only when something is known: «cost=unknown toolCalls=unknown» on every resume told the model nothing.
+  if (record && (record.cost != null || record.toolCalls != null)) lines.push(`metrics: cost=${record.cost ?? 'unknown'} toolCalls=${record.toolCalls ?? 'unknown'}`);
+  if (record?.concurrent) lines.push('parallel sessions detected; this record was not merged with them.');
+  for (const lesson of lessons) lines.push(`approved lesson (${lesson.confidence}): ${lesson.text}`);
+  return truncateUtf8(`${lines.join('\n')}\n`, config.contextBytes);
+}
+
+export function resume(input = {}) {
+  const cwd = resolve(input.cwd || process.cwd());
+  const config = settings(input.settings);
+  if (!config.enabled) return { match: 'none', record: null, lessons: [], context: '' };
+  const store = chooseMemoryRoot(cwd);
+  ensureStore(store.root);
+  const now = iso(input.now);
+  prune(store.root, now, config);
+  const here = resolve(input.worktreeCwd || cwd);
+  const current = snapshot(here, null);
+  const records = readRecords(store.root).filter((record) => validAnchor(here, record))
+    .sort((a, b) => b.timestamps.updatedAt.localeCompare(a.timestamps.updatedAt));
+  let record = records.find((candidate) => candidate.branch === current.branch && candidate.worktree === current.worktree) || null;
+  let match = record ? 'exact' : 'none';
+  // Only ever this worktree's own records. The chain used to end in `|| records[0]` — the newest
+  // record in the store, whoever wrote it — which a moved or renamed checkout reached every time,
+  // because its stale records match nothing. A shared store is a place to KEEP several worktrees'
+  // journals, never a reason to hand one of them to another. No continuation is the honest answer
+  // when there is nothing of yours to continue.
+  if (!record) {
+    record = records.find((candidate) => candidate.worktree === current.worktree) || null;
+    if (record) match = 'nearby';
+  }
+  const lessons = selectedLessons(store.root, config);
+  return { match, record, lessons, context: renderContext(record, match, lessons, config, here) };
+}
+
+export function learn(input = {}) {
+  if (input.approved !== true) return { saved: false, reason: 'individual explicit approval required' };
+  const text = cleanString(input.text, 1000);
+  const evidence = cleanString(input.evidence, 1000);
+  if (!text || !evidence || secretShaped(input.text) || secretShaped(input.evidence)) return { saved: false, reason: 'secret-shaped or invalid lesson' };
+  if (!['project', 'global'].includes(input.scope)) return { saved: false, reason: 'scope must be project or global' };
+  const confidence = finiteOrNull(input.confidence);
+  if (confidence === null || confidence > 1) return { saved: false, reason: 'confidence must be between 0 and 1' };
+  const cwd = resolve(input.cwd || process.cwd());
+  const store = chooseMemoryRoot(cwd);
+  ensureStore(store.root);
+  const approvedAt = iso(input.now);
+  const id = createHash('sha256').update(`${input.scope}\0${text}\0${evidence}`).digest('hex').slice(0, 20);
+  const lesson = { schemaVersion: 1, id, text, evidence, scope: input.scope, confidence, approvedAt };
+  const path = join(store.root, 'lessons', `${id}.json`);
+  atomicJson(path, lesson);
+  return { saved: true, lesson, path, notice: consumeNotice(store) };
+}
+
+export function metricsSummary(input = {}) {
+  const cwd = resolve(input.cwd || process.cwd());
+  const config = settings(input.settings);
+  const store = chooseMemoryRoot(cwd);
+  ensureStore(store.root);
+  prune(store.root, iso(input.now), config);
+  const sessions = readRecords(store.root).map(({ sessionId, target, cost, toolCalls, timestamps }) => ({ sessionId, target, cost, toolCalls, timestamps }));
+  const unknown = {
+    cost: sessions.filter((row) => row.cost === null).length,
+    toolCalls: sessions.filter((row) => row.toolCalls === null).length,
+  };
+  // A sum over nothing known is unknown, not zero: doctor printed `cost: 0` for three sessions whose
+  // cost nobody had measured.
+  const knownSum = (key) => (unknown[key] === sessions.length ? null
+    : sessions.reduce((sum, row) => sum + (row[key] ?? 0), 0));
+  const knownTotal = { cost: knownSum('cost'), toolCalls: knownSum('toolCalls') };
+  const total = {
+    cost: !sessions.length || unknown.cost ? null : knownTotal.cost,
+    toolCalls: !sessions.length || unknown.toolCalls ? null : knownTotal.toolCalls,
+  };
+  return { sessions, total, knownTotal, unknown };
+}
+
+export function memoryStatus(input = {}) {
+  const cwd = resolve(input.cwd || process.cwd());
+  const store = chooseMemoryRoot(cwd);
+  ensureStore(store.root);
+  return {
+    enabled: settings(input.settings).enabled,
+    root: store.root,
+    kind: store.kind,
+    reason: store.reason,
+    sessions: readRecords(store.root).length,
+    lessons: lessonFiles(store.root).map(readJson).filter(Boolean).length,
+  };
+}

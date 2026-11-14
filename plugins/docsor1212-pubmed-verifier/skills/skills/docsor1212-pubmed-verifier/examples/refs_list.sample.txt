@@ -1,0 +1,4 @@
+[1] Gattorno M, Sanni K. Development and validation of the autoinflammatory diseases effect scale. Annals of the Rheumatic Diseases. 2019;78(5):618-622. PMID: 31018962
+[2] Zaripova LN, Midgley A, Christmas SE. Autoinflammatory diseases in practice. Pediatric Rheumatology. 2021;19(1):75. https://doi.org/10.1186/s12969-021-00566-6
+[3]Obokata H. Stimulus-triggered fate conversion of somatic cells into pluripotency. Nature. 2014;511(7510):540-545.
+[4] And a deliberately broken line without any usable metadata.

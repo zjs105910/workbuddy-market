@@ -1,0 +1,18 @@
+{
+  "counts_by_adapter": {
+    "LegacyClaim": 43,
+    "LegacyMechanism": 28,
+    "LegacyQueueRecord": 1,
+    "LegacyRunState": 1
+  },
+  "record_count": 73,
+  "records_digest": "sha256:d15230c1a73ca0752394f625408eca46d10ad703b4c9f0acab9aacc4502ea35f",
+  "result": "pass",
+  "schema_version": "1.0.0",
+  "source_paths": [
+    "researcher/claims/index.jsonl",
+    "researcher/mechanisms/registry.jsonl",
+    "researcher/runs/20260515-035228-executable-autonomous-research-frameworks/run-state.json",
+    "researcher/runs/20260515-035228-executable-autonomous-research-frameworks/sources/queue.jsonl"
+  ]
+}

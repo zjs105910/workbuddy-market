@@ -1,0 +1,925 @@
+---
+name: design-spacing-rhythm
+description: >
+  The most complete spacing & alignment skill for AI-generated UI and written documents. Reads the
+  layout, sets three dials (SPACING_STEP / DENSITY / ALIGNMENT_RIGOR), derives
+  ONE scale, and lets proximity carry meaning — establishing a spacing scale,
+  vertical rhythm, optical alignment, whitespace hierarchy, responsive/fluid
+  density, accessibility floors, component recipes, document & long-form
+  (Word / Docs / PDF / Markdown) spacing, and an anti-slop checklist.
+  Every rule is CONTEXTUAL: read the situation, then pull only what fits. Not a
+  blanket "add more padding" pass.
+---
+
+# spacingskill: The Spacing & Rhythm Skill
+
+> For any UI **or written document** an agent generates or edits — landing
+> pages, dashboards, forms, data tables, mobile screens, editorial, and
+> Word / Google Docs / PDF / Markdown documents (§14).
+> Spacing is the single fastest tell of AI-generated UI: off-scale magic
+> numbers, everything equally cramped, no proximity hierarchy, optical
+> misalignment.
+> Every rule below is **contextual**. Nothing fires automatically. First read
+> the layout, set the dials, then pull only what fits. Spacing is a *system*,
+> not decoration applied at the end.
+
+---
+
+## 0. SPACE INFERENCE — Read the Layout Before a Single Pixel
+
+Spacing is a decision made BEFORE the first `<div>` exists. Infer it; do not
+default to it. State the dials, emit one "Space Read" line, then generate.
+
+### 0.A Signals to read (priority order — higher overrides lower)
+
+| # | Signal | Where it comes from | What it sets |
+|---|--------|---------------------|--------------|
+| 1 | **Existing scale / tokens** | Tailwind config, `--space-*` / `--spacing` vars, a component lib (MUI/Carbon/Radix/Chakra), repeated literals | SPACING_STEP + the whole scale. Conform, do not invent. |
+| 2 | **Brand / explicit constraint** | Brand guide, "match our app", a referenced screenshot, a stated number | Overrides aesthetic preference. Lock it, build around it. |
+| 3 | **Surface kind** | table vs hero vs form vs dashboard | DENSITY + SPACING_STEP start |
+| 4 | **Density the CONTENT demands** | field count, columns, rows/screen, words/block, scan-vs-read | Final DENSITY. Content outranks aesthetic. |
+| 5 | **Grouping relationships** | how many groups; nesting depth | the spacing ramp + ALIGNMENT_RIGOR |
+| 6 | **Viewport range** | mobile-only, responsive, desktop-app, TV | margins/gutters + how DENSITY shifts across breakpoints |
+
+- **Detect-and-conform is rule zero.** If a scale exists, SPACING_STEP is already decided — adopt it. Introducing a second scale beside an existing one produces `13px`/`22px` values that read as broken. This is the most damaging spacing error.
+- **Content demand outranks the surface stereotype.** A "marketing page" that is really a 9-row pricing table is a *data* surface — raise DENSITY. Classify by what the content does (scan / compare / read / input), not its label.
+- **Grouping is the real job.** The deliverable is almost never "more space"; it is a *correct ratio* — items in a group sit closer to each other than to the next group (§6).
+- **Viewport sets margins, not the whole system.** SPACING_STEP stays constant across breakpoints; outer margin and sometimes DENSITY change. Mobile gets a smaller margin (≈16px), never zero.
+
+### 0.B State the "Space Read" FIRST, every time
+
+One line before any markup. It makes the inference explicit and reviewable, and locks the dials so the user can redirect in one sentence.
+
+> **Space Read:** `<surface>` · `<airy|balanced|packed>` · STEP `<n>` · DENSITY `<n>` · RIGOR `<n>` · `<the one ratio/constraint that matters>`
+
+| Situation | Space Read |
+|-----------|------------|
+| Admin table, 7 cols, 30 rows | `data-table · packed · STEP 4 · DENSITY 8 · RIGOR 9 · row rhythm 8px, columns hard-snapped, numerals right-aligned` |
+| SaaS landing hero + 3 cards | `marketing-hero · airy · STEP 8 · DENSITY 2 · RIGOR 5 · section padding 96–128px, generous lead under headline` |
+| Settings form, existing Tailwind | `form · balanced · STEP 4 (inherited) · DENSITY 5 · RIGOR 8 · label↔input 8px, field↔field 24px, group↔group 40px` |
+
+If you cannot fill the final clause, you have not finished reading the situation — do not start coding.
+
+### 0.C Anti-Default Discipline — forbidden LLM reflexes
+
+| Forbidden default | Why it's wrong | Do instead |
+|-------------------|----------------|-----------|
+| **Uniform padding everywhere** | destroys grouping; reads as one flat list | apply the §6 proximity ladder — inner gap < outer gap |
+| **Magic numbers** (`13`, `17`, `22px`) | on no grid; reads as broken | every value = a multiple of SPACING_STEP |
+| **Mixing two scales** | cumulative drift, nothing lines up | one SPACING_STEP for the whole tree |
+| **Airy by default on dense data** | wastes the screen the content needs | DENSITY follows content (0.A.4) |
+| **`gap: 10px / 20px / 30px`** | base-10 ≠ the grid | snap to 8/12/16/24 |
+| **Equal margin above & below a heading** | heading belongs to the content below | ~2:1 above:below (§5) |
+| **Zero outer margin on mobile** | cramped, unreadable | ≥16px screen margin for text |
+| **Centering everything** | no alignment spine; weak scanning | left-align body; center only hero/empty states |
+| **Sub-target tap areas** | fails a11y | ≥24×24px (WCAG AA); 44pt/48dp on touch |
+| **Cramming to fit "above the fold"** | breaks rhythm for a myth | hold the ramp; let content scroll |
+
+---
+
+## 1. THE THREE DIALS — Core Configuration
+
+Set three dials after the Space Read. Every later decision is gated by them.
+
+* **`SPACING_STEP`** — base grid unit (px). `4` = fine/dense data UI, `8` = default clean layout. Avoid odd bases. Every spacing value is a multiple of it (the `0.5×` half-step is the only sub-unit, for hairline/icon↔label gaps).
+* **`DENSITY`** — `1` = art-gallery airy (marketing, hero) … `10` = cockpit packed (tables, terminals). It does not invent numbers; it selects *which* rungs of the scale you reach for.
+* **`ALIGNMENT_RIGOR`** — `1` = freeform/editorial … `10` = strict column- & baseline-grid-locked. Governs how hard elements snap to columns, edges, and a shared text baseline. Governs snapping, **not** gap size — an airy layout can still be strictly aligned.
+
+**Baseline (no signal): `8 / 4 / 7`.** Overrides happen **conversationally**, never by asking the user to edit this file (see §13.B).
+
+### 1.A Dial inference (signal → dials)
+
+| Signal in the Space Read | STEP | DENSITY | RIGOR |
+|--------------------------|:---:|:---:|:---:|
+| Marketing / hero / landing | 8 | 1–3 | 4–6 |
+| Editorial / brand piece | 8 | 2–4 | 1–3 |
+| Standard app UI / forms / settings | 8 | 4–6 | 7–8 |
+| Dashboard (mixed cards + tables) | 8 (4 inside tables) | 6–8 | 8 |
+| Data table / terminal / cockpit | 4 | 8–10 | 9–10 |
+| Docs / long-form reading | 8 | 3–4 | 5–6 |
+| Mobile primary | 8 | 4–6 | 7 |
+
+**Inference rules:**
+- **Compute DENSITY:** start at the **midpoint** of the §1.A range, apply the §1.B deltas (they **sum**), then **clamp to [1, 10]**. When a §1.B content shift contradicts the §1.A surface band, **content wins** (§0.A) — let the value leave the band (a marketing-hero surface holding a 9-row pricing table lands *dense*, not airy).
+- `SPACING_STEP = 4` **only when** `DENSITY ≥ 7` (and as a 4-grid local override inside a dense region of an 8-grid page). The 4-scale is a strict subset of the 8-scale, so one product stays coherent.
+- DENSITY and gap move **inversely**: high DENSITY pulls every gap one rung *down*; low DENSITY pushes section gaps one rung *up*.
+- ALIGNMENT_RIGOR **rises with repetition** — many repeated rows/cells → 8–10; few bespoke blocks → 1–4. The `7` baseline applies only absent any repetition/bespoke signal; a present "few bespoke blocks" signal overrides it to 1–4. High DENSITY does **not** mean low RIGOR; packed UIs need *more* rigor.
+
+### 1.B Content adjustments to DENSITY
+
+| Observed | Shift DENSITY |
+|----------|:---:|
+| > 6 columns OR > 20 rows visible | +2 |
+| Numeric / financial / monitoring data | +1 |
+| > 8 input fields in one view | +1 |
+| Primary action is *compare* / *scan* | +1 |
+| Primary action is *read* (prose) | −2 |
+| Single focal CTA, little else | −2 |
+| "spacious / premium / calm" | −1 to −2 |
+| "compact / power-user / efficient" | +1 to +2 |
+
+Deltas **sum**, then clamp DENSITY to `[1, 10]`. On a content-vs-aesthetic conflict the **content** delta wins (§0.A) — "numeric/financial +1" beats "premium −1".
+
+---
+
+## 2. THE SPACING SCALE — One Scale, No Magic Numbers
+
+Every spacing value resolves to a rung on one scale derived from `SPACING_STEP`. If a number is not on the scale it is a bug — except the one hairline exception in §2.D. **8 is the default** because Material, Apple HIG, IBM Carbon, and Tailwind's effective layout steps all converge on an 8px rhythm; 8 divides cleanly at common zoom/DPR factors and keeps steps visually distinct.
+
+### 2.A The canonical scale (`SPACING_STEP = 8`)
+
+Keyed by px (the universal truth) with rem and the matching Tailwind utility. `px = SPACING_STEP × multiplier`. Spacing is **linear** (multiples of the step) so it tiles and nests on a grid — never a modular/fractional scale for layout (modular is for type, §5, and the macro exception in §2.C).
+
+| px | mult | rem | Tailwind | Typical use |
+|---:|:---:|:---:|:---:|-------------|
+| 0 | 0 | 0 | `p-0` | reset / collapse |
+| **4** | 0.5× | 0.25 | `p-1` | hairline gap, icon↔label, tightest pair |
+| **8** | 1× | 0.5 | `p-2` | tight inline gap, compact vertical inset |
+| **12** | 1.5× | 0.75 | `p-3` | compact control padding |
+| **16** | 2× | 1 | `p-4` | **default gap between related items**, control pad-x |
+| **24** | 3× | 1.5 | `p-6` | card inset, field↔field, related-group gap |
+| **32** | 4× | 2 | `p-8` | group separation, large card inset |
+| **48** | 6× | 3 | `p-12` | sub-section gap |
+| **64** | 8× | 4 | `p-16` | section gap (compact) |
+| **96** | 12× | 6 | `p-24` | major section gap (marketing) |
+| **128** | 16× | 8 | `p-32` | hero vertical rhythm |
+| **160** | 20× | 10 | `p-40` | airy landing rhythm (DENSITY ≤ 3) |
+
+**For `SPACING_STEP = 4`:** halve every px — the in-between rungs (`4 / 8 / 12 / 16 / 24 / 32 …`) become load-bearing. Nothing is dropped; the dense scale is the 8-scale with finer resolution.
+
+> **Tailwind note:** Tailwind's unit is 4px (`p-4` = 16px). The Tailwind column above is matched by **px**, not by index — always pick the utility whose px equals your target (16px → `p-4`), and never `p-[13px]`.
+
+### 2.B Primitive vs semantic tokens
+
+Two tiers. Primitives are the raw scale. **Semantic aliases name a job** and point at a primitive, so a density change edits one mapping, not 200 call-sites. Components consume semantic tokens; only the theme layer touches primitives.
+
+| Semantic | Job | DENSITY 1–3 | DENSITY 4–7 | DENSITY 8–10 |
+|----------|-----|:---:|:---:|:---:|
+| `inset-md` | standard card/panel padding | 48 | 24–32 | 16 |
+| `gutter` | column / grid-cell gap | 64 | 32–40 | 16 |
+| `section` | gap between page sections | 128–160 | 96 | 48 |
+| `stack-sm` | vertical gap between stacked items | 24 | 16 | 8 |
+
+### 2.C Modular scale — only for the macro tier
+
+For section rhythm on low-DENSITY marketing pages, a geometric scale (`stepₙ = base × ratioⁿ`) gives more deliberate jumps — **then snap each result to the nearest grid multiple.** Allowed only when `ALIGNMENT_RIGOR ≤ 4` *and* `DENSITY ≤ 4` *and* the spacing is between full page sections. At `RIGOR ≥ 7` stay linear (a baseline-locked grid can't absorb the snap residue).
+
+Pick the ratio by DENSITY: `1.25` at DENSITY 4 (restrained) · `1.333` at 3 (editorial) · `1.5` at 2 (dramatic) · `1.618` at 1 (hero only). Example (base 16, ×1.5, snapped to 8): 16 → 24 → 40 → 56 → 80. The unsnapped 36/54/81 are forbidden.
+
+### 2.D The ONE allowed off-scale exception
+
+**Hairlines, borders, and rendered lines live off the spacing scale.** A `1px` border, `0.5px` retina rule, `outline-offset`, and optical-centering transform nudges (≤4px — typically 1–2px, up to 4px only for large display glyphs) are rendered lines, not layout space. The *gap around* a border is still on-scale. Nothing else escapes.
+
+### 2.E Emitting tokens
+
+```css
+:root {
+  --space-step: 8px;
+  --space-1: calc(var(--space-step) * 1);   /* 8  */
+  --space-2: calc(var(--space-step) * 2);   /* 16 */
+  --space-3: calc(var(--space-step) * 3);   /* 24 */
+  --space-4: calc(var(--space-step) * 4);   /* 32 */
+  --space-8: calc(var(--space-step) * 8);   /* 64 */
+  /* semantic aliases point at primitives — density edits these only */
+  --inset-md: var(--space-3);
+  --gutter:   var(--space-4);
+  --section:  var(--space-12, 96px);
+}
+```
+
+---
+
+## 3. SPACING PRIMITIVES & GAP OWNERSHIP
+
+Every gap expresses a *relationship*. Name the relationship → the primitive is determined.
+
+| Primitive | Spaces | Mechanism | Use when |
+|-----------|--------|-----------|----------|
+| **Stack** | siblings stacked vertically | parent `flex-direction:column; gap` | form fields, list rows, sections |
+| **Inline (cluster)** | siblings in a row | parent `flex; gap` (+ `align-items`) | button rows, tag clusters, toolbars |
+| **Inset** | a container & its own children | `padding` on the container | inside card/button/input/section |
+| **Grid-gap** | cells of a 2-D grid | `display:grid; gap` | card galleries, dashboards, matrices |
+
+One axis of siblings → Stack/Inline. Container-to-content → Inset. Two-axis repetition → Grid. Inset is the **only** primitive that uses padding; Stack/Inline/Grid express *between* with `gap`. On a *wrapping* flex/grid container, one `gap` owns **both** the inline gap and the cross-axis gap between wrapped rows (`align-content` distributes leftover cross space) — chip/tag clusters wrap with even spacing from one declaration.
+
+### 3.A The single-owner law — one gap, one owner
+
+**The space between two elements has exactly one owner.** Never let A's `margin-bottom` and B's `margin-top` both contribute — you get an unpredictable sum (or a surprise collapse).
+
+- **Default everywhere: `gap` on the flex/grid parent.** Single-owner by construction; children declare zero margins. This is the highest-leverage rule in the skill.
+- **Margins are a one-direction fallback** for free-flowing prose where children aren't a known set — pick `margin-block-end`-only and never deviate.
+- **Inset never doubles with gap.** A card's `padding` owns edge-to-content; the grid's `gap` owns card-to-card. They meet but never sum.
+
+```css
+.stack { display: flex; flex-direction: column; gap: var(--space-2); }
+.stack > * { margin: 0; }
+```
+
+If you ever compute a gap as "8 here plus 8 there = 16", you have two owners. Collapse to one.
+
+### 3.B DENSITY selects which rungs
+
+| DENSITY | Section gap | Card inset | Stack gap (related) | Inline gap |
+|---------|:---:|:---:|:---:|:---:|
+| 1–3 (airy) | 64–96 | 32–48 | 16–24 | 12–16 |
+| 4–6 (default) | 32–48 | 16–24 | 12–16 | 8–12 |
+| 7–10 (data/cockpit) | 16–24 | 8–12 | 4–8 | 4–8 |
+
+At `DENSITY ≥ 8` set `SPACING_STEP = 4` so tight gaps still land on grid.
+
+---
+
+## 4. LAYOUT GRID & ALIGNMENT
+
+### 4.A Column grid, gutters, page margins
+
+Use a 12-column grid (divisible by 2/3/4/6) when content must align across rows of differing components. **Gutters and page margins are fixed per breakpoint; column widths are fluid (`%`/`fr`).** Material 3 reference: 16dp margins at compact, 24dp gutters + margins at the tablet range.
+
+| Viewport | Columns | Gutter | Page margin |
+|----------|:---:|:---:|:---:|
+| Mobile (<600) | 4 | 16 | 16 |
+| Tablet (600–1024) | 8 | 24 | 24 |
+| Desktop (>1024) | 12 | 24–32 | `clamp`, see 4.B |
+
+```css
+.grid-12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--gutter); }
+```
+
+Use `minmax(0, 1fr)` for fluid tracks so a long unbroken string can't blow out a column and break the gap; reach for `fit-content`/`min-content` where a track should hug its content. This also protects the §9.D reflow guarantee.
+
+### 4.B Measure & content max-width
+
+Unbounded text on wide viewports destroys readability. **Cap the measure at 45–75 characters (~66 ideal).** Use `ch` for prose so the measure holds across font sizes; center the *block* with `margin-inline:auto`, keep page margins as `padding-inline` so text never kisses the edge.
+
+```css
+.prose { width: min(100% - 2 * var(--page-margin), 65ch); margin-inline: auto; }
+```
+
+### 4.C Alignment toolkit (reach for these before any margin/`auto` hack)
+
+| Property | Axis | Use |
+|----------|------|-----|
+| `justify-content` | main / inline | distribute along the row (`space-between` for logo↔nav, `space-evenly` for segmented controls) |
+| `align-items` | cross | line items up across the cross axis (`baseline` for icon+text, number+label) |
+| `align-content` | wrapped lines | distribute wrapped rows |
+| `place-items` | both (grid) | `place-items:center` centers a single child on both axes |
+| `gap` | both | the space owner (§3.A) |
+
+- Mixed-height inline items must align to text → `align-items:baseline`, not `center`.
+- Equal-height cards in a row → `align-items:stretch` + a flex-column card with `margin-top:auto` on the footer (the one sanctioned auto-margin — it pushes *within* a flex child, owns nothing between siblings).
+- **That auto-margin only pushes when the child has slack — otherwise it is silently `0`.** `margin-top:auto` consumes *free space*; in a column that hugs its content (`flex:none`, `height:auto`, a grid cell sized to `max-content`) there is none, so the footer lands flush against the block above and the gap you "set" never existed. No warning, no overflow, nothing to see in the rule — the declaration is present and its computed value is zero. Measured across one layout's two variants: an identical footer meant to clear its subtitle rendered **44px** in the landscape build, where the column was the flex item absorbing leftover height, and **0px** in the portrait build, where the same column was `flex:none`. Reach for `auto` only where stretch is guaranteed; everywhere else give the gap a real value from the scale (§2). The symptom generalizes: *a spacing rule whose value depends on free space disappears the moment the container stops having any.*
+- A bottom-aligned row that **mixes an editable control with static text** aligns the *boxes*, not the *text*: the control carries a touch-target `min-height` (44/48px) and centers its text, while a bare `<span>` is one line tall and sits flush at the bottom — so the two labels land at visibly different heights. Give every slot the same box (`min-height` + padding) and center the static ones (`display:flex; align-items:center`). The touch-target floor (§9) is an alignment constraint, not just an ergonomic one.
+- **A hug-width child inside a Stack still fills the cross axis.** `width:auto` (`w-auto`, `fit-content`) says nothing about the cross axis of a `flex-direction:column` parent — `align-items:stretch`, the default, does. A secondary button sized to hug its label renders full-bleed until the child gets `align-self:start` (or the Stack gets `align-items:start`). Measured on one settings screen: `sm:w-auto` alone left the button at **640px**; adding `sm:self-start` brought it to **184px**, its true content width. Same trap for any hug-sized chip, badge, or card stacked vertically — and it hides on mobile, where full-bleed is what you wanted anyway, then surfaces at the first wide breakpoint.
+- **A leading icon opens a text column — the row's actions belong in it.** In an icon + title/description row, the copy starts at `icon width + gap` while a control placed after it, being a sibling of the icon block, starts back at the container inset; the eye reads two competing left edges. Indent the action by exactly that amount (icon 44 + gap 12 → `padding-inline-start: 56px`) so title, description, and control share one spine. Mandatory at `RIGOR ≥ 7`. Below `sm`, where the control goes full-width for touch, drop the indent and let it align to the card edge instead — one spine per breakpoint, never a half-step between them.
+- **In a flex row, decide which item yields — the ellipsis belongs to the text that can lose its tail.** Flex shrink lands on every item whose minimum can shrink, in proportion to its size, so unless you say otherwise the wrong item gives way. Two ways it goes wrong: a long title set `flex:none` inside an `overflow:hidden` wrapper is cut mid-glyph with no ellipsis while its short neighbor is squeezed to nothing, and a button whose component defaults to `min-width:0` is squeezed until it clips its own label. Give the long, tail-tolerant text (a name, an email, a path) `flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis`, and make short fixed-meaning items — buttons, plan or status badges, counters — `flex:none` (cap a badge that can run long with a `max-width` in `em`). Measured on one tray popup at 320px: a card title "Claude · <29-char email>" needed 283px of a 209px slot, so the plan badge that told two accounts of one brand apart rendered **0px** wide; after the swap the title truncated at 166px and the badge kept its 37.8px. On the same popup a "no account" row squeezed its button from 102px to 79px until the button went `flex:none`. Verify `scrollWidth ≤ clientWidth` on every button and badge at the narrowest width, and pair a truncated text with a hover tooltip that shows it whole.
+- `ALIGNMENT_RIGOR`: at 1–3 freeform centering and optical nudges are fine; at 7–10 every edge lands on a column line and body content uses `start`/`stretch` (not `center`) so left edges lock to the grid.
+
+### 4.D Subgrid — align nested card content across siblings
+
+Cards with different title lengths lose internal alignment. `align-items:stretch` equalizes *height* but not internal tracks. **Subgrid fixes it** — each card adopts the row's tracks, so titles/bodies/footers align across the row regardless of text length (widely supported: Chrome/Edge 117+, Firefox 71+, Safari 16+).
+
+```css
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-6); }
+.cards > .card { display: grid; grid-row: span 3; grid-template-rows: subgrid; }
+```
+
+### 4.E Centering — by what you're centering
+
+| Situation | Strategy |
+|-----------|----------|
+| One element, both axes | `display:grid; place-items:center` |
+| One element horizontally, block flow | `margin-inline:auto` + `max-width` |
+| Text within its box | `text-align:center` (text only) |
+| A row of items as a group | flex parent + `justify-content:center` |
+
+**Centering acts on the box, not on the ink.** An item whose `max-content` is wider than its container is clamped to the container, so the text inside wraps and leaves dead space on the trailing edge — `align-items:center` then centers a box wider than anything it draws, and the group reads pulled toward the leading edge. The drift *is* that leftover, so it grows with the container: one logo + company-name lockup sat 10.7px off at 375px wide and 63.2px off at 674px from identical markup, which is exactly why it survives a phone-only check. Fix the sizing, not the position — make the wrap deterministic so `max-content` equals the longest line (force the break, or cap the text at that measure) until the item shrink-wraps; only then does any strategy above bite. Acceptance test is `item box width === longest rendered line`, measured at the widest viewport you support.
+
+**Never center long-form body copy** (ragged edges wreck the return sweep) — center the *block*, left-align the *text*. Centering is a DENSITY 1–4 move; at higher density / `RIGOR ≥ 6`, left-align and lock to the grid.
+
+---
+
+## 5. VERTICAL RHYTHM — Type Drives Spacing
+
+Vertical space is emitted *by* the text. Line-height is the atom; set type first, then let it dictate rhythm.
+
+### 5.A Line-height is the base unit
+
+The **line box** (computed line-height), not the font size, is what stacks: 16px × 1.5 = a 24px line box. Reason in line boxes.
+
+| Role | line-height | Why |
+|------|:---:|-----|
+| Body / paragraph | **1.5–1.6** | WCAG 1.4.12 needs ≥1.5; ship 1.5 minimum |
+| Long-form reading | 1.6–1.75 | longer measure needs taller leading |
+| UI body / dense rows | 1.4–1.5 | tighter, never below 1.4 on wrapping text |
+| Headings (large type) | 1.0–1.25 | big glyphs need less leading |
+| Single-line labels/buttons | 1.0–1.2 | inset owns the height (5.E) |
+
+Leading shrinks as size grows. DENSITY trims leading before gaps (≥7 → 1.4; ≤3 → 1.6+), but **never below 1.4 on wrapping text** regardless of DENSITY.
+
+**Stacked-diacritic scripts raise the heading floor.** Scripts whose marks stack *both above and below* a letter — Vietnamese (`Ệ Ợ Ằ Ầ`), and similarly Thai / Arabic / Devanagari — need multi-line headings held at **line-height ≥ 1.1**: below ~1.05 an under-dot on one line collides with a circumflex/breve on the next. Latin all-caps tolerates 0.95; the same heading set in Vietnamese does not. This is gated by the *content language*, not by taste — a `leading-[0.95]` display heading is a latent collision the instant it wraps to two lines of marked caps, so set the floor whenever the text can be localized into a mark-stacking script.
+
+### 5.B Baseline grid — pragmatic, not dogmatic
+
+Round the computed line-height to a multiple of SPACING_STEP so every line lands on the grid (16px body → **24px** line box on an 8-grid). Align line *boxes* to the grid; don't chase per-font baselines. `ALIGNMENT_RIGOR`: ≤3 loose multipliers, no snapping; 4–7 snap line-heights and block gaps (headings may break locally); ≥8 snap everything and insert a corrective spacer to re-sync after off-grid media (images, embeds).
+
+### 5.C Heading spacing is ASYMMETRIC — more above, less below
+
+A heading **belongs to the content beneath it**. Space above separates it from the previous block; space below must be smaller so it bonds to its paragraph. Equal space orphans the heading. Ratio `above ≈ 2–3× below`; both are scale multiples. Zero out the top space on a `:first-child` heading (the container's padding owns it).
+
+| Level | font-size | above | below |
+|-------|:---:|:---:|:---:|
+| H1 / page title | 36–48 | **48** | 16 |
+| H2 / section | 28–32 | **40** | 16 |
+| H3 / subsection | 22–24 | **32** | 12 |
+| H4 | 18–20 | **24** | 8 |
+| H5 / eyebrow | 14–16 | **16** | 8 |
+
+Collapse the asymmetry into one owner (heading `margin-top` + small/zero `margin-bottom`, or container gap) — never set both heading margins *and* the next paragraph's top margin.
+
+### 5.D A paired modular TYPE scale
+
+Type scale and spacing scale share the same `SPACING_STEP` rhythm so sizes and gaps never fight. Ratio by context: 1.333–1.5 for marketing (DENSITY ≤3), **1.25 (major third)** default, 1.2–1.125 for dense UI (≥7). Material 3's line-*boxes* are 4-grid-aligned (body 16/24, title 22/28, headline 24/32, 28/36, 32/40, display 57/**64**) — note some font-sizes (e.g. 57) aren't multiples of 4, so anchor the rhythm to the line boxes, not the sizes.
+
+### 5.E Control heights = line-height + inset, never a clamped fixed height
+
+A button/input height is `line-height + padding + borders` — computed, not asserted. A rigid `height:36px` with centered text clips descenders (g, y, p) when font/zoom/line-height change. Use `min-height` (a floor), never `height` (a clamp).
+
+| Control | font / lh | inset (each side) | height | grid |
+|---------|:---:|:---:|:---:|:---:|
+| Small | 14 / 20 | 6 | 32 | 4× |
+| Medium | 14–16 / 20–24 | 8–10 | 40 | 5× |
+| Large | 16 / 24 | 12 | 48 | 6× |
+
+Vertical inset is a **derived** value — pick it so total height lands on a grid multiple (the grid-locked quantity is the **height** 32/40/48, so a computed inset like 6px is exempt, like line-height). Inset is the density dial (≥7 → tighter, ≤3 → 12–14px), but the **touch target must still clear 44×44px / 48×48dp** — pad the hit area, never shrink the target (§9).
+
+**Floor-not-clamp applies to the INLINE axis too — and fails louder there.** An icon rail, logo strip, avatar column, or badge tray given a fixed `width` to line up a text column is the same clamp: it holds only until a row carries one more item than the slot was measured against. Use `min-width` so the slot keeps the shared text edge for the common case and still grows for the fat one. The inline failure is nastier than the block one: a too-short box clips or scrolls, whereas a too-narrow slot whose children are `shrink-0` (or hold an image at `max-w-none`) **overflows and paints over the next flex sibling** — no clip, no scrollbar, no warning, just glyphs on top of glyphs. It also hides until someone adds item N+1 to *one* row, so it reads as "that row is broken" rather than a sizing error, while the untouched rows keep looking right. Measured on one checkout: a rail sized 64px for a single badge got a second row of Visa + `gap-1` + Mastercard needing 96px, and 32px of logo landed 20px deep in its own description text. **When a shared alignment spine and the proximity ladder collide, the ladder wins** — do not widen every rail to the fattest one if that inflates a sparse row's icon↔label gap past its inter-item gap (§6.B); let the fat row run wider and keep each row's own gap tight.
+
+---
+
+## 6. WHITESPACE HIERARCHY — Proximity = Relationship
+
+Whitespace is not leftover; it is the primary grouping signal. The eye groups by distance pre-attentively (~100–150ms), before reading a word. Spacing decides structure whether you control it or not.
+
+### 6.A The Law of Proximity
+
+Closer reads as related; farther reads as separate — distance overrides border, color, and similarity. **The signal is the *ratio between* gaps, not any absolute value.** A 12px gap means "tighter than the 24px gap beside it." Ambiguous spacing (tiers too close in size) reads as flat noise — fix by widening the larger tier, not shrinking the smaller.
+
+### 6.B The Proximity Ladder — the core mental model
+
+Every gap belongs to exactly one tier. Assign the tier, then pull px from the scale.
+
+| Tier | Separates | Reads as |
+|------|-----------|----------|
+| **Intra-item** | parts of ONE atom (label↔input, icon↔text, number↔unit) | one indivisible unit |
+| **Inter-item** | sibling atoms in a group (two fields, two rows) | distinct but related |
+| **Inter-group** | whole groups / sections | separate concerns |
+
+**Non-negotiable rule: each tier must be clearly larger than the one below — target ≥2×, never < ~1.5×.** Below 1.5× the eye can't separate the tiers. Clean ladders: `8 → 16 → 32` (each 2×) at STEP 8, `4 → 8 → 16` at STEP 4. Three tiers is usually enough; add a fourth (`→ 64`) only for full pages.
+
+### 6.C A label + its control is ONE unit
+
+The `label → input` gap is intra-item — the tightest tier. **Always keep `label→input` < `input→nextField`** (e.g. 8 < 16). Violating this single inequality is the most common form-spacing bug; it makes the label detach and the form fragment.
+
+### 6.D Macro vs micro whitespace
+
+Micro (inside/between atoms: line-height, padding, intra/inter-item gaps, steps 4–16) drives **legibility** — get it right for usability. Macro (between sections/regions, steps 32–96+) drives **feel** — thin macro whitespace reads as cheap. They are set independently: a dense table can have tight micro spacing and generous macro margins.
+
+### 6.E Active whitespace = emphasis
+
+Isolation is emphasis. When something matters more, give it *more* surrounding space — a primary CTA with 2× the breathing room of its neighbors reads as primary without extra weight or color.
+
+### 6.F Reach for whitespace BEFORE borders and boxes
+
+Separation ladder — stop at the lightest tool that resolves the grouping: **whitespace → background tint → hairline divider (1px) → border → filled card.** A card is justified only when the surface scrolls independently, is draggable/selectable, or genuinely floats (elevation). If a card contains only spacing and no independent behavior, **delete the card and keep the spacing.** Never double-encode (a gap *and* a divider for the same break).
+
+---
+
+## 7. OPTICAL ALIGNMENT — Trust the Eye
+
+The eye, not the math, is the acceptance test. Metric centering is correct only for symmetric shapes; everything asymmetric needs a nudge toward visual mass. `ALIGNMENT_RIGOR` gates *how many* fixes fire — never *whether* the egregious ones do.
+
+### 7.A Rigor gate (apply top-down until the budget runs out)
+
+| RIGOR | Fires | Skips |
+|:---:|-------|-------|
+| 1–3 | lone glyph in a circular button; icon↔text vertical centering | hanging punctuation, overshoot, mass correction |
+| 4–6 | + asymmetric icon nudge (play/chevron/arrow); button icon asymmetric inset; bullet/marker hang | per-icon optical sizing, sub-pixel quote hang |
+| 7–10 | + hanging punctuation & quotes, overshoot tuning, equal-gap mass correction | nothing — full optical pass |
+
+**An asymmetric mark metric-centered is a bug at any rigor** — fix it even on an art-gallery page. DENSITY scales nudge magnitude: ~1px at DENSITY ≥7 (small glyphs; over-correction reads as error), 2–4px at ≤3 (large display glyphs).
+
+### 7.B Asymmetric glyph nudges (≈24px icon; scale `≈ round(size/16)px`, clamp 1–3)
+
+| Mark | Direction | Nudge @24px |
+|------|-----------|:---:|
+| Play ▶ in a circle | right, toward the apex | +1 to +2px translateX |
+| Chevron › / ‹ | toward the point | +1px |
+| Caret ▾ (dropdown) | down | +1px translateY |
+
+Do this in the artwork or a wrapper transform — **never by unbalancing the button's padding** (that breaks the touch target).
+
+### 7.C Icon ↔ text — the most common real bug
+
+Size an inline icon to ≈cap-height and sit it on the cap band, not the line box (a `1em` icon floats above the optical center):
+
+```css
+.inline-icon { width: 1em; height: 1em; vertical-align: -0.125em; }
+```
+
+Prefer the `cap` unit where supported; otherwise `-0.1em` to `-0.15em` is the safe default. In dense rows, baseline-lock the icon to the row's text baseline.
+
+### 7.D Hanging punctuation, quotes, list markers (RIGOR ≥ 6)
+
+Pull marks into the margin so the **text edge** — not the punctuation — aligns to the column. Opening quotes hang ≈0.4–0.5em; bullets use `list-style-position: outside`; numbered lists right-align numerals (tabular figures); use `hanging-punctuation: first` where supported. Failure mode: a blockquote whose visible text starts a quote-width right of the body column.
+
+### 7.E Button optical padding — icon beside a label
+
+Inset asymmetrically: **tighter on the icon side, looser on the label side** (a metric-equal pad crams the icon). At STEP 8 / DENSITY 4–6: `padding: 8px 16px 8px 12px` for a leading-icon button; mirror for trailing. Icon↔label gap = one step, and always tighter than the outer pad so the pair groups. Icon-only buttons return to symmetric padding.
+
+### 7.F Overshoot & equal-gap-unequal-mass (RIGOR ≥ 7)
+
+Round/pointed shapes must slightly exceed cap height to *look* equal (≈1–3% for a circle/dot vs an adjacent square; below 16px, snap to whole pixels). For cards of unequal content with equal gaps: equalize *visual mass* — pad the sparse card more so ink-to-space ratio matches its neighbor, adjusting by whole SPACING_STEP units. **Squint test:** misaligned mass survives blur; metric-but-balanced alignment dissolves into even gray.
+
+---
+
+## 8. RESPONSIVE & FLUID SPACING
+
+Space is a function of viewport and container — resolve it with math, gate the breakpoints with the dials, and let components respond to *their* width.
+
+### 8.A `clamp()` for fluid section rhythm
+
+`clamp(MIN, PREFERRED, MAX)` replaces a breakpoint stack. PREFERRED carries a `vw` term so it scales; **always include a `rem` term so it survives zoom**, and snap MIN/MAX to the scale (mid-scroll interpolation off-grid is invisible).
+
+```css
+/* 48px @360 → 128px @1440, STEP 8 */
+.section { padding-block: clamp(3rem, 1.33rem + 7.41vw, 8rem); }
+```
+
+| Signal | clamp band |
+|--------|-----------|
+| Hero / section, DENSITY 1–3 | `clamp(4rem, …, 10rem)` |
+| Standard section, DENSITY 4–6 | `clamp(3rem, …, 6rem)` |
+| Dense app shell, DENSITY 7–10 | `clamp(1rem, …, 2rem)` |
+| Component padding | `clamp(1rem, …, 1.5rem)` — narrow band |
+
+Keep the fluid band wide for large spaces, narrow for small ones — a 4px→40px icon gap reads as broken.
+
+### 8.B Step DENSITY +1 on mobile — outer skeleton only
+
+On narrow viewports, compress *layout* gaps (section/margin/gutter drop 1–2 steps) but **hold intra-item gaps and touch targets**. If a gap separates layout regions, it is compressible; if it separates parts of one comprehensible unit, it is not.
+
+**The same test governs COLUMN COUNT — and a blanket "collapse everything to one column" is where a phone screen gets spent.** Reflow (§9.D) requires no *horizontal scroll*; it does not require a single column. Set the mobile column count from the **narrowest cell's content demand**, not from the grid it happens to live in: a cell holding one number and its label wants about half a phone's width, while a cell holding a table, a chart or prose wants all of it. A four-up stat row therefore belongs **two-up** at 375px — collapsing it costs roughly a screen of scroll per four cells (measured on one dashboard: 822px of stat cards before the first real content, 371px after the same four went two-up). Target the row that holds the small cells (`:has(> .stat)`, or a modifier class where `:has()` is not available) rather than the breakpoint as a whole, so cells that genuinely need the width still get it.
+
+### 8.C Container queries vs viewport
+
+A component should respond to its **container**, not the window — a card in a 320px sidebar and a 900px column differ at one viewport width. Page chrome → `@media`; everything reusable inside it → `@container` (query `inline-size` for RTL safety).
+
+```css
+.card-wrap { container-type: inline-size; }
+@container (min-width: 28rem) { .card { --pad: 1.5rem; } }
+```
+
+### 8.D Logical properties
+
+Author with `padding-block` / `padding-inline` / `margin-inline` / `inset-*`, not physical `top/right/bottom/left`. They flow with writing direction (LTR/RTL/vertical) with zero overrides and cut declarations roughly in half. In vertical writing modes (CJK), the block/inline axes swap — the §5 line-box rhythm then runs along the inline axis, so re-check the baseline logic there.
+
+### 8.E safe-area insets
+
+Pad against `env(safe-area-inset-*)` for edge-anchored UI (fixed headers, bottom tab bars, FABs). Requires `<meta name="viewport" content="…, viewport-fit=cover">` or insets resolve to 0. **Add to your token, never replace it:** `padding-block-end: calc(1rem + env(safe-area-inset-bottom, 0px))`.
+
+**Anything composited *over* the layout is a safe area too** — burnt-in subtitles, a player's control bar, a stream HUD, a watermark, a floating cookie bar. `env()` knows nothing about these, so the band has to be reserved by hand: measure the overlay's real box (font size × line count + its own bottom margin), then add it to the container's block-end padding. Measured on a 1920×1080 slide: content was padded 72px from the bottom while a 46px caption sat 56px up, so the caption's box covered the last two lines of a panel; padding the layout to 184px cleared it. The trap is *when* it appears — the layout is correct in the browser and only breaks once the overlay is composited, so it survives every check that looks at the page instead of the finished frame. Reserve the band in the layout; never rely on the overlay landing somewhere empty.
+
+### 8.F `vw` pitfalls
+
+Never size spacing/type with bare `vw` (no floor/ceiling, ignores zoom) — always wrap in `clamp()` with a `rem` term. Avoid `100vw` (scrollbar overflow → use `100%`/`100dvw`); prefer `dvh`/`svh`/`lvh` over `vh` so mobile URL-bar changes don't jump the layout.
+
+### 8.G Anchored scroll under a sticky header
+
+A fixed/sticky header (the nav in §10) hides in-page scroll targets. Reserve the space in scale multiples: `scroll-padding-block-start` on the scroll container = header height + a buffer, and `scroll-margin-block-start` on anchor targets.
+
+```css
+html      { scroll-padding-block-start: calc(var(--header-h) + var(--space-2)); }
+:target   { scroll-margin-block-start: var(--space-2); }
+```
+
+### 8.H Motion preserves the scale
+
+Animate `opacity`/`transform`, never layout (`gap`/`padding`/`width`) — animated layout reflows the grid and breaks rhythm. Stagger list reveals by *time*, not by spacing. Honor `prefers-reduced-motion`.
+
+### 8.I A resize is a round trip — re-measure what the toolkit cached
+
+Checking a layout once at each width proves each width, not the trip between them. Toolkits keep sizes they measured while the container was narrow: grid rows auto-sized only while visible, controls that auto-size and only ever grow (WinForms `GrowOnly`), fill columns whose working ratio shifted when one of them hit its minimum width, virtualized lists that cache measured row heights. Widen the container and those sizes stay: rows too tall, a toolbar still wrapped, the least important column still wide. Measured on one WinForms table: two rows grown to 78px at 1000px kept 78px at 1680px where they needed the 54px floor, and the name / status / file columns came back as 216 / 151 / 112px instead of 226 / 157 / 96px at the same width. **Once the width settles, re-measure every item — off-screen ones included — and put working ratios back to the declared ones;** debounce it (~150ms) so dragging stays cheap (a full pass cost 131ms at 300 rows, a drag step 15ms). Test the round trip narrow → wide → narrow, not each width once.
+
+- **WinForms `DataGridView`:** while an `AutoSizeRowsMode` is active, `AutoResizeRows` only caches heights — set the mode to `None`, run `AutoResizeRows(AllCellsExceptHeaders)`, restore the mode. Nudging one `FillWeight` up and back makes fill columns redistribute from their current weights (a column the user dragged keeps its width: the drag already rewrote its `FillWeight`).
+- **The settle pass must not re-arm itself.** Resetting a ratio or re-measuring changes widths, which fires the same width-changed event that scheduled the pass. Ignore the events your own pass raises, and re-measure only when the widths really moved; otherwise the pass runs every debounce interval forever (measured: a 150ms timer that never settled, so a test harness waiting for the table to go idle timed out after 240s).
+- **Virtualized lists:** reset the measured-size cache when the container width changes (react-window `resetAfterIndex(0)`, react-virtualized `CellMeasurerCache.clearAll()`).
+- **Auto-sized controls:** a label that changes with data must keep a constant width or reserve its widest text; `GrowOnly` never gives the space back, so one transient long caption keeps a toolbar wrapped for the rest of the session.
+
+---
+
+## 9. ACCESSIBILITY — Spacing Floors That Override Every Dial
+
+These are floors verified against the spec, not preferences. When a dial collides with a floor, the floor wins and you clamp the dial.
+
+### 9.A Target size
+
+| Standard | Minimum hit area | Level |
+|----------|:---:|:---:|
+| WCAG 2.5.8 Target Size (Minimum) | **24×24 CSS px** | AA |
+| WCAG 2.5.5 Target Size (Enhanced) | **44×44 CSS px** | AAA |
+| Apple HIG | **44×44 pt** | platform |
+| Material 3 / Android | **48×48 dp** | platform |
+
+**Separate hit area from visual size** — a 16px icon + padding reaches the target: +4px → 24px (AA), +14px → 44px (AAA). DENSITY picks which floor (1–3 → 44; 4–7 → 24 AA, 44 on primary CTAs; 8–10 → 24 AA + the spacing exception) but **never** pushes a hit area below 24px.
+
+**Grow the hit box at zero layout cost — padding + negative margin.** In a tight cluster on a fixed `gap` (header icon buttons, a VN/EN toggle, a toolbar), padding *alone* to reach the floor spreads the row and breaks its rhythm. Pair the padding with an **equal negative margin**: the padding enlarges the hit box, the negative margin restores the margin-box, so every sibling gap and edge holds. `-m-2.5 p-2.5` makes a 20px icon a 40px target with the layout unmoved (`-my-*`/`py-*` for a vertical-only grow on an inline text toggle) — the actionable form of §5.E's *pad the hit area, never shrink the target* when the surrounding spacing is load-bearing. **Re-anchor overlays to the glyph:** a badge/dot set `absolute` on the button jumps to the *padded* corner once you inset it — wrap the icon (+ overlay) in an inner `relative` span so it stays pinned to the icon, not the hit area.
+
+### 9.B The 2.5.8 spacing exception — how dense UIs stay legal
+
+A target smaller than 24×24 passes AA **if** a 24px-diameter circle centered on it does not intersect another target's circle — i.e. centers ≥24px apart, so **min edge-gap = `24 − targetSize`**.
+
+| Undersized target | Min edge-gap | On STEP |
+|---|:---:|---|
+| 20×20 | **4px** | one 4-grid step |
+| 16×16 | **8px** | one 8-grid step |
+
+This is the *only* legal way to pack interactive elements tighter than 24px — why DENSITY 8–10 tables on STEP 4 work (a 20px icon-button + 4px gutter passes AA geometrically). Also exempt: inline targets in text, user-agent-styled native controls, essential presentations.
+
+### 9.C Text spacing must survive overrides — WCAG 1.4.12
+
+Layout must not break (no clip, overlap, or lost content) when the user applies **all four**: `line-height ≥1.5×`, paragraph spacing `≥2×` font-size, `letter-spacing ≥0.12em`, `word-spacing ≥0.16em`. → Never set fixed-px line-height or fixed-height text containers; default to `min-height` + `height:auto`; express vertical text spacing in `rem`/`em`/grid multiples so it scales with the override. Any `overflow:hidden` / `white-space:nowrap` text box is a failure risk. When truncation is *intentional*, reserve a fixed number of line-boxes with `-webkit-line-clamp` + `min-height` (never `height`) so rows keep their rhythm without clipping.
+
+### 9.D Reflow at 320px — WCAG 1.4.10
+
+Content must work with no 2-D scrolling at 320 CSS px wide (= 1280px @400% zoom). No fixed-px widths on layout containers (use `%`/`max-width`/`minmax()`); multi-column grids collapse to one column. Exempt content (tables, images, maps, diagrams, video, toolbars) may scroll in 2D — wrap it in an `overflow:auto` container so the *page* never scrolls horizontally. RIGOR's strict columns still apply *within* a breakpoint but never exempt the collapse below it.
+
+**No-wrap overflow (the silent one):** text pinned to one line (`white-space:nowrap` — e.g. a stat/KPI value) overflows the instant its column is narrower than the text. The classic trigger is a multi-column metric grid inside a **narrow card** — `sm:grid-cols-3` stats living in a `lg:grid-cols-2` half-width card give ~100px columns at desktop while the value font is still ~30px. Apply **both** fixes: (1) **size the value to fit** — cap the font, or make it fluid (`clamp()` / a container-query `cqi` font); (2) **drop columns when the container is narrow** (`@container`, or a `lg:` step matching the card going multi-column), so a column is never narrower than the longest value. Verify by measuring `scrollWidth` vs the column at the **narrowest** breakpoint, not the widest — the bug hides on wide viewports and bites at the breakpoint where cards halve but the font/columns don't.
+
+**Scroll-region overflow (`overflow-x-auto` is not self-contained):** an *intentional* horizontal scroller (pill nav, toolbar, chip row, wide table) still blows the page out when its wrapper sits in an **`auto`-sized grid/flex track** — the track grows to the scroller's *max-content* (every `shrink-0` child laid end to end) so `overflow-x-auto` never engages. The classic trigger: a grid given only a desktop template (`lg:grid-cols-[…]`) falls back to an implicit `auto` column on mobile, which the scroll row inflates to thousands of px. Fix by capping the track **and** letting the item shrink: an explicit mobile `grid-cols-1` (Tailwind = `minmax(0, 1fr)` — min `0`, not the default `auto`) or `minmax(0, …)` tracks (§4.A), plus `min-w-0` on the grid/flex item holding the scroller. Then the scroll happens *inside* the box. Same verify: page `scrollWidth` at the narrowest width, not the widest.
+
+**Dynamic text at its widest value:** a no-wrap label assembled from parts that data or the viewer's settings choose (a count, the selection size, language, 12/24-hour clock, time-zone offset, date order, currency) has no single width. Its real width is the sum of each part's widest form, and the combination on the developer's machine is rarely that one. Build the worst string (`12:48 PM`, not `9:06`; `GMT+5:30`, not `GMT+7`; `Wednesday`, not `Monday`; `999`, not `2`; the longest shipped language) and measure it against the width the container allots, including the control's own padding. Never compare against the control's auto-sized width, which shrinks with its text and makes the check self-referential. Measured on a 320px tray popup: a reset caption fitted its 256px slot at 244px in Vietnamese 24-hour and overflowed at 258–298px in 12-hour, half-hour-zone and English builds. When the worst string does not fit, an ellipsis is the wrong fallback if the tail carries meaning (an offset, a unit, a status), because it cuts exactly the part that says what the number is. Split the text into lines by meaning, each short enough at its worst (time + offset on one line, the qualifier on the next: 210.5px and 149.5px at the worst English combination), or keep the label constant and move the variable part to a tooltip. Toolkits whose autosize only grows (WinForms `GrowOnly`) keep one transient long value's width for the rest of the session (§8.I).
+
+### 9.E Focus indicator — budget space for it
+
+The ring is a spacing consumer. `outline-offset ≥ 2px`; reserve a gutter (width + offset, ≈4px) so the ring isn't clipped by an `overflow:hidden` ancestor or a neighbor. Never `outline:none` without an equivalent (fails 2.4.7 / 2.4.11). At high DENSITY on STEP 4, bump the focusable gutter to 8px so the ring fits.
+
+### 9.F Spacing as cognitive-load reduction
+
+Whitespace groups related controls and isolates unrelated ones — directly helping low-vision, cognitive, and attention-affected users. Enforce within-group ≤ ½ between-group at **every** DENSITY; even a cockpit keeps within=4 / between=8, never both equal.
+
+### 9.G Forced colors & dark mode
+
+Under `forced-colors` / Windows High Contrast, background tints and elevation are stripped — so the §6.F separation ladder must not rely on tint or shadow alone; keep a **structural** fallback (a real gap or border) so groups stay separated. In dark mode, light-on-dark elements bloom and read slightly tighter — a marginally larger gap restores equal perceived separation.
+
+---
+
+## 10. COMPONENT SPACING RECIPES
+
+Stated at **DENSITY 4 / SPACING_STEP 8** (baseline `8/4/7`). Every value is a step multiple. As DENSITY rises, compress in this order: **block inset → inline inset → sibling gap → icon/label gap → touch target (never).** Nav and modals lag the curve; tables lead it.
+
+### 10.A Density reference (read first; every recipe references it)
+
+| Gap role | D1–2 | **D4** | D6–7 | D8–10 | Floor |
+|----------|:---:|:---:|:---:|:---:|:---:|
+| Inner inset (block) | 24–32 | **16** | 12 | 8→4 | 4 |
+| Inner inset (inline) | 24–40 | **24** | 16 | 12→8 | 8 |
+| Icon ↔ label | 12 | **8** | 8 | 4 | 4 |
+| Label ↔ control | 8 | **8** | 6 | 4 | 4 |
+| Sibling controls in a row | 16–24 | **12** | 8 | 4 | 4 |
+| Stacked fields / list rows | 24–32 | **16** | 12 | 8→4 | 4 |
+| Card ↔ card (gutter) | 32–48 | **24** | 16 | 8 | 8 |
+| Section padding-block | 96–160 | **64** | 40 | 24 | 24 |
+| **Tap target (mobile)** | 48 | **48** | 44 | 44 | **44 hard** |
+
+Compression curve when no row covers a case: `gap(D) ≈ baseline × 0.85^(D−4)`, snapped to the scale, clamped to the floor.
+
+### 10.B Recipes
+
+- **Button:** inline inset 16 (sm 12 / lg 24) ≈ 2× block inset 8–10; icon↔label 8; button↔button 12. Inline pad always > block pad (equal looks like a chip); icon-only is square. Size by inset, never `height`.
+- **Input / field:** inline inset 12–16 (match sibling buttons so they align on a row); block inset 8–12 (height ≥40 desktop / 44 touch); label↔field 8; field↔field 16; helper/error↔field **4** (tight by intent — binds the message to its field). Keep `label↔field < field↔field`.
+- **Form:** group related fields with 24 between groups, 16 within; section heading↔first field 16; submit↔last field 24 (detach the commit).
+- **Card:** inset 16 (media-light) / 24 (content); title↔body 8; body↔action row 16; **card↔card gutter ≥ card inset** so the channel reads wider than the card's own breathing room (or cards merge into a sheet).
+- **Nav bar:** treat as fixed **D2–3** regardless of body density (a cramped nav reads as broken). Item↔item 24–32; logo↔first item 32–40; height 56–64; tap targets inside still ≥44.
+- **Modal / dialog:** inset 24 (mobile 16) — larger than a card; header↔body 16; body↔footer 24; footer button↔button 12; close (×) at the inset corner with a 44px hit area. Compresses last of all surfaces.
+- **Table / list row:** the canonical high-DENSITY component — design at D8–10 even in a D4 app. Row block inset 12→8→4 (the primary density lever); inline inset 16→12→8; cell inset *is* the column gap; group header 16 above / 8 below (asymmetric). Below 4px block inset, switch to fixed row-height + divider rules.
+- **Settings / list row with one action:** make the **whole row** the target instead of parking a button inside it — icon tile (40) + `gap` 12 + one-line label + trailing chevron, `min-height` 64, inset 16/12. It buys ~1.7× the tap area of a button in the same row (measured 341×65 vs 279×48 at 390px), removes the icon-column alignment problem of §4.C entirely, and cuts the row to one line. The price: only **one** action per row, and any explanation longer than a clause moves to a note at the foot of the group. A row needing two actions goes back to buttons.
+- **Chips / tags:** inline inset 8–12, block 4–6; icon↔label 4–6; chip↔chip 8 (row+column equal). Already dense — ignore much of the curve, but a removable chip's × still needs a 44px touch hit.
+- **Dropdown / menu:** item block inset 8–10 (height ≥36 / 44 touch), inline 12–16; icon↔label 8; label↔trailing shortcut `auto` (min 24 gap); list inset 4–8 so first/last item isn't flush.
+- **Section (landing):** marketing inverts the default — live at **D1–2**. `padding-block: clamp(6rem, 4rem + 8vw, 10rem)` (96→160); heading↔content 24–32; content↔CTA 32–48; `padding-inline: clamp(1rem, 0.5rem + 4vw, 4rem)` (16→64). Section-to-section space is the biggest "premium vs cheap" signal.
+- **Avatar / media:** avatar↔text 8–12; avatar-stack overlap −8 to −12; media↔caption 8; lock media with `aspect-ratio` + `object-fit:cover`, not fixed height.
+- **Chart / data-viz:** apply the §6 proximity ladder to data — inter-bar gap < inter-category gap (e.g. bars 4–8, categories 16–24); plot inset for axis labels 24–32; legend↔plot 16; gridline/tick density tracks DENSITY (sparse at ≤3, dense at ≥7). Negative space inside the plot is breathing room — don't fill it.
+
+---
+
+## 11. COMMON SLOP — Anti-Patterns (Fix on Sight)
+
+Spottable in a screenshot or diff in under three seconds. The meta-rule: **spacing must encode relationship.** Slop applies one number everywhere because it has no model of what belongs to what.
+
+| # | The tell | Why it's slop | The fix |
+|---|----------|---------------|---------|
+| 1 | **Uniform padding everywhere** | no proximity hierarchy | differential ladder: intra 1 step, inter-group 2–3 steps (§6) |
+| 2 | **Off-scale magic numbers** (`13/17/23px`) | untraceable to any grid | snap to nearest step: 13→12/16, 17→16, 23→24 |
+| 3 | **Orphaned heading** (symmetric margins) | reads as unowned | above ≥ 2× below (§5.C) |
+| 4 | **Sub-minimum touch targets** | fails WCAG 2.5.8 | ≥24×24; 44/48 on touch (§9) |
+| 5 | **Double-owned gap** (child margin + parent gap) | brittle summed spacing | one owner; prefer parent `gap` (§3.A) |
+| 6 | **Fixed desktop spacing on mobile** | crushes content; h-scroll | fluid inset `clamp(16px, 5vw, 64px)` |
+| 7 | **Over-boxing** (a card per group) | borders do whitespace's job | whitespace first; card only for true containers (§6.F) |
+| 8 | **Centering everything** | no anchor line | left-align body; center only short hero lines |
+| 9 | **Cards-in-cards** | double padding stacks | flatten to one level; inner groups use spacing |
+| 10 | **Per-child `margin-right`** | phantom trailing gap; breaks wrap | `flex; gap` on the parent |
+| 11 | **Inconsistent gutters** (16/20/24 for one role) | no system | one gutter token per breakpoint |
+| 12 | **Optical blindness** (metric-centered glyphs, flush quotes) | looks off-center | §7 |
+| 13 | **Inset ignores surface size** (24px on a chip and a panel) | should scale with surface | map inset to surface tier (chip 4–8 → page 32–64) |
+| 14 | **No vertical rhythm** (random prose gaps) | off the baseline cadence | gaps = step multiples (§5) |
+| 15 | **Tight display leading on stacked-diacritic text** (`leading-[0.95]` on Vietnamese caps) | tone marks collide between wrapped lines | floor multi-line headings at ≥1.1 for VN / Thai / Arabic / Devanagari (§5.A) |
+| 16 | **Blanket one-column collapse on mobile** (`.cols-2,.cols-3,.cols-4 { 1fr }`) | a card holding one number does not need a phone's width; four of them eat a screen before any content | set columns from the narrowest cell's content demand — stat rows two-up, tables/prose full width (§8.B) |
+| 17 | **Layout property written inline** (`style={{ gridTemplateColumns: … }}`) | outranks every media query, so the responsive rule exists and never fires — silently | inline sets a custom property, CSS keeps the property (§12) |
+| 18 | **Fixed-width icon/logo rail** (`w-16` holding two badges) | children are `shrink-0`, so the slot overflows and paints over the next flex sibling — no clip, no scrollbar | `min-w-*` (a floor, not a clamp); measure the rail against its **fattest** row (§5.E) |
+| 19 | **Centering a clamped text box** (`items-center` on a lockup whose name wraps) | the item is clamped to the container, so the centered box is wider than its ink and the group drifts toward the leading edge — worse the wider the viewport | make the wrap deterministic so `max-content` = the longest line, then center (§4.E) |
+| 20 | **Unlayered critical CSS beside a layered design system** (a bare `<style>` holding `input{font:inherit}`) | layer order is settled before specificity, so the plain selector beats every `@layer utilities` class — the class is on the element, the rule is in the sheet, and the value is still wrong | wrap the block in the system's own layer: `@layer base { … }` (§12) |
+| 22 | **`@page { margin: 0 }` on a multi-page document to kill the browser's print header/footer** | root padding is not per-page — left/right repeats, top/bottom lands only on the first and last sheet, so middle pages print edge-to-edge and the printer's hardware margin clips their top and bottom rows | scope the zero-margin page to single-page documents with a named `@page`, leave long reports on a real margin (§12) |
+| 23 | **`margin-top:auto` as a gap in a hug-height container** (`flex:none` column, `max-content` cell) | no free space to consume, so it computes to `0` and the footer sits flush — the rule is in the sheet and the gap is not on screen | `auto` only where stretch is guaranteed; otherwise a real scale value (§4.C) |
+| 24 | **Layout padded as if nothing will be drawn over it** (burnt-in caption / HUD / control bar lands on content) | `env()` does not see composited overlays, and the page looks correct right up until the frame is rendered | reserve the band: block-end padding ≥ the overlay's measured box (§8.E) |
+| 21 | **Bottom-aligning a row that mixes inputs with plain text** (`margin-top:auto` on both) | the input's touch-target `min-height` makes its box ~2× taller than the one-line span, so the two texts sit at different heights even though both boxes are flush at the bottom | give every slot the same `min-height` + padding and vertically center the static ones (§4.C) |
+| 25 | **Checking each width once, never the trip between them** (layout verified at 1000px and at 1680px, separately) | toolkits keep what they measured while narrow, so after widening rows stay tall, toolbars stay wrapped and fill ratios stay skewed — every single-width check still passes | re-measure every item once the width settles, off-screen rows included, and test narrow → wide → narrow (§8.I) |
+| 26 | **No item told to yield in a flex row** (a `flex:none` title beside a shrinkable badge, or a `min-width:0` button beside a long label) | shrink lands on whatever can give, so the short item that carries the meaning — the plan badge, the button label — collapses or clips while the long text stays whole | the long, tail-tolerant text truncates (`flex:0 1 auto; min-width:0` + ellipsis); buttons and badges are `flex:none` (§4.C) |
+| 27 | **A composed caption checked in one locale and one clock** (the developer's `9:06 · GMT+7`) | its width is the sum of the widest form of each part the viewer's settings choose, so 12-hour time, a half-hour zone or English overflows the slot and the ellipsis cuts the offset or unit at the tail | measure the worst combination at the narrowest slot; split into lines by meaning before truncating (§9.D) |
+
+**Magic-number triage:** snap `5/6/7→8`, `10–15→8/12/16`, `17–22→16`, `23–26→24`. The only sanctioned non-multiples are hairline borders (1px), 0.5px retina rules, and optical nudges ≤4px (typically 1–2px; up to 4px only for large display glyphs). Font-driven values (line-height, cap offsets, derived control insets) are computed, not magic — exempt.
+
+---
+
+## 12. IMPLEMENTATION PER STACK
+
+The system is stack-agnostic; the expression is not. **One source of truth for spacing per project** — if a token system exists, conform; never author a second scale beside it.
+
+| Stack | Native primitive | SPACING_STEP lever | Forbidden |
+|-------|------------------|--------------------|-----------|
+| Tailwind v4 | `--spacing` + `p-4`/`gap-6` | redefine `--spacing` in `@theme` | `p-[13px]`, `gap-[15px]` |
+| Tailwind v3 | `theme.spacing` | `theme.extend.spacing` | arbitrary `[13px]` |
+| Plain CSS | `--space-*` at `:root` | edit the ramp | hard-coded px in rules |
+| MUI | `theme.spacing(n)` (factor 8) | `spacing:` factor | raw px in `sx` |
+| Chakra | `space` tokens (`gap={4}`) | extend `theme.space` | string `"13px"` props |
+| Radix Themes | `gap`/padding props `1–9` | `scaling` on `<Theme>` | inline overrides |
+| shadcn/ui | **is Tailwind** | `--spacing` | arbitrary values |
+
+- **Tailwind:** the default scale *is* the grid (`--spacing` = 4px). At `SPACING_STEP 8`, prefer even steps (`2,4,6,8,12`). Extend `theme.spacing` only for **named semantic tokens** (`--spacing-section`), never one-off pixels. Own spacing from the parent (`gap` / `space-y-*`), not `mt-*` on every child.
+- **Plain CSS:** declare the ramp once at `:root`; use logical properties; prefer `gap` over margins.
+- **Unlayered CSS outranks every layered utility — the same trap one level up from inline styles.** A design system on `@layer` (Tailwind v4 puts every utility in `@layer utilities`) loses to *any* rule written outside a layer, **regardless of specificity**: a bare `input { font: inherit }` beats `.text-input { font-size: 1.375rem }`, because layer order is decided before specificity is ever consulted. This bites hardest in the one place it is most tempting to write plain CSS — the **critical/inline `<style>` block** meant to hold type steady before the main stylesheet lands. Measured on one login screen: an unlayered two-line critical block silently pulled the field from 22px to 18px while every test stayed green, the class was still on the element, and the rule was still in the stylesheet. **Wrap critical CSS in the same base layer the system uses** (`@layer base { … }`) so it keeps its job — supplying defaults — without outranking the utilities layered above it. Grep for a `<style>` that has no `@layer` before trusting any utility it touches; the failure shows up as a value the DOM class says should be different.
+  ```css
+  @layer base { input, button, select, textarea { font: inherit } }   /* not the bare selector */
+
+- **Print: the `@page` margin box is also the browser's header/footer canvas.** Chrome, Edge and Firefox draw the date, page title, URL and page number *inside* the `@page` margin — they are chrome, not content, so no selector reaches them and `display:none` is useless. The only CSS lever is `@page { margin: 0 }`: with no margin box there is nowhere to draw. The paper whitespace then has to come back as `padding` on the print root. **Scope that to single-page documents only** — `padding` on a root box is not per-page: left/right repeats on every sheet, top/bottom lands only on the first and last, so a multi-page report with `margin: 0` prints its middle pages edge-to-edge and the printer's own hardware margin clips those rows. Use a named page (`@page name { margin: 0 }` + `page: name` on the one-page root) and leave long documents on the default margin. Pick the direction whose failure adds whitespace rather than removes it.
+
+```css
+@page slip { size: A4 portrait; margin: 0; }        /* no margin box ⇒ no browser header/footer */
+main[data-print-page='slip'] { padding: 10mm; page: slip; }   /* whitespace moves onto the content */
+```
+  ```
+- **Only `<input>` visibly changes size when the stylesheet is late.** The UA sheet renders body text at 16px but form controls at ~13.3px, so a page whose CSS arrives late reads as *"the box where you type shrinks, then grows"* while every other line looks roughly right — which is exactly how users report it, and why the bug gets hunted in the field component instead of in CSS delivery. The floor to hold in critical CSS is therefore `font: inherit` on `input, button, select, textarea` plus the body font-size; that alone moved a measured field from 13.3px to 18px against a 22px target, turning a 65% jump into 22%.
+- **Inline styles outrank every media query — so a layout property written inline has no responsive behaviour at all.** A JSX `style={{ gridTemplateColumns: '1.5fr 1fr' }}` cannot be collapsed by `@media (max-width: …)`, and nothing warns you: the rule is written, the breakpoint fires, the layout does not move. Measured on one app, four dashboards stayed two-column on a phone with the narrow side at 107px, and the collapse rule had been sitting in the stylesheet the whole time. **Let the inline set a custom property and keep the property itself in CSS** — a variable does not outrank a media query, so the breakpoint stays reachable while a screen can still ask for its own proportions.
+  ```css
+  .split { display: grid; grid-template-columns: var(--split-main, 1.5fr) 1fr; }
+  @media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+  ```
+  ```jsx
+  <div className="split" style={{ '--split-main': '1.2fr' }}>   {/* not gridTemplateColumns */}
+  ```
+  **Converting a codebase full of these is a judgement per site, not a find-and-replace** — the class you
+  move to has to encode §8.B's question, what the narrower cell holds, so you need at least two: one that
+  collapses and one that stays two-up. Sending all of them to the collapsing one reproduces anti-pattern #16.
+  Measured on one sweep: 82 sites, 59 collapse and 23 do not.
+  The same trap covers any inline `width`, `padding`, `flex-direction` or `gap`. Grep for the property name in markup before trusting a breakpoint: `!important` "fixes" it and is the wrong tool, because it wins everywhere rather than at the breakpoint you meant.
+- **Component libs:** use the theme transform (`theme.spacing(2)`, `gap={4}`, Radix `scaling`), never raw px. shadcn = Tailwind rules.
+- **Design tokens as SSOT:** if `tokens.json` / Style Dictionary / Figma variables exist, import and reference — if a value isn't in the set, *add a named token*, don't inline a number. Tokens flow one direction: Figma → Style Dictionary → CSS vars / Tailwind theme → components.
+
+**Helper primitives + debugging:**
+
+```css
+.stack  { display:flex; flex-direction:column; gap:var(--space-2); }
+.inline { display:flex; align-items:center; gap:var(--space-1); flex-wrap:wrap; }
+.grid-auto { display:grid; gap:var(--space-6); grid-template-columns:repeat(auto-fill,minmax(16rem,1fr)); }
+
+* { outline: 1px solid rgba(255,0,0,.25); }   /* surface every box: spot off-scale & uneven gaps */
+```
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| gap bigger than spec between siblings | double-owned (parent gap + child margin) | remove the child margin |
+| inconsistent rhythm down a list | per-child `mt`/`mb` | move to container `gap` |
+| value not a step multiple | arbitrary px / off-scale token | snap to nearest rung or add a token |
+| collapsing/overlapping vertical margins | adjacent margin-collapse | switch to `gap` on a flex/grid parent |
+
+**Print & email** are distinct spacing environments: `@media print` — fixed page margins, and snap `clamp()` section spacing to its MAX (`vw` is unreliable on paper). HTML email — flex/grid `gap` is unsupported, so spacing lives on `<td>` padding + `margin` (inline-styled); keep one token set.
+
+---
+
+## 13. OPERATING PROCEDURE & PRE-FLIGHT CHECKLIST
+
+Run every UI through this loop. Steps 1–4 decide the layout; 5–7 refine; 8 gates the ship. Don't skip because it "looks simple" — the Space Read and dials take seconds.
+
+### 13.A The pipeline
+
+1. **Space Read** — one line (§0.B).
+2. **Set the three dials** — explicit STEP / DENSITY / RIGOR (§1).
+3. **Derive the one scale** — generate the ramp from STEP; bind nothing to raw px after this (§2).
+4. **Lay out** — pick the primitive, apply the proximity ladder (§3, §6).
+5. **Optical pass** — fix what the math got geometrically right but visually wrong (§7).
+6. **Responsive pass** — re-evaluate dials per breakpoint; reflow, don't shrink (§8).
+7. **A11y pass** — targets, focus, reflow, text-spacing survival (§9).
+8. **Pre-flight checklist** — every box before output.
+
+### 13.B Conversational OVERRIDE protocol
+
+The user steers with intent words, not numbers. Map phrase → dial move, re-derive, re-render, restate the new dial line. **Never tell the user to edit a file, token, or px — you hold the dials.**
+
+| User says | Dial move |
+|-----------|-----------|
+| "denser" / "tighter" / "fits more" | DENSITY +2 → gaps down a rung; if ≥7, STEP → 4 |
+| "more breathing room" / "airier" / "premium" | DENSITY −2 → section gaps up a rung; STEP → 8 |
+| "cleaner" / "line things up" | RIGOR +2 → lock columns + baseline |
+| "looser" / "more editorial" | RIGOR −3 → allow optical placement |
+| "feels cramped" (no density ask) | bump only the violated proximity rung; keep DENSITY |
+| "looks random / unaligned" | raise RIGOR, snap to grid; don't touch DENSITY |
+
+Override deltas apply to the **current** dial value and clamp to each dial's `[1, 10]`; a later override on the same dial supersedes the earlier one.
+
+**When to ask:** proceed silently when the Space Read completes from the brief. Ask exactly **one** question only when density intent is genuinely ambiguous and would flip DENSITY by ≥3 (e.g. "marketing hero or in-app dashboard?"). Never ask what you can infer; never ask permission to apply the scale.
+
+### 13.C Pre-flight checklist
+
+**Scale & dials**
+- [ ] Three dials stated; `SPACING_STEP=4` only if `DENSITY ≥ 7`.
+- [ ] Every spacing value lands on the ramp — zero magic numbers.
+- [ ] No raw px in markup that bypasses a token.
+
+**Rhythm & proximity**
+- [ ] Proximity ladder monotonic — no wide gap nested inside a narrow one; tiers differ ≥1.5× (ideally 2×).
+- [ ] `label→input` < `input→nextField`.
+- [ ] One `gap` per container; no per-child margin hacks, no `<br>`-as-spacer; no double-owned gaps.
+- [ ] Headings asymmetric (above ≈ 2–3× below); consistent section rhythm.
+
+**Alignment**
+- [ ] Shared left edge for stacked content; columns share tracks at `RIGOR ≥ 7`; subgrid where card internals must align.
+- [ ] Optical centering applied to asymmetric glyphs/caps; punctuation hangs; numeric columns right/decimal-aligned.
+- [ ] Baseline grid honored where `RIGOR ≥ 8`.
+- [ ] In every row that can run out of width, the long text truncates with an ellipsis and buttons and badges keep their size (`scrollWidth ≤ clientWidth` on each at the narrowest width) (§4.C).
+
+**Responsive**
+- [ ] Dials re-evaluated per breakpoint; layout reflows, never shrinks to illegible.
+- [ ] No horizontal scroll at 320px; grids collapse to a stack; 2-D-scroll content isolated in its own container.
+- [ ] Section/component spacing fluid via `clamp()` with a `rem` term; safe-area insets on edge-anchored UI.
+- [ ] Round trip narrow → wide → narrow returns the same layout; rows, columns and controls measured while narrow are re-measured once the width settles, off-screen rows included (§8.I).
+- [ ] Every no-wrap label built from data or viewer settings (counts, language, 12/24-hour clock, time zone, date order) measured at its worst combination against the slot it is given; text whose tail carries meaning splits into lines instead of truncating (§9.D).
+
+**A11y**
+- [ ] Interactive targets ≥ 24×24px (or the 24px-circle spacing exception); 44/48 on touch.
+- [ ] Focus rings visible, unclipped, `outline-offset ≥ 2px`.
+- [ ] Survives WCAG 1.4.12 text-spacing overrides without clipping or overlap.
+
+**Edge cases**
+- [ ] Empty / loading / overflow states keep the same rhythm (skeletons match real spacing).
+- [ ] First/last items have correct outer padding (no flush-to-edge unless an intended bleed).
+- [ ] RTL mirrors padding/margins (logical properties).
+
+---
+
+## 14. DOCUMENT & LONG-FORM — Word / Google Docs / PDF / Markdown
+
+Written documents (reports, essays, papers, PDFs) obey the **same principles** — rhythm, measure, proximity, asymmetric headings — through **different controls**. There is no `gap`, `flex`, or `px`; you set page margins, paragraph spacing, line spacing, and indents in **points (pt)**, **inches/cm**, or **line-spacing multiples**. Map the dials: documents are almost always **low DENSITY** (reading is the job); `SPACING_STEP` becomes a small pt vertical rhythm (≈6pt); `ALIGNMENT_RIGOR` governs style consistency and whether body text is justified or left-aligned.
+
+### 14.A Page setup — margins first
+
+| Doc kind | Margins | Notes |
+|---|---|---|
+| Academic (APA / MLA / Chicago) | **1 in / 2.54 cm** all sides | with 1.5- or double-spaced body; required, not optional |
+| Business report | 1 in top/bottom, 1–1.25 in sides | |
+| Bound / double-sided print | add a **gutter** (+0.5 in) or use **mirror margins** | inner edge needs binding room |
+| Dense reference / handout | 0.75 in | the floor — below this, text crowds the edge |
+
+Choose page size by region — **A4** (210×297 mm) vs **US Letter** (8.5×11 in) — *before* writing; changing it reflows everything.
+
+### 14.B Measure — the silent killer in documents
+
+A 12pt body on Letter with 1 in margins is a ~6.5 in line ≈ **90–100 characters**, well past the 45–75 ideal (§4.B), so the eye loses the return sweep. Fix with one of: **wider margins** (1.25–1.5 in), **larger type**, **more leading** (double-spacing buys back readability at long measure — why academia mandates it), or **two columns**. Never ship full-width single-spaced 11pt body.
+
+### 14.C Line spacing (leading)
+
+The word-processor analog of CSS `line-height`, set as a multiple on the **paragraph style** — never via blank lines.
+
+| Use | Line spacing |
+|---|---|
+| Body, comfortable | **1.15–1.5** (1.15 floor; 1.5 reads better) |
+| Academic requirement | 1.5 or **2.0 (double)** as specified |
+| Dense tables / references / footnotes | 1.0–1.08 |
+| Headings (large) | 1.0–1.1 |
+
+### 14.D Paragraph spacing & indentation — pick ONE separator
+
+The document single-owner rule (cf. §3.A): a paragraph break is shown by **first-line indent OR space-between paragraphs — never both, never neither.**
+
+| Style | Separator | Use |
+|---|---|---|
+| **Indented** | first-line indent **0.5 in / 1.27 cm**, no space after | books, essays, continuous prose |
+| **Block** | space-after **6–10pt** (or one line), no indent | business, technical, reports, web |
+
+- **Never double-press Enter** for paragraph spacing (the document `<br><br>` — off-rhythm, breaks across pages). Use *Spacing After*.
+- The first paragraph after a heading takes **no indent** — it needs no separation from the heading it follows.
+
+### 14.E Heading hierarchy — use styles, space asymmetrically
+
+- **Use named styles** (Heading 1 / 2 / 3), not manual bold + size — styles give consistent spacing, a navigation pane, and an automatic table of contents.
+- **Asymmetric spacing** (§5.C restated): *space-before > space-after*, ≈2:1, so the heading bonds to the text below (e.g. H1 24/8 pt, H2 18/6, H3 12/4).
+- Enable **Keep with next** so a heading never strands at the bottom of a page.
+- Size steps follow a modular ratio (§2.C): e.g. 11pt body → 14 / 18 / 24pt headings.
+
+### 14.F Lists, quotes, tables in prose
+
+- **Lists:** item-to-item spacing **tighter** than paragraph spacing (one group, §6); nested levels indent **one step** (0.25–0.5 in); space before/after the whole list = paragraph spacing.
+- **Block quotes:** indent the block (0.5 in), optionally a touch smaller, with space above and below; don't *also* italicize the whole thing.
+- **Tables / figures:** cell padding ≥ 3–6pt so text doesn't touch the rules; one paragraph of space above/below the table; caption tight to its figure, loose from the next paragraph.
+
+### 14.G Print & pagination
+
+Turn on **Widow/Orphan control** (no single line stranded at a page top/bottom), **Keep lines together** for short blocks, and **Page-break-before** on major sections (never fake a break with Enter). Keep a consistent header/footer distance from the edge; footnotes get a small space above the separator rule.
+
+### 14.H Concept → tool mapping
+
+| Concept | CSS / web | Word | Google Docs | Markdown |
+|---|---|---|---|---|
+| Line spacing | `line-height` | Paragraph ▸ Line Spacing | Format ▸ Line & paragraph spacing | (renderer CSS) |
+| Paragraph spacing | `margin` / `gap` | Spacing Before / After | Line & paragraph spacing ▸ Custom | blank line |
+| First-line indent | `text-indent` | Ruler / Paragraph ▸ Special | Ruler ▸ first-line indent | — |
+| Page margins | `@page { margin }` | Layout ▸ Margins | File ▸ Page setup | — |
+| Heading | `<h1>`–`<h6>` | Styles (Heading 1…) | Styles | `#` `##` `###` |
+| Measure | `max-width: 65ch` | margins / columns | margins / columns | renderer width |
+| Page break | `break-before` | Insert ▸ Page Break | Insert ▸ Break | — |
+
+> **Markdown** carries no spacing of its own — rhythm comes from the renderer's CSS (§2–§5). Author clean structure (one blank line between blocks, real headings, real lists); style it downstream.
+
+### 14.I Document pre-flight
+
+- [ ] Margins set for page size and binding *before* writing.
+- [ ] Measure 45–75 chars (widen margins / size / spacing / columns if over).
+- [ ] One paragraph separator only — indent **or** space-after, never both; no double-Enter.
+- [ ] Line spacing ≥ 1.15 (1.5–2.0 if required); set on the style, not by hand.
+- [ ] Headings use named styles; space-before > space-after; Keep-with-next on.
+- [ ] Lists / quotes / tables grouped tighter internally than the surrounding prose.
+- [ ] Widow/orphan control on; major sections start with a real page break.
+
+---
+
+## 15. CONTINUOUS IMPROVEMENT — The Field-Learnings Loop
+
+This loop is optional. Apply the spacing guidance without changing the installed
+plugin, its cache, or the author's repository. Capture lessons only when the
+recipient explicitly requests journaling and chooses a writable file in their
+own project. The source repository's `LEARNINGS.md` is historical author material,
+not a destination for recipients' work and not a runtime dependency.
+
+### 15.A When it fires
+
+After the recipient opts in, an edit that creates or changes spacing/alignment
+on a real artifact can provide a lesson — a `gap`,
+padding, inset, grid/flex alignment, vertical rhythm, an optical nudge, or a
+document's margins / leading / indents. Skip pure reading, restating a value that
+is already on-scale, or a throwaway sketch.
+
+### 15.B Capture — append one entry to the recipient's chosen journal
+
+Use the recipient's existing journal format. Record the **Space Read** (surface · dials · the one ratio
+that mattered), **what changed with the real numbers**, **what the situation
+taught**, and a one-word **verdict**:
+
+| Verdict | Means | Triggers |
+|---------|-------|----------|
+| `covered` | the skill already prescribed this | nothing — a confirmation |
+| `gap` | the skill was silent or wrong here | a §15.C distill pass |
+| `refinement` | the skill was right but too vague to act on | a §15.C distill pass |
+
+Log only edits you actually made (ideally saw render). Never invent a lesson you
+did not hit — **evidence, not vibes.**
+
+### 15.C Distill — graduate the lesson into the brain
+
+For a `gap` / `refinement` that generalizes past the one case, propose a contextual
+rule for the relevant section (§0–§14). Change a recipient-owned fork only when
+the recipient explicitly requests skill maintenance. Upstream contributions
+require a separate, authorized pull request. Journaling does not authorize a
+version bump, source modification, commit, push, or publication.
+
+### 15.D Guardrails
+
+- **One datapoint opens a `gap`; a repeated pattern hardens a default.** Don't
+  rewrite a baseline off a single layout.
+- **§9 accessibility floors outrank every field preference** — a learning may
+  tighten a gap only down to the floor, never through it.
+- **Keep the brain lean.** The journal grows in `LEARNINGS.md`; a lesson earns a
+  place in §0–§14 only by generalizing. Restate in place — never append a second
+  rule that says the same thing.
+
+---
+
+> **Spacing is a system, not a set of nudges — read the layout, name the dials,
+> derive one scale, and let proximity carry the meaning. Give it room — but give
+> it *measured* room.**

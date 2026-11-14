@@ -1,0 +1,24 @@
+{
+  "name": "@shadowclone/web",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/agents": "workspace:*",
+    "@shadowclone/builds": "workspace:*",
+    "@shadowclone/cloud": "workspace:*",
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/environment": "workspace:*",
+    "@shadowclone/learning": "workspace:*",
+    "@shadowclone/redact": "workspace:*",
+    "@shadowclone/sessions": "workspace:*",
+    "@shadowclone/skills": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}

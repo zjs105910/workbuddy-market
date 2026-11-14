@@ -1,0 +1,15 @@
+{
+  "name": "shadowclone",
+  "owner": {
+    "name": "Shadowclone"
+  },
+  "description": "Install Shadowclone with agent-led local setup and explicit consent.",
+  "plugins": [
+    {
+      "name": "shadowclone",
+      "source": "./plugins/shadowclone",
+      "strict": true,
+      "description": "Set up and maintain portable coding-agent skills with explicit local consent"
+    }
+  ]
+}

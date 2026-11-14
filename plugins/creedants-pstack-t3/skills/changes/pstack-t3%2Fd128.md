@@ -1,0 +1,1 @@
+- The brigade-admin skill points to the Refusals step of Filing tracker work, `docs/light-mode.md` cites the brigade skill by section and step, and `docs/multi-coordinator.md` names the brigade-admin skill.

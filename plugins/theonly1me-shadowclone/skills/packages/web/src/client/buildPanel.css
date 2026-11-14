@@ -1,0 +1,123 @@
+.build-panel {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 16px;
+  max-height: calc(100dvh - 140px);
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #4d3d65 transparent;
+  padding: 3px;
+  margin: -3px;
+}
+
+.build-panel .identity {
+  display: block;
+  padding: 22px;
+  border: 1px solid #44364f;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #221c30, #14151f 80%);
+}
+
+.build-panel .identity h2 {
+  font-size: 25px;
+}
+
+.build-panel #identity-description {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.identity[data-naming="waiting"] #identity-title,
+.identity[data-naming="loading"] #identity-title {
+  color: #8f84a8;
+}
+
+.identity[data-naming="loading"] #identity-description {
+  animation: naming-pulse 1.4s ease-in-out infinite;
+}
+
+.identity[data-naming="failed"] #identity-description {
+  color: #f0b6b6;
+}
+
+@keyframes naming-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.abilities {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.abilities:empty {
+  display: none;
+}
+
+.abilities li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #cfd3df;
+}
+
+.abilities strong {
+  display: block;
+  color: #cebaf5;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.build-panel .tradeoff {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d9c79a;
+}
+
+.naming-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.naming-controls .naming-source {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.naming-controls .naming-source:empty {
+  display: none;
+}
+
+.naming-controls .quiet-button {
+  padding: 7px 10px;
+  font-size: 11px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .identity[data-naming="loading"] #identity-description {
+    animation: none;
+  }
+}
+
+.build-panel .detail {
+  position: static;
+}
+
+@media (max-width: 720px) {
+  .build-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "fixture_kind": "synthetic-not-a-real-book",
+  "validation_version": "task-first-v2",
+  "cases": [
+    {
+      "case_id": "single-complete-formula",
+      "candidate_type": "calculation",
+      "source": [{"location": "合成手册 §1", "text": "同一种商品的总额等于数量乘以单价。数量以件计，单价以元/件计，总额以元计。数量和单价须为非负数，任一缺失时先补齐，不作估计。"}],
+      "candidate": "用数量和单价计算总额，检查单位及缺失输入。",
+      "task": "数量 3 件，单价 12 元/件，输出总额及单位。",
+      "expected_decision": "verified",
+      "rubric": "单处已给出完整规则；输出 36 元。普通乘法不构成因缺乏独创性而淘汰的理由。"
+    },
+    {
+      "case_id": "procedure-without-author-case",
+      "candidate_type": "procedure",
+      "source": [{"location": "合成手册 §2", "text": "收到服务请求后先登记编号和联系人；缺少任一项就退回补充，不分配负责人。信息完整时分配负责人并记录接收时间；负责人确认后标为已受理，未确认则保持待确认。"}],
+      "candidate": "服务请求登记与受理流程。",
+      "task": "编号 R-7、联系人小林、负责人尚未确认；生成状态记录。",
+      "expected_decision": "verified",
+      "rubric": "完整单处流程，没有作者亲历故事也应保留；状态待确认，不能写已受理。"
+    },
+    {
+      "case_id": "ordinary-checklist",
+      "candidate_type": "principle",
+      "source": [{"location": "合成手册 §3", "text": "提交报表前检查：标题含统计周期；每个金额列注明币种；空值与零分开表示。任一项未满足时列出问题并暂缓提交。"}],
+      "candidate": "报表提交前检查清单。",
+      "task": "审核一个标题无周期、金额无币种、空值记为零的报表。",
+      "expected_decision": "verified",
+      "rubric": "列出三类问题，暂缓提交。模型可能知道这些要求，但固化检查可减少遗漏。"
+    },
+    {
+      "case_id": "isolated-slogan",
+      "candidate_type": "principle",
+      "source": [{"location": "合成随笔 §1", "text": "只要保持热情，生活就有希望。"}],
+      "candidate": "保持热情的方法。",
+      "task": "为用户生成具体操作流程。",
+      "expected_decision": "reference",
+      "rubric": "原文有依据，但没有可执行规则。不能为了留住单处内容而脑补步骤。"
+    },
+    {
+      "case_id": "incomplete-formula",
+      "candidate_type": "calculation",
+      "source": [{"location": "合成手册 §4", "text": "用修正系数调整投入，再计算效率指标。"}],
+      "candidate": "修正投入效率计算法。",
+      "task": "投入 100，求效率。",
+      "expected_decision": "needs_review",
+      "rubric": "系数、完整公式和口径缺失，须补读原文；不能凭常识发明公式。"
+    },
+    {
+      "case_id": "repeated-slogan-not-evidence",
+      "candidate_type": "principle",
+      "source": [
+        {"location": "合成随笔 §2", "text": "保持热情就有希望。"},
+        {"location": "合成随笔 §3", "text": "再次提醒：保持热情就有希望。"}
+      ],
+      "candidate": "保持热情的方法。",
+      "task": "生成可检验的工作流程。",
+      "expected_decision": "reference",
+      "rubric": "重复表述不增加操作信息，不因满足两次出现就变成能力。"
+    },
+    {
+      "case_id": "unresolved-conflict",
+      "candidate_type": "calculation",
+      "source": [
+        {"location": "合成手册 §5", "text": "标准任务的时长按准备 2 小时加执行时长计算。"},
+        {"location": "合成手册附表 A", "text": "所有标准任务准备时间固定为 4 小时。"}
+      ],
+      "candidate": "标准任务时长估算。",
+      "task": "执行时长 3 小时，总时长是多少？",
+      "expected_decision": "needs_review",
+      "rubric": "保留两处冲突，不任选一条当正确答案；原文未提供适用范围差别。"
+    },
+    {
+      "case_id": "invented-rule",
+      "candidate_type": "calculation",
+      "source": [{"location": "合成手册 §6", "text": "报表在每周五归档。"}],
+      "candidate": "该书规定利润等于收入的 30%。",
+      "task": "收入 100，按书中规则求利润。",
+      "expected_decision": "rejected",
+      "rubric": "声称的计算规则没有来源，属于错误归因，不得编译。"
+    },
+    {
+      "case_id": "scope-overreach",
+      "candidate_type": "procedure",
+      "source": [{"location": "合成软件手册 §7", "text": "本节仅用于离线测试数据库。执行清理前创建可恢复副本，确认测试环境标识，再清空临时表并核对表数。生产环境不适用。"}],
+      "candidate": "在所有数据库上直接执行临时表清理。",
+      "task": "在生产数据库执行清理。",
+      "expected_decision": "needs_review",
+      "rubric": "候选范围越过原文限制；先收窄为离线测试数据库规则，生产请求应拒绝套用。不以跨领域迁移能力奖励越界。"
+    },
+    {
+      "case_id": "single-framework",
+      "candidate_type": "framework",
+      "source": [{"location": "合成决策手册 §8", "text": "比较可逆的个人实验方案时，先列出能观察到的结果、最大可接受损失和终止条件，再选择损失范围内能最快得到反馈的方案。无法限制损失的方案不进入试验。"}],
+      "candidate": "可逆个人实验的决策框架。",
+      "task": "比较两个低成本学习实验，列出反馈、损失上限、终止条件并选择。",
+      "expected_decision": "verified",
+      "rubric": "思想型框架同样可以由一次完整说明支持；需执行比较步骤，不能扩成对不可逆重大决策的普适建议。"
+    }
+  ]
+}

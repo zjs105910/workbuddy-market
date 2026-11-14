@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action https://github.com"
+    />
+    <title>Your agent build · Shadowclone</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/shadowclone-mark.svg" />
+    <link rel="stylesheet" href="./base.css" />
+    <link rel="stylesheet" href="./controls.css" />
+    <link rel="stylesheet" href="./pageLayout.css" />
+    <link rel="stylesheet" href="./tree.css" />
+    <link rel="stylesheet" href="./treeResponsive.css" />
+    <link rel="stylesheet" href="./panels.css" />
+    <link rel="stylesheet" href="./dialogs.css" />
+    <link rel="stylesheet" href="./bot.css" />
+    <link rel="stylesheet" href="./atmosphere.css" />
+    <link rel="stylesheet" href="./library.css" />
+    <link rel="stylesheet" href="./starfield.css" />
+    <link rel="stylesheet" href="./buildPanel.css" />
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body>
+    <div class="frame">
+      <header class="masthead">
+        <a class="brand" href="/" aria-label="Shadowclone agent builder">
+          <img class="brand-mark" src="./assets/shadowclone-mark.svg" alt="" />
+          shadowclone
+        </a>
+        <span class="local-badge"><span></span> LOCAL WORKSPACE</span>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow">YOUR AGENT. YOUR INSTINCTS.</p>
+          <h1 id="page-title">Build the way you think.</h1>
+          <p class="subtitle">
+            Equip a way of working. Every skill shapes how your agent approaches a task.
+          </p>
+        </section>
+
+        <div class="toolbar">
+          <label class="scope-field">
+            Build scope
+            <select id="scope">
+              <option value="global">Personal · everywhere</option>
+              <option value="private">Personal · this repository</option>
+              <option value="shared">Shared · this repository</option>
+            </select>
+          </label>
+          <label class="search-field">
+            <span class="visually-hidden">Find a skill</span>
+            <input id="search" type="search" placeholder="Find a skill…" />
+          </label>
+          <button id="new-skill" class="quiet-button">+ Create a skill</button>
+        </div>
+
+        <div class="scope-meta">
+          <p id="scope-note" class="scope-note"></p>
+          <details id="library-note" class="library-note" hidden>
+            <summary>Built-in library · add your own</summary>
+            <p>Include your installed skills by choosing the folders Shadowclone can read.</p>
+            <code>shadowclone skills configure</code>
+          </details>
+        </div>
+        <div id="notice" role="status" class="notice" hidden></div>
+        <details class="requirements">
+          <summary>Learning model</summary>
+          <p>
+            Models and credentials are configured in your coding harness. Session learning follows
+            that session's model.
+          </p>
+          <button id="load-models" class="quiet-button">Refresh available models</button>
+          <label
+            >Saved model
+            <select id="learning-model">
+              <option>Refresh models to choose</option>
+            </select></label
+          >
+        </details>
+
+        <div class="workspace">
+          <section id="constellation" class="constellation" aria-label="Skill constellation">
+            <div id="constellation-status" class="constellation-status" role="status">
+              <p id="constellation-status-text">Loading your skills…</p>
+              <button id="retry-build" class="quiet-button" hidden>Retry loading skills</button>
+            </div>
+            <div class="constellation-controls" aria-label="Constellation controls">
+              <button
+                id="toggle-constellation-view"
+                class="quiet-button"
+                aria-controls="constellation-map constellation-list"
+                aria-pressed="false"
+              >
+                Map / list
+              </button>
+            </div>
+            <svg id="starfield" class="starfield" aria-hidden="true"></svg>
+            <svg
+              id="constellation-map"
+              class="constellation-map"
+              aria-label="Skills grouped by source and category"
+            ></svg>
+            <div id="constellation-list" class="constellation-list"></div>
+            <p class="tree-hint">Select a skill to equip it. Search highlights matches.</p>
+          </section>
+
+          <aside class="build-panel" aria-label="Your character build">
+            <section id="identity" class="identity" aria-labelledby="identity-title" aria-live="polite">
+              <div>
+                <p class="eyebrow">YOUR BUILD</p>
+                <h2 id="identity-title">An open canvas</h2>
+                <p id="identity-description">
+                  Choose the instincts you want your agent to bring to work.
+                </p>
+              </div>
+              <ul id="abilities" class="abilities"></ul>
+              <p id="tradeoff" class="tradeoff" hidden></p>
+              <div class="naming-controls">
+                <p id="naming-source" class="naming-source"></p>
+                <button id="retry-name" class="quiet-button" hidden>Retry</button>
+                <button id="toggle-naming" class="quiet-button" aria-pressed="true">
+                  Turn naming off
+                </button>
+              </div>
+            </section>
+            <section id="detail" class="detail" aria-label="Selected skill"></section>
+          </aside>
+        </div>
+
+        <section
+          id="requirements"
+          class="requirements"
+          hidden
+          aria-label="Repository requirements"
+        ></section>
+      </main>
+
+      <footer class="footer">
+        <div>
+          <strong id="equipped-count">0 skills equipped</strong>
+          <p>Your build is editable at any time.</p>
+        </div>
+        <div class="footer-actions">
+          <button id="undo" class="quiet-button" hidden>Undo last apply</button>
+          <button id="review" class="primary-button">
+            Review your build <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

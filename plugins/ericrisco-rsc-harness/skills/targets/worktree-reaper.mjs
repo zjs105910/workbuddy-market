@@ -1,0 +1,732 @@
+#!/usr/bin/env node
+// rsc worktree reaper — the deterministic half of "the cleanup is the default".
+//
+// The catalog told agents, in prose, to remove a worktree once its work had landed. Prose is not an
+// executor: `ship` carried the procedure in a paragraph under "park/discard", the block that runs on
+// a direct merge never mentioned it, and nothing at all fired when the merge happened in the forge.
+// So worktrees accumulated, and a list where live work and landed work look identical is a list
+// nobody can act on — least of all the non-technical profile the harness claims to serve.
+//
+// This module owns the one judgement that must never be made by feel: *can this be removed without
+// asking?* Three questions decide it, and every one of them fails towards keeping the directory:
+//
+//   provenance  — did rsc create it? (derived from the content, never from a registry: P3)
+//   integration — does the branch still carry anything the trunk does not have?
+//   contents    — is there anything inside that was never in git and cannot be regenerated?
+//
+// Imported by `.rsc/session-start.mjs` (the sweep) and by `scripts/rsc.js` (`rsc worktrees`), so the
+// rule exists once and both entry points cannot drift apart. Same shape as `sello.mjs`.
+import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, chmodSync, copyFileSync } from 'node:fs';
+import { join, resolve, dirname, basename, relative, sep } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+// git reports worktree paths with every symlink resolved; callers hand us whatever they were given.
+// On macOS that alone is enough to make every comparison here fail, because /tmp and /var are
+// symlinks — and a path comparison that silently never matches would turn this whole module into a
+// no-op that looks healthy. Compare real paths on both sides, always.
+function real(p) {
+  try { return realpathSync.native(resolve(p)); } catch { return resolve(p); }
+}
+
+export const OPT_OUT = '.no-worktree-cleanup';
+
+// Content that lives outside git and is nevertheless disposable, as a table the test reads rather
+// than conditionals it cannot see. Without this carve-out the default would never be automatic:
+// virtually every worktree has dependencies installed inside it, and asking every single time is how
+// a safeguard gets switched off (P7). The list ages — an ecosystem missing from it sends the
+// worktree down the confirmation path, which is noise, not loss.
+export const REGENERABLE = [
+  'node_modules', 'bower_components', 'jspm_packages', '.pnpm-store', '.yarn',
+  'venv', '.venv', 'env', '.tox', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+  'dist', 'build', 'out', 'target', 'bin', 'obj', '.next', '.nuxt', '.svelte-kit', '.astro',
+  '.turbo', '.parcel-cache', '.cache', '.gradle', '.dart_tool', 'Pods', 'vendor',
+  'coverage', '.nyc_output',
+];
+
+// Junk that is disposable wherever it appears, matched by filename. Kept SEPARATE from the table
+// above, and deliberately tiny, because the two cannot share a matching rule: the first entries are
+// directory names, and matching them against a *filename* is what made `config/env` — a dotenv file
+// full of live credentials — read as build output and get deleted with no confirmation at all. A
+// directory name means something only as a directory.
+export const REGENERABLE_FILES = ['.DS_Store', 'Thumbs.db', '.coverage'];
+
+// rsc's OWN state inside a worktree: hook markers, knowledge-sync's index, the memory journal. It is
+// in no commit by design, so the contents check read it as work that "would be lost" and refused
+// every landed worktree a session had ever worked in (team simulation D8) — the default cleanup
+// never ran. It does not block. The one part of it that is history — the session journal — is moved
+// to the project's store before the directory goes (`adoptJournal`), never dropped.
+export const RSC_STATE = ['.rsc/', '02-DOCS/raw/worklog/.rsc-memory/'];
+const isRscState = (path) => RSC_STATE.some((prefix) => path === prefix || path === prefix.slice(0, -1) || path.startsWith(prefix));
+
+// Trunk candidates, most authoritative first. The remote tip beats a local branch that may be stale.
+const TRUNKS = ['origin/main', 'main', 'origin/master', 'master'];
+
+// Branch shapes the catalog's isolation produces.
+//
+// `worktrees` documents `feat/<slug>`, and while SDD was the only lane that was the whole set:
+// every isolated branch was a feature. 2.0.0 made FTD the default and FTD names a branch for what
+// it is — a fix is not a feature — so `fix/`, `docs/` and `chore/` fell outside, scored as half a
+// signal, and were never swept, while `ftd` promises in writing that the cleanup is automatic once
+// the branch lands. Found by using it: the two fixes released on 2026-09-18 both had to be removed
+// by hand. These are the Conventional Commits types, which is what the commit guard already
+// enforces on every commit in a project rsc governs — so the branch shape and the commit shape now
+// come from the same vocabulary instead of two that drifted apart.
+//
+// Widening one signal, never the conjunction: a branch outside this vocabulary is still `ambiguous`
+// wherever it sits, and one of these in a directory rsc does not own is still `ambiguous` too.
+const RSC_BRANCH = /^(?:feat|feature|fix|docs|chore|refactor|test|perf|ci|build|style)\//;
+
+function git(cwd, args) {
+  // 64 MiB, because node's 1 MiB default kills git mid-write on any worktree with a few thousand
+  // stray files and hands back a truncated-but-successful-looking result. Measured: in the 1.0-1.15 MB
+  // band the same unchanged worktree flipped between verdicts across runs.
+  const r = spawnSync('git', ['-C', cwd, ...args], { windowsHide: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  // `raw` matters for porcelain output: its leading space is a status code, not padding, and
+  // trimming it shifted every path by one character — so the message naming the file about to be
+  // lost named a file that does not exist. A refusal has to be true to be actionable (P6).
+  return { ok: r.status === 0, out: (r.stdout || '').trim(), raw: r.stdout || '', err: (r.stderr || '').trim() };
+}
+
+/**
+ * The MAIN working tree for wherever we are standing.
+ *
+ * You cannot remove the directory you are inside, and closing a branch from the worktree you built it
+ * in is the most common way this is reached — so without this the common case is exactly the one that
+ * never gets cleaned. `--show-toplevel` is the wrong question here: inside a linked worktree it
+ * answers with that worktree. The common git dir is the only thing that points home.
+ */
+export function resolveMainRoot(cwd = process.cwd()) {
+  const probe = git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (probe.ok && probe.out) {
+    const home = real(dirname(probe.out));
+    // In the bare-repo layout (`proj/.bare` plus sibling worktrees) the parent of the common dir is
+    // not a repository at all, so every git question from there fails and the feature silently does
+    // nothing. That layout is one of the two mainstream worktree workflows; fall back to the git dir.
+    if (git(home, ['rev-parse', '--git-dir']).ok) return home;
+    return real(probe.out);
+  }
+  const legacy = git(cwd, ['rev-parse', '--git-common-dir']);
+  if (legacy.ok && legacy.out) return real(dirname(resolve(cwd, legacy.out)));
+  return real(cwd);
+}
+
+/** Is this ref one of the trunk names? Deleting one is never a side effect of a cleanup. */
+export function isTrunkName(branch) {
+  return TRUNKS.some((t) => t === branch || t.endsWith(`/${branch}`));
+}
+
+/** The cleanup is on unless this project turned it off. Same shape as the other guards' switches. */
+export function isCleanupEnabled(root) {
+  return !existsSync(join(root, '.rsc', OPT_OUT));
+}
+
+/** The first trunk ref that actually exists, or null when there is nothing to compare against. */
+export function resolveTrunk(root) {
+  return TRUNKS.find((ref) => git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).ok) || null;
+}
+
+/** Every working tree git knows about. The first entry is always the main one. */
+export function listWorktrees(root) {
+  const { ok, out } = git(root, ['worktree', 'list', '--porcelain']);
+  if (!ok) return [];
+  const trees = [];
+  let cur = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      cur = { path: real(line.slice('worktree '.length)), branch: null, head: null, locked: false, isMain: trees.length === 0 };
+      trees.push(cur);
+    } else if (!cur) continue;
+    else if (line.startsWith('HEAD ')) cur.head = line.slice('HEAD '.length);
+    else if (line.startsWith('branch ')) cur.branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
+    // A lock is the strongest "do not touch this" git lets a person express. Dropping the line meant
+    // the sweep announced locked worktrees as removable and only git's own refusal stopped it.
+    else if (line === 'locked' || line.startsWith('locked ')) cur.locked = true;
+  }
+  // `git worktree list --porcelain` does not quote paths and has no -z form, so a directory whose name
+  // contains a newline fabricates an extra entry that inherits the real one's HEAD and branch. It can
+  // never be deleted (git refuses a path that is not a working tree), but it would be displayed, and
+  // `status --ignored` would be run against whatever it points at. Ask git whether each parsed path
+  // really belongs to this repository; a forgery does not.
+  const home = git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!home.ok || !home.out) return trees;
+  return trees.filter((wt) => {
+    if (wt.isMain) return true;
+    const mine = git(wt.path, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (!mine.ok || real(mine.out) !== real(home.out)) return false;
+    // Belonging to this repository is not enough: any directory *inside* the checkout answers the
+    // same. A genuine worktree is its own root, so git's toplevel from there is the path itself.
+    const top = git(wt.path, ['rev-parse', '--show-toplevel']);
+    return top.ok && real(top.out) === wt.path;
+  });
+}
+
+/**
+ * Whose worktree is this? Derived, because a list of "worktrees rsc created" is the parallel
+ * accounting P3 forbids — and a stale one would authorise deleting something it no longer describes.
+ *
+ * Two independent signals, and the conjunction is what counts as certainty. Deriving gets it wrong in
+ * both directions and only one of them is benign: ours, renamed by hand, is never cleaned (it
+ * accumulates, nothing is lost), while one the user made by hand that happens to match the
+ * convention would be indistinguishable from ours. So one signal alone is `ambiguous`, not `rsc`.
+ */
+export function provenanceOf(root, wt) {
+  const p = wt.path;
+  const home = real(root);
+  const inside = (dir) => p === dir || p.startsWith(dir + sep);
+  const location = inside(join(home, '.worktrees'))
+    || inside(join(home, 'worktrees'))
+    || (dirname(p) === dirname(home) && basename(p).startsWith(`${basename(home)}-`));
+  const branch = Boolean(wt.branch && RSC_BRANCH.test(wt.branch));
+  if (location && branch) return 'rsc';
+  if (location || branch) return 'ambiguous';
+  return 'foreign';
+}
+
+/**
+ * Does the branch still carry anything the trunk does not have?
+ *
+ * Reachability alone answers "no" for every pull request the forge squashed or rebased — the most
+ * common way work lands anywhere — because those rewrite the commit identities. So the question is
+ * asked about content, which is what the contract actually says: if merging this branch into the
+ * trunk would not change the trunk's tree, the branch adds nothing.
+ *
+ * Cheapest first, and anything that cannot be answered is answered as "still carries work".
+ */
+/**
+ * Did this branch ever carry a commit of its own?
+ *
+ * A branch cut ten seconds ago adds nothing the trunk does not have, so every content test calls it
+ * integrated — and "integrated" was being read as "landed", which turned a live workspace that had
+ * merely run an install into a directory to delete. Nothing landed from a branch that never committed.
+ *
+ * The reflog is git's own record of the ref moving; when it cannot answer, the answer is no, because
+ * accumulating a stale worktree costs a directory and the other mistake costs someone's afternoon.
+ */
+export function hasLandedWork(root, wt) {
+  if (!wt.branch) return false;
+  // Ask the reflog FIRST. It is the only record that distinguishes the two states that look
+  // identical from the outside: a worktree sitting at the trunk because it was just created there,
+  // and one sitting at the trunk because its work landed by fast-forward and took the trunk with
+  // it. Until 2.0.3 the tip comparison below ran first and answered "nothing landed" for both, so
+  // every branch landed the ordinary FTD way — commit, push, fast-forward — was kept for ever.
+  // Found on 2026-09-18 watching this repo refuse to sweep its own branch for the wrong reason.
+  const log = git(root, ['reflog', 'show', '--format=%gs', wt.branch]);
+  if (log.ok && log.out) return log.out.split('\n').some((line) => line.startsWith('commit'));
+  // No reflog to ask — a fresh clone, or a branch whose reflog has expired. There is then no
+  // evidence this branch ever carried anything, and this whole module fails towards keeping the
+  // directory: unproven is not proven. (The tip comparison that used to sit here is deliberately
+  // gone rather than kept as a fallback: both of its outcomes are this same answer, and a line
+  // that cannot change the result while reading like a guard is the kind of decoration that made
+  // the bug above hard to see.)
+  return false;
+}
+
+export function integrationOf(root, wt, trunk) {
+  const head = wt.head || (wt.branch ? git(root, ['rev-parse', wt.branch]).out : null);
+  if (!head) return 'unknown';
+  if (git(root, ['merge-base', '--is-ancestor', head, trunk]).ok) return 'integrated';
+
+  const merged = git(root, ['merge-tree', '--write-tree', trunk, head]);
+  // A conflict exits non-zero with a tree on stdout; an unsupported flag (git < 2.38) exits non-zero
+  // with usage on stderr and nothing usable. Neither is integration, but only the second is ignorance.
+  if (!merged.ok && !merged.out) return 'unknown';
+  const trunkTree = git(root, ['rev-parse', `${trunk}^{tree}`]);
+  if (!merged.ok || !trunkTree.ok) return 'not-integrated';
+  return merged.out.split('\n')[0].trim() === trunkTree.out ? 'integrated' : 'not-integrated';
+}
+
+/**
+ * What is inside that git would not miss? Split into what git calls dirty (tracked changes) and what
+ * git cannot see at all — untracked and *ignored* files.
+ *
+ * The second half is the one that matters and the one every "is it clean?" check forgets: a worktree
+ * with nothing pending can still hold the only copy of an .env, a local database or a page of notes,
+ * and removing the directory takes them with it. `--ignored` is the only way to be told they exist.
+ */
+export function contentOutsideHistory(wtPath) {
+  const { ok, raw } = git(wtPath, ['status', '--porcelain', '-z', '-uall', '--ignored=matching']);
+  const dirty = [];
+  const outside = [];
+  if (!ok) return { dirty, outside, readable: false };
+  const fields = raw.split('\0');
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i];
+    if (entry.length < 4) continue;
+    const code = entry.slice(0, 2);
+    const path = entry.slice(3);
+    // A rename emits TWO fields: the target, then the bare origin path with no status code. Treating
+    // that origin as another entry sliced three characters off it, so the refusal named a file that
+    // does not exist — the exact failure the `raw` comment above exists to prevent (P6).
+    if (code[0] === 'R' || code[0] === 'C') { i++; dirty.push(path); continue; }
+    if (code === '??' || code === '!!') {
+      if (!isRegenerable(path) && !isRscState(path)) outside.push(path);
+    } else dirty.push(path);
+  }
+  return { dirty, outside, readable: true };
+}
+
+// A directory name counts anywhere it is used as a DIRECTORY; a filename counts only as a filename.
+// Matching the table against the last segment made `config/env` — a dotenv full of live credentials —
+// read as a virtualenv and get deleted. Matching it only at position 0 fixed that and broke every
+// monorepo, where the disposable directory is `packages/app/node_modules`. Position is the whole rule.
+function isRegenerable(path) {
+  const parts = path.split('/').filter(Boolean);
+  // git reports a wholly-ignored directory with a trailing slash and does not expand it, so there the
+  // last segment is a directory too. Getting this wrong is what made `node_modules/` itself — the most
+  // common entry there is — fail the very carve-out written for it.
+  const isDir = path.endsWith('/');
+  const dirs = isDir ? parts : parts.slice(0, -1);
+  return dirs.some((d) => REGENERABLE.includes(d))
+    || (!isDir && REGENERABLE_FILES.includes(parts[parts.length - 1]));
+}
+
+/**
+ * Every worktree with a verdict: `safe` (remove without asking), `ask` (confirm first, and the
+ * reasons say why), `skip` (not ours, or still carrying work — never offered).
+ *
+ * Returns nothing at all when the cleanup is off or the trunk cannot be resolved: with no trunk there
+ * is no way to tell landed work from live work, and guessing is the one thing this must not do.
+ */
+// No submodule guard here, deliberately. It was written because a submodule *looks* like a worktree,
+// and a planted mutant proved it could never fire: `git worktree list` does not report submodules, so
+// nothing this iterates can ever be one. A guard that cannot fail is the decorative gate P2 exists to
+// forbid — the invariant is structural, and test 32 is what holds it.
+export function classifyWorktrees(root) {
+  if (!isCleanupEnabled(root)) return [];
+  const trunk = resolveTrunk(root);
+  if (!trunk) return [];
+
+  return listWorktrees(root)
+    .filter((wt) => !wt.isMain && wt.path !== real(root))
+    .map((wt) => {
+      const base = { path: wt.path, branch: wt.branch, verdict: 'skip', reasons: [], details: {} };
+
+      // A detached worktree has no branch, so half the provenance signal cannot even be asked for and
+      // every message about it interpolates `null`. Nothing to reason about; leave it alone.
+      if (!wt.branch) return { ...base, reasons: ['detached'] };
+
+      const provenance = provenanceOf(root, wt);
+      if (provenance === 'foreign') return { ...base, reasons: ['foreign'] };
+
+      if (wt.locked) return { ...base, reasons: ['locked'] };
+
+      const integration = integrationOf(root, wt, trunk);
+      if (integration !== 'integrated') return { ...base, reasons: [integration] };
+      if (!hasLandedWork(root, wt)) return { ...base, reasons: ['nothing-landed'] };
+
+      const { dirty, outside, readable } = contentOutsideHistory(wt.path);
+      if (!readable) return { ...base, reasons: ['unreadable'] };
+
+      const reasons = [];
+      if (dirty.length) reasons.push('dirty');
+      if (outside.length) reasons.push('content-outside-history');
+      if (provenance === 'ambiguous') reasons.push('provenance-ambiguous');
+
+      return {
+        ...base,
+        verdict: reasons.length ? 'ask' : 'safe',
+        reasons,
+        details: { dirty, outside },
+      };
+    });
+}
+
+/**
+ * Remove one worktree, and its branch only when git will do it the safe way.
+ *
+ * The branch rule is the recovery net for the one judgement here that is inferred rather than proven:
+ * a squash-merged branch is equivalent by content and not by identity, so `branch -d` refuses it. We
+ * do not override that refusal. The directory goes, the branch stays, and while the branch exists the
+ * commits are recoverable even if the equivalence was judged wrong. Never `-D`.
+ *
+ * `--force` on the worktree removal is not a relaxation: our own gate above is strictly stronger than
+ * git's, because git's refusal ignores ignored files and ours does not. By this point the contents
+ * have already been classified as either nothing, or regenerable, or explicitly confirmed.
+ */
+export function reapWorktree(root, targetPath, { confirmed = false } = {}) {
+  const target = real(targetPath);
+  if (!isCleanupEnabled(root)) {
+    return { removed: false, reason: `cleanup is off for this project (.rsc/${OPT_OUT}); remove it by hand with \`git worktree remove\`` };
+  }
+  if (target === real(root)) {
+    return { removed: false, reason: 'that is the main working tree, not a worktree to remove' };
+  }
+
+  const candidate = classifyWorktrees(root).find((c) => c.path === target);
+  if (!candidate) {
+    return { removed: false, reason: `${target} is not a worktree of this repository, or the trunk could not be resolved` };
+  }
+  if (candidate.verdict === 'skip') {
+    return { removed: false, reason: refusal(candidate) };
+  }
+  if (candidate.verdict === 'ask' && !confirmed) {
+    return { removed: false, reason: refusal(candidate) };
+  }
+
+  // The journal first: if it cannot be carried home, the directory stays (fail towards keeping).
+  try { adoptJournal(root, target); } catch (err) {
+    return { removed: false, reason: `its session journal could not be moved to the project, so nothing was removed: ${err.message}` };
+  }
+
+  const removal = git(root, ['worktree', 'remove', '--force', target]);
+  if (!removal.ok) {
+    return { removed: false, reason: `git refused to remove it: ${removal.err || removal.out}` };
+  }
+
+  // `-d` refuses an unmerged branch, which is the recovery net — but it happily deletes the TRUNK,
+  // which is an ancestor of everything. A sibling checkout of `main` classified as ambiguous, the user
+  // confirmed removing a stray directory, and the trunk ref went with it.
+  const branchDeleted = candidate.branch && !isTrunkName(candidate.branch)
+    ? git(root, ['branch', '-d', candidate.branch]).ok
+    : false;
+  // No `git worktree prune` here. It has no expiry of its own, so running it while another worktree's
+  // volume happens to be unmounted de-registers that worktree immediately — and this project lives on
+  // an external drive. `git worktree remove` already clears the entry it owns.
+
+  return {
+    removed: true,
+    path: target,
+    branch: candidate.branch,
+    branchDeleted,
+    branchKept: Boolean(candidate.branch) && !branchDeleted,
+  };
+}
+
+/**
+ * Carry a worktree's memory journal into the project's store before the worktree is removed.
+ *
+ * Since sessions inside `.worktrees/` journal into the project's store directly, this is the net for
+ * what older versions (and any session that ran before that fix) left inside the worktree. Merge by
+ * file name, the newer record wins, nothing in the project is ever overwritten by something older.
+ * The project's store is the same one the memory picks: the ignored wiki worklog when it is in use,
+ * `.rsc/memory` otherwise.
+ */
+export function adoptJournal(root, worktreePath) {
+  const sources = [join(worktreePath, '.rsc', 'memory'), join(worktreePath, '02-DOCS', 'raw', 'worklog', '.rsc-memory')]
+    .filter((dir) => existsSync(dir));
+  if (!sources.length) return { moved: [] };
+  const worklogStore = join(root, '02-DOCS', 'raw', 'worklog', '.rsc-memory');
+  const dest = existsSync(join(worklogStore, 'sessions')) ? worklogStore : join(root, '.rsc', 'memory');
+  const stamp = (value) => new Date(value?.timestamps?.updatedAt || value?.updatedAt || value?.approvedAt || value?.startedAt || 0).getTime() || 0;
+  const read = (path) => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; } };
+  const moved = [];
+  for (const source of sources) {
+    for (const kind of ['sessions', 'anchors', 'lessons']) {
+      const dir = join(source, kind);
+      if (!existsSync(dir)) continue;
+      for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+        const from = join(dir, name);
+        const to = join(dest, kind, name);
+        if (existsSync(to) && stamp(read(to)) >= stamp(read(from))) continue;
+        mkdirSync(join(dest, kind), { recursive: true });
+        copyFileSync(from, to);
+        chmodSync(to, 0o600);
+        moved.push(`${kind}/${name}`);
+      }
+    }
+  }
+  return { moved };
+}
+
+// Branches that are never a cleanup's side effect, whatever their state: the knowledge branch carries
+// 01-TOOLS/ and 02-DOCS/ to the team (knowledge-sync) and is merged into the trunk as a matter of course.
+export const KEEP_BRANCHES = ['rsc/knowledge'];
+
+/**
+ * Plain local branches whose work has landed: the half of "al fusionar se borra solo" that has no
+ * directory. E2E defect 14 (2026-10-07): a branch merged into the default branch — or whose remote
+ * branch the forge deleted after the PR, `[gone]` — stayed in `git branch` for ever, landed work
+ * looking exactly like live work.
+ *
+ * Deleted only when ALL hold, each failing towards keeping the branch:
+ *   - the cleanup is on, and a trunk resolves (the remote tip first, like the worktrees);
+ *   - it is not the default branch, a trunk name, `rsc/knowledge`, the current branch, or checked out
+ *     in ANY worktree (`branch -d` would refuse that last one anyway; we do not even ask);
+ *   - its tip is an ancestor of the trunk — no commit of its own left. Against `origin/<default>`
+ *     when there is one, so a branch merged locally but not yet pushed keeps its unpushed commits
+ *     (being ahead of its own upstream then loses nothing: those commits are on the remote trunk);
+ *   - it really carried work: a commit in its reflog, or an upstream the forge deleted. A branch cut a
+ *     moment ago is an ancestor of everything and has landed nothing (same rule as `hasLandedWork`).
+ * And then git decides: `branch -d`, never -D. A squash-merged branch is `[gone]` but has commits of
+ * its own by identity, so it is not an ancestor and stays — its commits remain recoverable.
+ *
+ * Never throws (it runs from the post-merge hook, like `autoReap`).
+ */
+export function reapMergedBranches(root) {
+  const out = { deleted: [], kept: [] };
+  try {
+    if (!isCleanupEnabled(root)) return out;
+    const trunk = resolveTrunk(root);
+    if (!trunk) return out;
+    const defaultName = trunk.replace(/^origin\//, '');
+    const current = git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).out || null;
+    const checkedOut = new Set(listWorktrees(root).map((wt) => wt.branch).filter(Boolean));
+    const refs = git(root, ['for-each-ref', '--format=%(refname:short)%00%(upstream:track)', 'refs/heads']);
+    if (!refs.ok) return out;
+    for (const line of refs.out.split('\n').filter(Boolean)) {
+      const [branch, track = ''] = line.split('\0');
+      const keep = (reason) => out.kept.push({ branch, reason });
+      if (branch === defaultName || isTrunkName(branch) || KEEP_BRANCHES.includes(branch)) continue;
+      if (branch === current) { keep('current branch'); continue; }
+      if (checkedOut.has(branch)) { keep('checked out in a worktree'); continue; }
+      if (!git(root, ['merge-base', '--is-ancestor', `refs/heads/${branch}`, trunk]).ok) continue; // live work
+      const gone = track.includes('gone');
+      if (!gone && !hasLandedWork(root, { branch })) { keep('never carried a commit'); continue; }
+      const del = git(root, ['branch', '-d', branch]);
+      if (del.ok) out.deleted.push(branch);
+      else keep(`git branch -d refused: ${del.err || del.out}`);
+    }
+  } catch (err) {
+    out.kept.push({ branch: null, reason: `branch cleanup could not run: ${err.message}` });
+  }
+  return out;
+}
+
+/**
+ * Every refusal carries the way out, because the person receiving it may not be able to deduce one (P6).
+ *
+ * EVERY reason, not the first one recorded. A worktree that is both dirty and holding an untracked
+ * file used to be described by the dirty half alone — so the user read "uncommitted changes in
+ * README.md", judged that a nuisance, confirmed, and the confirmation landed on a `production.env`
+ * the message never mentioned. The module knew. It just did not say.
+ */
+/**
+ * The unattended half: remove what classification already called `safe`, and nothing else.
+ *
+ * `sweep` offers and never acts, on purpose — there is a human reading it. This runs from a git hook
+ * the moment work lands, where there is nobody to ask, so the two verdicts that would have become a
+ * question become a refusal instead. It adds NO judgement of its own: the judgement is the dangerous
+ * part, it is written above, and it is already tested in both directions.
+ *
+ * Two properties its caller depends on, both load-bearing:
+ *  - it never throws. The caller is git, mid-merge. A throw here would turn a cleanup into a failed
+ *    merge, which is a far worse bug than the one this fixes.
+ *  - it is silent when there is nothing to do, so the common merge prints nothing.
+ */
+export function autoReap(root) {
+  const result = { reaped: [], skipped: [], disabled: false, branches: { deleted: [], kept: [] } };
+  try {
+    if (!isCleanupEnabled(root)) {
+      result.disabled = true;
+      return result;
+    }
+    for (const candidate of classifyWorktrees(root)) {
+      // Not the protection, and it must not be mistaken for one: `reapWorktree` refuses an `ask`
+      // on its own, and that refusal is the gate — mutation-tested by 18b and 23. Verified here on
+      // 2026-09-17 by removing this line: every test still passed. It stays because skipping early
+      // avoids re-classifying the whole repository once per candidate, and because the recorded
+      // reason is then the verdict itself rather than a message written for a human to read.
+      if (candidate.verdict !== 'safe') {
+        result.skipped.push({ path: candidate.path, reason: candidate.reasons.join(', ') || candidate.verdict });
+        continue;
+      }
+      const out = reapWorktree(root, candidate.path);
+      if (out.removed) result.reaped.push(candidate.path);
+      else result.skipped.push({ path: candidate.path, reason: out.reason });
+    }
+    // After the worktrees: removing one frees its branch, which may then be a landed plain branch.
+    result.branches = reapMergedBranches(root);
+  } catch (err) {
+    // Swallowed deliberately, and recorded rather than discarded: the merge must survive whatever
+    // went wrong in here, but a silent failure that leaves no trace is how this rots unnoticed.
+    result.skipped.push({ path: root, reason: `cleanup could not run: ${err.message}` });
+  }
+  return result;
+}
+
+export const HOOK_MARKER = '# rsc-managed worktree cleanup (post-merge) v1';
+
+// Every branch exits 0. That is the whole contract with git: this hook runs in the middle of
+// somebody's merge, and a cleanup that can turn a good merge into a failed one is a worse bug than
+// the accumulation it exists to fix. Missing node, missing reaper, broken reaper, unreadable repo —
+// all of them are "do nothing", never "fail".
+const HOOK_BODY = `#!/bin/sh
+${'# rsc-managed worktree cleanup (post-merge) v1'}
+# Retires worktrees whose work has just landed. Installed by rsc; safe to delete.
+# Turn it off for this project with: .rsc/.no-worktree-cleanup
+hook_dir=$(dirname "$0")
+if [ -x "$hook_dir/post-merge.rsc-local" ]; then
+  "$hook_dir/post-merge.rsc-local" "$@" || true
+fi
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+# First, while the landed branch still exists: close its feature documents (off: .rsc/.no-ftd-close).
+if [ -f "$root/.rsc/knowledge-sync.mjs" ]; then
+  node "$root/.rsc/knowledge-sync.mjs" close "$root" 2>/dev/null || true
+fi
+[ -f "$root/.rsc/worktree-reaper.mjs" ] || exit 0
+node "$root/.rsc/worktree-reaper.mjs" "$root" auto 2>/dev/null || true
+exit 0
+`;
+
+/**
+ * Where git will ACTUALLY look for hooks, asked of git rather than assumed.
+ *
+ * The assumption was `<root>/.git/hooks`, and it is wrong in three ordinary situations at once:
+ * a repo that sets `core.hooksPath` (husky v9 writes `.husky/_`, lefthook and committed
+ * `.githooks/` dispatchers do the same), a linked worktree where `.git` is a FILE and the mkdir
+ * raised ENOTDIR, and a submodule. Reported from a user's repo on 2026-09-18 against 2.0.1: rsc
+ * wrote the hook where git does not look, `doctor` read the same wrong path back, and the report
+ * said `armed` about something that could never run. Verified there and here that a single
+ * `rev-parse` answers all three.
+ *
+ * `--path-format=absolute` needs git 2.31 (Mar 2021). Older git gets the old path — which is
+ * correct whenever `core.hooksPath` is unset, i.e. the case it was always right about.
+ */
+export function hooksDir(root) {
+  const r = git(root, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
+  if (r.ok && r.out) return r.out;
+  return join(real(root), '.git', 'hooks');
+}
+
+// Whether that directory is ours to write in. Inside the repository's own git dir: yes, it is
+// private plumbing that is never cloned and never committed. Anywhere else it belongs to the user
+// or to another tool — a committed `.githooks/` is their source tree (writing there would put rsc
+// in their diff, and moving an existing hook aside would rename a TRACKED file), and `.husky/_` is
+// regenerated by husky, so anything we left there disappears on their next install. Report it and
+// let the person decide; that is P4, and it is the same reasoning the comment on this function has
+// claimed since the hook shipped, finally applied instead of only stated.
+export function hooksDirIsOurs(root, dir) {
+  const r = git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!r.ok || !r.out) return false;
+  const gitDir = real(r.out);
+  const target = real(dir);
+  return target === gitDir || target.startsWith(gitDir + sep);
+}
+
+/**
+ * Install the trigger. The judgement has existed and been tested for a while; what never existed was
+ * something that runs it at the moment work lands. `post-merge` is that moment, and it covers both
+ * of ship's landing paths — a local `merge --no-ff` and the `pull --ff-only` after a forge merge.
+ *
+ * A hook lives in `.git/hooks/`, which is not cloned. So this is called on install AND on repair,
+ * and `doctor` reports its absence: a trigger nobody re-installs is a trigger that quietly stops
+ * existing on every machine but the one that ran the installer.
+ *
+ * Somebody else's post-merge is moved aside and chained, never overwritten. Husky and lefthook put
+ * real work in there, and eating it to install a convenience would be indefensible.
+ */
+export function installMergeHook(root) {
+  try {
+    const dir = hooksDir(root);
+    if (!hooksDirIsOurs(root, dir)) {
+      return { installed: false, state: 'unreachable', reason: `git reads hooks from ${dir}, which belongs to this repository or to another tool — rsc will not write there.` };
+    }
+    const hook = join(dir, 'post-merge');
+    mkdirSync(dir, { recursive: true });
+    if (existsSync(hook)) {
+      const current = readFileSync(hook, 'utf8');
+      if (current.includes(HOOK_MARKER)) {
+        // Already ours. Rewrite so an older body converges, but never chain ourselves behind
+        // ourselves — repair runs this repeatedly and stacking would run the cleanup N times.
+        writeFileSync(hook, HOOK_BODY);
+        chmodSync(hook, 0o755);
+        return { installed: true, chained: existsSync(join(dir, 'post-merge.rsc-local')) };
+      }
+      renameSync(hook, join(dir, 'post-merge.rsc-local'));
+      chmodSync(join(dir, 'post-merge.rsc-local'), 0o755);
+    }
+    writeFileSync(hook, HOOK_BODY);
+    chmodSync(hook, 0o755);
+    return { installed: true, chained: existsSync(join(dir, 'post-merge.rsc-local')) };
+  } catch (err) {
+    return { installed: false, state: 'failed', reason: err.message };
+  }
+}
+
+export function refusal(candidate) {
+  const d = candidate.details || {};
+  const parts = (candidate.reasons || []).map((reason) => {
+    switch (reason) {
+      case 'foreign':
+        return 'it was not created by rsc, so it is not ours to delete. Remove it yourself with `git worktree remove` if you want it gone.';
+      case 'not-integrated':
+        return `\`${candidate.branch}\` still carries work that is not in the trunk. Land it (\`ship\`) or discard it deliberately first.`;
+      case 'unknown':
+        return `whether \`${candidate.branch}\` is integrated could not be determined (old git, or no comparable trunk). Check with \`git log --oneline <trunk>..${candidate.branch}\` and remove it by hand if you are satisfied.`;
+      case 'detached':
+        return 'it has no branch checked out (detached HEAD), so there is nothing to judge as landed. Left alone.';
+      case 'locked':
+        return 'it is locked. Unlock it deliberately (`git worktree unlock`) if you really want it gone.';
+      case 'nothing-landed':
+        return `\`${candidate.branch}\` has never carried a commit, so nothing landed from it — this is a live workspace, not leftovers.`;
+      case 'unreadable':
+        return 'git could not report the state of that directory; nothing was touched.';
+      case 'dirty':
+        return `it has uncommitted changes: ${list(d.dirty)}. Commit, stash or discard them first.`;
+      case 'content-outside-history':
+        return `it holds files that are in no commit and would be lost: ${list(d.outside)}. Move or copy them out first.`;
+      case 'provenance-ambiguous':
+        return `only half of the rsc convention matches (\`${candidate.branch}\`), so it may be yours rather than ours. Confirm before it is removed.`;
+      default:
+        return null;
+    }
+  }).filter(Boolean);
+  return parts.length ? parts.join(' Also: ') : 'nothing was removed.';
+}
+
+// Naming what is at risk is the point; naming ten thousand of them is a denial of service against the
+// reader and against the context window. Show enough to recognise, then say how many are left.
+const SHOWN = 5;
+function list(items = []) {
+  if (!items.length) return 'none';
+  const head = items.slice(0, SHOWN).join(', ');
+  return items.length > SHOWN ? `${head} and ${items.length - SHOWN} more` : head;
+}
+
+/** One line per candidate, for someone who asked — the CLI names what is at risk. */
+export function describe(candidate) {
+  const who = `${candidate.path}${candidate.branch ? ` (${candidate.branch})` : ''}`;
+  if (candidate.verdict === 'safe') return `  safe  ${who} — landed and empty of anything unsaved`;
+  return `  ${candidate.verdict === 'skip' ? 'keep' : 'ask '}  ${who} — ${refusal(candidate)}`;
+}
+
+/**
+ * One line per candidate for the session-start sweep, which nobody asked for.
+ *
+ * That block is injected into the model's context on every startup, so it is held to a stricter rule
+ * than the CLI: paths relative to the repository (P9 — nothing distributed carries machine paths) and
+ * **counts instead of filenames**. The files this would otherwise enumerate are, by construction, the
+ * ones outside git: the .env, the private key, the client folder — exactly what the user marked as
+ * not-for-sharing. Enough to decide whether to look; nothing that leaks by being read.
+ */
+export function summarize(candidate, root) {
+  const where = relative(real(root), candidate.path) || candidate.path;
+  const who = `${where}${candidate.branch ? ` (${candidate.branch})` : ''}`;
+  if (candidate.verdict === 'safe') return `  safe  ${who} — landed, nothing unsaved inside`;
+  if (candidate.verdict === 'skip') return `  keep  ${who} — ${candidate.reasons.join(', ')}`;
+  const d = candidate.details || {};
+  const why = candidate.reasons.map((r) => {
+    if (r === 'dirty') return `${d.dirty.length} uncommitted change(s)`;
+    if (r === 'content-outside-history') return `${d.outside.length} file(s) in no commit`;
+    if (r === 'provenance-ambiguous') return 'provenance unclear';
+    return r;
+  }).join(', ');
+  return `  ask   ${who} — ${why}; ask before removing`;
+}
+
+// CLI: `node worktree-reaper.mjs <root> [reap [path]]`. `scripts/rsc.js` is the public entry point;
+// this exists so the materialized copy in .rsc/ is runnable on its own.
+if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+  const root = resolve(process.argv[2] || process.cwd());
+  const candidates = classifyWorktrees(root).filter((c) => c.verdict !== 'skip');
+  if (process.argv[3] === 'auto') {
+    // The unattended entry point, called by the post-merge hook. Prints only what it actually did.
+    const out = autoReap(root);
+    for (const p of out.reaped) process.stdout.write(`rsc: retired worktree ${p}\n`);
+    for (const b of out.branches.deleted) process.stdout.write(`rsc: deleted merged branch ${b}\n`);
+  } else if (process.argv[3] === 'reap') {
+    const one = process.argv[4];
+    const targets = one ? [resolve(one)] : candidates.filter((c) => c.verdict === 'safe').map((c) => c.path);
+    for (const t of targets) {
+      const out = reapWorktree(root, t, { confirmed: Boolean(one) });
+      process.stdout.write(out.removed
+        ? `removed ${t}${out.branchKept ? ` (branch ${out.branch} kept — git will not delete it safely)` : ''}\n`
+        : `kept ${t} — ${out.reason}\n`);
+    }
+  } else if (!candidates.length) {
+    process.stdout.write('no worktrees to clean up.\n');
+  } else {
+    process.stdout.write(candidates.map(describe).join('\n') + '\n');
+  }
+}

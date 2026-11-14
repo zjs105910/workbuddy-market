@@ -1,0 +1,1 @@
+- `README.md` and `docs/guide.md` describe what uninstall does with emptied backup directories, the exit status 3 of `install` and `uninstall`, and the leftover records `doctor` lists. They count 56 skills, name `$brigade-admin` as the command that opens an executive admin, and describe tracker intake and `ticket add --from-report` as the coordinator runs them.

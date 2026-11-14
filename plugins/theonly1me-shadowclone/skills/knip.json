@@ -1,0 +1,89 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreBinaries": [
+    "shadowclone"
+  ],
+  "rules": {
+    "exports": "off",
+    "types": "off",
+    "nsExports": "off",
+    "nsTypes": "off",
+    "enumMembers": "off",
+    "duplicates": "off"
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        "plugins/shadowclone/skills/*/scripts/*.mjs"
+      ],
+      "project": [
+        "plugins/**/*.mjs"
+      ]
+    },
+    "packages/*": {
+      "entry": [
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/cli": {
+      "entry": [
+        "scripts/*.ts",
+        "src/**/*.test.ts",
+        "scripts/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.ts",
+        "bin/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "commander",
+        "smol-toml"
+      ]
+    },
+    "packages/mcp": {
+      "entry": [
+        "src/server.ts",
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/web": {
+      "entry": [
+        "src/client/main.ts",
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "tooling": {
+      "entry": [
+        "src/*.ts",
+        "src/**/*.test.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "evals": {
+      "entry": [
+        "**/*.test.ts",
+        "work/prepare.ts",
+        "work/scaffold/cli.ts",
+        "work/fakeGh/main.ts",
+        "work/regrade.ts",
+        "pr-review/cli.ts",
+        "pr-review/mine/index.ts"
+      ],
+      "project": [
+        "**/*.ts"
+      ]
+    }
+  }
+}

@@ -1,0 +1,202 @@
+{
+  "schema_version": 3,
+  "corpus_id": "cross-genre-v3",
+  "holdout_policy": {
+    "development": "reusable tuning and regression evidence",
+    "holdout": "single-use after candidate guidance, rubric, prompts, and thresholds are frozen"
+  },
+  "cases": [
+    {
+      "case_id": "romance-missed-voice",
+      "split": "development",
+      "genre": "romance",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": true,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/01-romance-missed-voice.md"
+    },
+    {
+      "case_id": "comedy-wrong-banquet",
+      "split": "development",
+      "genre": "comedy",
+      "negative_control": true,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/02-comedy-wrong-banquet.md"
+    },
+    {
+      "case_id": "workplace-credit",
+      "split": "development",
+      "genre": "workplace",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": true,
+        "literal_precise_deadline": true
+      },
+      "case_spec": "content-quality-cases/03-workplace-credit.md"
+    },
+    {
+      "case_id": "family-night-shift",
+      "split": "development",
+      "genre": "family-realism",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": true,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/04-family-night-shift.md"
+    },
+    {
+      "case_id": "suspense-empty-room",
+      "split": "development",
+      "genre": "suspense",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": true,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/05-suspense-empty-room.md"
+    },
+    {
+      "case_id": "revenge-public-toast",
+      "split": "development",
+      "genre": "revenge",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": true,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/06-revenge-public-toast.md"
+    },
+    {
+      "case_id": "rural-rain-shelter",
+      "split": "development",
+      "genre": "rural-slice-of-life",
+      "negative_control": true,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/07-rural-rain-shelter.md"
+    },
+    {
+      "case_id": "fantasy-three-breaths",
+      "split": "development",
+      "genre": "fantasy",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": true,
+        "contested_evidence": false,
+        "literal_precise_deadline": true
+      },
+      "case_spec": "content-quality-cases/08-fantasy-three-breaths.md"
+    },
+    {
+      "case_id": "historical-ledger-margin",
+      "split": "development",
+      "genre": "historical-marketplace",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": true,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/09-historical-ledger-margin.md"
+    },
+    {
+      "case_id": "sports-pair-oar",
+      "split": "development",
+      "genre": "youth-sports",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": true,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/10-sports-pair-oar.md"
+    },
+    {
+      "case_id": "slice-life-clothesline",
+      "split": "development",
+      "genre": "urban-slice-of-life",
+      "negative_control": true,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/11-slice-life-clothesline.md"
+    },
+    {
+      "case_id": "scifi-cooling-rail",
+      "split": "development",
+      "genre": "near-future-science-fiction",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": true
+      },
+      "case_spec": "content-quality-cases/12-scifi-cooling-rail.md"
+    },
+    {
+      "case_id": "music-borrowed-bow",
+      "split": "holdout",
+      "genre": "youth-music",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": true,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/13-music-borrowed-bow.md"
+    },
+    {
+      "case_id": "folk-horror-wet-hem",
+      "split": "holdout",
+      "genre": "folk-horror",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": true,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/14-folk-horror-wet-hem.md"
+    },
+    {
+      "case_id": "children-kite-alley",
+      "split": "holdout",
+      "genre": "children-comedy",
+      "negative_control": true,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": false
+      },
+      "case_spec": "content-quality-cases/15-children-kite-alley.md"
+    },
+    {
+      "case_id": "rescue-three-locks",
+      "split": "holdout",
+      "genre": "industrial-rescue",
+      "negative_control": false,
+      "mechanisms": {
+        "consequential_choice": false,
+        "contested_evidence": false,
+        "literal_precise_deadline": true
+      },
+      "case_spec": "content-quality-cases/16-rescue-three-locks.md"
+    }
+  ]
+}

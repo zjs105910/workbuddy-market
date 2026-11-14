@@ -1,0 +1,120 @@
+{
+  "name": "@ericrisco/rsc",
+  "version": "3.0.16",
+  "description": "A guided harness builder that turns your goal into a minimal, verified AI-agent setup using strict best practices.",
+  "type": "module",
+  "bin": {
+    "rsc": "scripts/rsc.js",
+    "rsc-install": "scripts/install-apply.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "manifest": "node scripts/build-manifest.js",
+    "manifest:check": "node scripts/build-manifest.js --check",
+    "validate": "node scripts/build-manifest.js --validate",
+    "drift:check": "node scripts/drift-check.js",
+    "drift:knowledge": "node scripts/drift-check.js --knowledge",
+    "knowledge:doctor": "node scripts/knowledge-doctor.js",
+    "spec:gate": "node scripts/spec-gate.js",
+    "routing:audit": "node scripts/routing-audit.js",
+    "originality:check": "node scripts/originality-check.js",
+    "test": "node --test",
+    "coverage": "c8 --reporter=text node --test",
+    "version": "npm run manifest && git add manifest.json",
+    "prepublishOnly": "npm run manifest && npm run validate && npm run drift:check && npm run originality:check"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "ajv": "^8.18.0"
+  },
+  "devDependencies": {
+    "c8": "^10.1.3"
+  },
+  "files": [
+    "scripts",
+    "targets",
+    "schema",
+    "skills",
+    "manifest.json",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
+  ],
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "cursor",
+    "codex",
+    "deepseek",
+    "deepseek-harness",
+    "gemini",
+    "antigravity",
+    "cli",
+    "skills",
+    "ai"
+  ],
+  "license": "MIT",
+  "author": "Eric Risco",
+  "homepage": "https://github.com/ericrisco/rsc-harness#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericrisco/rsc-harness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ericrisco/rsc-harness/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "rscFixes": [
+    {
+      "fixedIn": "2.0.6",
+      "symptom": "A guard your team disarmed (.rsc/.no-gitmoji and similar) comes back armed after cloning the repo"
+    },
+    {
+      "fixedIn": "2.0.8",
+      "symptom": "rsc doctor reports commandOrphans for skills that are installed, and rsc capabilities shows no skills (macOS/Linux)"
+    },
+    {
+      "fixedIn": "2.0.10",
+      "symptom": "onboard fails with RSC_ONBOARDING_INCOMPLETE: installed agents differ from accepted policy (antigravity, windsurf, cline, roo, continue, amp, jules, zed, aider)"
+    },
+    {
+      "fixedIn": "2.0.11",
+      "symptom": "Stop or PreCompact hook error: Hook JSON output validation failed, and a 'consider compacting' notice repeating after every turn"
+    },
+    {
+      "fixedIn": "2.0.12",
+      "symptom": "Security: session continuation context could come from a different git worktree"
+    },
+    {
+      "fixedIn": "2.0.15",
+      "symptom": "The 'consider compacting' notice never appears in sessions that edit files through the terminal instead of the Edit tool"
+    },
+    {
+      "fixedIn": "2.0.16",
+      "symptom": "Non-technical or mixed users in a non-software project had no guard against irreversible commands; repair wired guards the plan had declined"
+    },
+    {
+      "fixedIn": "2.0.17",
+      "symptom": "Re-accepting an onboarding plan erased what init had learned about you, reset your explanation level, or dropped an assistant you added later"
+    },
+    {
+      "fixedIn": "2.0.18",
+      "symptom": "Onboarding silently replaced a skill you wrote yourself that had the same name as one of rsc's (review, plan, debug…)"
+    },
+    {
+      "fixedIn": "2.0.19",
+      "symptom": "rsc doctor reported missing pieces or an unwired hook but still exited with 0, so a CI or an editor extension could not tell"
+    },
+    {
+      "fixedIn": "2.0.20",
+      "symptom": "In a project whose path contains a space, rsc doctor reported every hook script as missing and exited 1, though the scripts were there and the hooks ran"
+    },
+    {
+      "fixedIn": "2.1.0",
+      "symptom": "Answers were long and leaned on hidden reasoning, and onboarding asked an accompaniment level few could answer; now: short stand-alone sentences, one question"
+    }
+  ]
+}

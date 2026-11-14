@@ -1,0 +1,100 @@
+---
+import SkillCard from "@/components/SkillCard.astro";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getCatalogStats, loadCatalog } from "@/lib/catalog";
+import { withBase } from "@/lib/urls";
+
+const entries = await loadCatalog();
+const stats = getCatalogStats(entries);
+const featured = entries.filter((entry) => entry.featured).slice(0, 6);
+---
+
+<BaseLayout title="仓颉 Skill — 把知识变成 AI 可执行的方法" description="学习、发现并共建经过蒸馏的 Agent Skills。">
+  <section class="home-hero">
+    <div class="shell hero-grid">
+      <div>
+        <p class="eyebrow">Cangjie Skill Registry</p>
+        <h1>把知识，变成 AI<br />可以执行的方法</h1>
+        <p class="hero-copy">仓颉 Skill 是一套知识蒸馏方法，也是一个开放的 Skill 目录。你可以直接使用已有成果，也可以提交自己的 Skill Pack。</p>
+        <div class="button-row">
+          <a class="button accent" href={withBase("/skills")}>浏览 Skills</a>
+          <a class="button secondary" href={withBase("/learn")}>从零开始使用</a>
+        </div>
+      </div>
+      <aside class="hero-panel" aria-label="仓颉 Skill 数据概览">
+        <div class="hero-panel-label">Registry / v1</div>
+        <dl class="hero-stats">
+          <div><dt>{stats.packs}</dt><dd>Skill Packs</dd></div>
+          <div><dt>{stats.skills}</dt><dd>Legacy Atomic Skills</dd></div>
+          {stats.v2Packs > 0 && <div><dt>{stats.v2Entrypoints} / {stats.v2Capabilities}</dt><dd>v2 入口 / 能力</dd></div>}
+          <div><dt>{stats.domains}</dt><dd>Knowledge Domains</dd></div>
+          <div><dt>{stats.contributors}</dt><dd>Contributors</dd></div>
+        </dl>
+        <div class="registry-line"><span class="status-dot"></span> Registry schema valid</div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="shell">
+      <div class="section-header">
+        <div><p class="eyebrow">How it works</p><h2>三步开始使用</h2></div>
+        <a class="text-link" href={withBase("/learn")}>查看完整教程 →</a>
+      </div>
+      <ol class="steps-grid">
+        <li><span>01</span><h3>选择 Skill Pack</h3><p>按主题、领域或使用场景，找到适合当前任务的一组 Skill。</p></li>
+        <li><span>02</span><h3>交给 Agent 安装</h3><p>复制详情页的安装提示词，Agent 会自动判断目录并完成安装。</p></li>
+        <li><span>03</span><h3>描述真实任务</h3><p>自然地提出任务，Agent 会读取 SKILL.md 并按其中的方法执行。</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="shell">
+      <div class="section-header">
+        <div><p class="eyebrow">Featured</p><h2>精选 Skill Packs</h2><p>从投资、认知、写作到 AI 提示词，先从经过验证的代表性成果开始。</p></div>
+        <a class="text-link" href={withBase("/skills")}>查看全部 {stats.packs} 个 →</a>
+      </div>
+      <div class="skill-grid">
+        {featured.map((entry) => <SkillCard entry={entry} />)}
+      </div>
+    </div>
+  </section>
+
+  <section class="section contribution-section">
+    <div class="shell contribution-grid">
+      <div><p class="eyebrow">Open Registry</p><h2>好方法，值得被更多 Agent 调用</h2></div>
+      <div><p>不需要注册账号，也不需要等待后台系统。填写信息后生成标准 Registry 文件，通过 GitHub Pull Request 完成公开审核和收录。</p><a class="button" href={withBase("/submit")}>提交一个 Skill</a></div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .home-hero { padding: 92px 0 76px; background-image: linear-gradient(rgba(24,25,22,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(24,25,22,.035) 1px, transparent 1px); background-size: 32px 32px; border-bottom: 1px solid var(--line); }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .75fr); align-items: end; gap: 70px; }
+  h1 { margin: 0; font-size: clamp(52px, 7.4vw, 88px); line-height: 1.01; letter-spacing: -.06em; }
+  .hero-copy { max-width: 670px; margin: 26px 0 0; color: var(--muted); font-size: 18px; }
+  .hero-panel { padding: 24px; border: 1px solid var(--ink); border-radius: var(--radius); background: rgba(255,254,249,.94); box-shadow: 10px 10px 0 var(--ink); }
+  .hero-panel-label { padding-bottom: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 12px "SFMono-Regular", monospace; text-transform: uppercase; }
+  .hero-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; }
+  .hero-stats div { padding: 20px 8px 16px 0; border-bottom: 1px solid var(--line); }
+  .hero-stats div:nth-child(odd) { border-right: 1px solid var(--line); }
+  .hero-stats div:nth-child(even) { padding-left: 18px; }
+  .hero-stats dt { font-size: 31px; font-weight: 750; letter-spacing: -.04em; }
+  .hero-stats dd { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+  .registry-line { padding-top: 16px; color: var(--success); font-size: 12px; }
+  .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #27a05c; box-shadow: 0 0 0 4px #dff3e8; }
+  .steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--ink); }
+  .steps-grid li { min-height: 220px; padding: 26px 26px 24px 0; border-right: 1px solid var(--line); }
+  .steps-grid li + li { padding-left: 26px; }
+  .steps-grid li:last-child { border-right: 0; }
+  .steps-grid span { color: var(--accent); font: 12px "SFMono-Regular", monospace; }
+  .steps-grid h3 { margin: 42px 0 8px; font-size: 20px; }
+  .steps-grid p { margin: 0; color: var(--muted); font-size: 14px; }
+  .contribution-section { background: #eceee7; }
+  .contribution-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: end; }
+  .contribution-grid h2 { max-width: 540px; margin: 0; font-size: clamp(34px, 5vw, 54px); line-height: 1.1; letter-spacing: -.045em; }
+  .contribution-grid p { margin: 0 0 24px; color: var(--muted); }
+  @media (max-width: 800px) { .hero-grid, .contribution-grid { grid-template-columns: 1fr; gap: 46px; } .hero-panel { max-width: 460px; } }
+  @media (max-width: 600px) { .home-hero { padding: 56px 0 48px; } h1 { font-size: 48px; } .steps-grid { grid-template-columns: 1fr; } .steps-grid li, .steps-grid li + li { min-height: auto; padding: 24px 0; border-right: 0; border-bottom: 1px solid var(--line); } .steps-grid h3 { margin-top: 18px; } }
+</style>

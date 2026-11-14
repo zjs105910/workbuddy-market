@@ -1,0 +1,4 @@
+- roles: `show` takes `--runtime-mode`, this thread's `runtimeMode` from `orchestrator_capabilities`. With a catalog, a runnable provider whose `driverKind` is `muse` then counts as not runnable under a mode other than `approval-required` and `full-access`.
+- roles: `show` then resolves a configured seat on that provider outside `review backups` as it resolves `inherit`, with the note `<provider> is not runnable (the muse driver lacks runtime mode <mode>); seat inherits the parent`. It drops a `review backups` seat on that provider.
+- roles: `show` exits 2 when `--runtime-mode` is empty or holds whitespace.
+- setup: step 4 says `write` runs `validate`'s checks on the roles it is about to store and refuses a listed problem without `--force`. It said `write` refuses a seat that does not match the catalog.

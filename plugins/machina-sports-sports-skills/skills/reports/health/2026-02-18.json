@@ -1,0 +1,243 @@
+{
+  "date": "2026-02-18",
+  "run_at": "2026-02-18T14:20:05+00:00",
+  "timeout_s": 10,
+  "degraded_threshold_ms": 3000,
+  "sources": {
+    "espn": {
+      "status": "ok",
+      "response_time_ms": 125,
+      "error": null,
+      "sample_data": {
+        "leagues_checked": 12,
+        "ok": 12,
+        "degraded": 0,
+        "down": 0
+      },
+      "per_league": {
+        "premier-league": {
+          "status": "ok",
+          "response_time_ms": 121,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Arsenal at Wolverhampton Wanderers"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
+        },
+        "la-liga": {
+          "status": "ok",
+          "response_time_ms": 89,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Villarreal at Levante"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/esp.1/scoreboard"
+        },
+        "bundesliga": {
+          "status": "ok",
+          "response_time_ms": 93,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Hamburg SV at Mainz"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/ger.1/scoreboard"
+        },
+        "serie-a": {
+          "status": "ok",
+          "response_time_ms": 177,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Como at AC Milan"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/scoreboard"
+        },
+        "ligue-1": {
+          "status": "ok",
+          "response_time_ms": 84,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Marseille at Brest"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/fra.1/scoreboard"
+        },
+        "championship": {
+          "status": "ok",
+          "response_time_ms": 96,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Preston North End at Blackburn Rovers"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.2/scoreboard"
+        },
+        "eredivisie": {
+          "status": "ok",
+          "response_time_ms": 96,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Excelsior at Fortuna Sittard"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/ned.1/scoreboard"
+        },
+        "primeira-liga": {
+          "status": "ok",
+          "response_time_ms": 178,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Tondela at Estrela"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/por.1/scoreboard"
+        },
+        "serie-a-brazil": {
+          "status": "ok",
+          "response_time_ms": 132,
+          "sample_data": {
+            "event_count": 1,
+            "first_event": "Corinthians at Athletico Paranaense"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard"
+        },
+        "mls": {
+          "status": "ok",
+          "response_time_ms": 126,
+          "sample_data": {
+            "event_count": 13,
+            "first_event": "Charlotte FC at St. Louis CITY SC"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard"
+        },
+        "champions-league": {
+          "status": "ok",
+          "response_time_ms": 125,
+          "sample_data": {
+            "event_count": 4,
+            "first_event": "Newcastle United at FK Qarabag"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/scoreboard"
+        },
+        "world-cup": {
+          "status": "ok",
+          "response_time_ms": 190,
+          "sample_data": {
+            "event_count": 2,
+            "first_event": "South Africa at Mexico"
+          },
+          "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+        }
+      }
+    },
+    "fpl": {
+      "status": "ok",
+      "response_time_ms": 358,
+      "sample_data": {
+        "players": 817,
+        "teams": 20,
+        "first_player": "David Raya Mart\u00edn"
+      },
+      "url": "https://fantasy.premierleague.com/api/bootstrap-static/"
+    },
+    "understat": {
+      "status": "ok",
+      "response_time_ms": 922,
+      "error": null,
+      "sample_data": {
+        "leagues_checked": 5,
+        "ok": 5,
+        "degraded": 0,
+        "down": 0
+      },
+      "per_league": {
+        "EPL": {
+          "status": "ok",
+          "response_time_ms": 1137,
+          "sample_data": {
+            "bytes": 18653,
+            "has_datesData": false
+          },
+          "url": "https://understat.com/league/EPL/2026"
+        },
+        "La_Liga": {
+          "status": "ok",
+          "response_time_ms": 768,
+          "sample_data": {
+            "bytes": 18669,
+            "has_datesData": false
+          },
+          "url": "https://understat.com/league/La_Liga/2026"
+        },
+        "Bundesliga": {
+          "status": "ok",
+          "response_time_ms": 849,
+          "sample_data": {
+            "bytes": 18681,
+            "has_datesData": false
+          },
+          "url": "https://understat.com/league/Bundesliga/2026"
+        },
+        "Serie_A": {
+          "status": "ok",
+          "response_time_ms": 691,
+          "sample_data": {
+            "bytes": 18669,
+            "has_datesData": false
+          },
+          "url": "https://understat.com/league/Serie_A/2026"
+        },
+        "Ligue_1": {
+          "status": "ok",
+          "response_time_ms": 1166,
+          "sample_data": {
+            "bytes": 18669,
+            "has_datesData": false
+          },
+          "url": "https://understat.com/league/Ligue_1/2026"
+        }
+      }
+    },
+    "kalshi": {
+      "status": "ok",
+      "response_time_ms": 218,
+      "sample_data": {
+        "market_count": 5,
+        "first_ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026462D4CE3A1C-698A4293A34",
+        "first_title": "yes Bucknell,yes Alabama,yes Loyola Maryland,yes Auburn,yes Bradley,yes Georgetown,yes Arizona,yes Tulsa,yes Clemson,yes Youngstown St.,yes UConn,yes George Mason,yes Seton Hall,yes Furman,yes Florida Atlantic,yes Illinois,yes Florida Gulf Coast,yes Coastal Carolina,yes St. Bonaventure,yes Louisiana Tech,yes Missouri St.,yes Kansas,yes Holy Cross,yes Duquesne,yes Fordham,yes Navy,yes Lipscomb,yes Northwestern,yes Texas A&M,yes Sam Houston,yes Illinois St.,yes North Carolina Central,yes North Dakota St.,yes Tennessee,yes Omaha,yes Washington St.,yes Northern Kentucky,yes Queens University,yes Davidson,yes Penn St.,yes Southern Illinois,yes St. John's,yes Saint Mary's,yes Troy,yes Temple,yes UIC,yes Northern Iowa,yes West Virginia,yes Virginia,yes Eastern Kentucky,yes Vanderbilt,yes Wofford,yes Wichita St.,yes Western Kentucky"
+      },
+      "url": "https://api.elections.kalshi.com/trade-api/v2/markets?limit=5"
+    },
+    "polymarket_gamma": {
+      "status": "ok",
+      "response_time_ms": 543,
+      "sample_data": {
+        "market_count": 5,
+        "first_question": "Will Joe Biden get Coronavirus before the election?"
+      },
+      "url": "https://gamma-api.polymarket.com/markets?limit=5&active=true"
+    },
+    "polymarket_clob": {
+      "status": "ok",
+      "response_time_ms": 1005,
+      "sample_data": {
+        "market_count": 1000,
+        "first_condition_id": "0x662270576ae01d\u2026"
+      },
+      "url": "https://clob.polymarket.com/sampling-markets?count=5"
+    },
+    "fastf1": {
+      "status": "ok",
+      "response_time_ms": 395,
+      "sample_data": {
+        "events_in_schedule": 25,
+        "year": 2024
+      }
+    },
+    "bbc_rss": {
+      "status": "ok",
+      "response_time_ms": 418,
+      "sample_data": {
+        "items_found": 71,
+        "bytes": 55312,
+        "first_headline": "BBC Sport"
+      },
+      "url": "https://feeds.bbci.co.uk/sport/rss.xml"
+    }
+  }
+}

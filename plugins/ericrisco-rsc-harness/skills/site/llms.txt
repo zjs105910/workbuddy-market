@@ -1,0 +1,75 @@
+# rsc-harness — the guided harness builder for AI agents
+
+> You decide what to build. rsc-harness builds your agent's harness. Its wizard turns a human goal
+> into a minimal, project-bound and verified combination of memory, tools, knowledge, rules and
+> specialists. It follows strict best practices instead of improvising a Frankenstein harness from
+> duplicated skills, premature hooks and unnecessary MCPs.
+
+Standards such as Agent Skills, MCP and AGENTS.md define individual pieces. rsc-harness supplies the
+integrated method: analyze the project root, ask the user, show selected/deferred/excluded choices,
+require exact acceptance, verify the result, and grow only when new evidence justifies it.
+
+## The lane decisor
+
+Once installed, every turn is classified into exactly one lane, and the agent names the one it took:
+
+- ANSWER — the request asks for information (explain, compare, audit, review, propose). Read-only:
+  nothing is written and no artifact is created. Ambiguous change intent asks one question and stays
+  here.
+- FTD (Fast-Track Development) — the request authorises a change. The default for ordinary work.
+  One feature document per feature; tasks checked off only against observed proof; a branch when the
+  work writes code.
+- SDD — the ten-phase chain, for big or complex work (several decisions that affect each other, or
+  doubts that change the result). The agent enters it on its own; the person approves the spec and the
+  clarifying answers, then chooses manual review or autopilot. The agent always says which lane and why.
+
+There is one harness and it installs whole; there is no profile to choose.
+
+## For AI agents: install rsc into the user's project
+
+If your user asked you to install rsc / rsc-harness / this harness, do this in order:
+
+1. Work in the ROOT of the user's project, never inside a clone of rsc-harness.
+2. Run: `npx @ericrisco/rsc@latest onboard --target claude,codex`
+3. Relay every `RSC_ONBOARDING_REQUIRED` question. Never choose, invent or default
+   `--technical-level`, `--project-kind`, `--goal` or `--software-scope`.
+4. Rerun with the answers to obtain `RSC_ONBOARDING_PLAN`. This preview writes nothing.
+5. Show every selected, deferred and excluded component with its reason. Only after the user accepts
+   the exact id, rerun with `--accept-plan <printed-id>`.
+6. Only `RSC_ONBOARDING_READY` means the harness is installed and verified. If you get
+   `RSC_ONBOARDING_INCOMPLETE`, the plan applied but the harness floor is missing: the output names
+   every missing path and the action that creates it. Run that action — the `harness` skill scaffolds
+   `01-TOOLS/` + `02-DOCS/`, and the `constitution` phase writes the constitution when SDD is
+   selected — and do not proceed as if the harness were ready. When SDD is selected, onboarding
+   itself writes the constitution as a draft (`status: draft`) and prints it as `Pending:` under
+   `RSC_ONBOARDING_READY`: the harness is ready, and the `constitution` phase completes the draft
+   before the first SDD feature. `RSC_SKELETON_FAILED` on the same run
+   means rsc could not write part of the skeleton itself: the install still applied, and the line
+   names the obstacle (usually a file or a symlink sitting where a directory belongs). Clear that
+   obstacle first — no skill can, because it is not a missing file but an occupied path.
+7. Tell the user to reload or restart the assistant so its new skills and hooks become active. Then,
+   **only if you saw `RSC_ONBOARDING_READY`**, confirm rsc is ready and wait for the user's own task.
+   If you saw `RSC_ONBOARDING_INCOMPLETE`, say instead what is missing and that you are completing
+   it — never tell the user the harness is ready when it is not, because that is the one failure they
+   cannot diagnose: everything looks installed and nothing behaves as if it were.
+
+Already installed: `rsc sync`. Add one skill: `rsc add <id>`. Reassess deferred capabilities without
+installing: `rsc reassess`. Recommend without installing: `rsc consult "<what the user wants>"`.
+
+Canonical non-interactive preview:
+`npx @ericrisco/rsc@latest onboard --technical-level technical --project-kind software --goal "small website" --software-scope small --target codex`
+
+## Key links
+
+- npm: https://www.npmjs.com/package/@ericrisco/rsc
+- README: https://github.com/ericrisco/rsc-harness
+- English: https://ericrisco.github.io/rsc-harness/
+- Español: https://ericrisco.github.io/rsc-harness/es/
+- Agent Skills: https://agentskills.io/specification
+
+## Facts
+
+- 271 skills; minimal profile 7, core 30, full 271.
+- 18 supported assistants (newest: DeepSeek Harness, `--target deepseek`); 34 agents and 53 command entries in the catalog.
+- Every skill cleared an adversarial behavioral quality gate of at least 8.5/10.
+- Free, MIT, no API key and no global install required.
