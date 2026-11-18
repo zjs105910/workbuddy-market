@@ -232,8 +232,6 @@ def validate_config(cfg: dict) -> list:
         raise ConfigError("packaging 必须是对象。")
     if pack.get("verify", "auto") not in ("auto", "fast", "strict"):
         raise ConfigError('packaging.verify 只能是 auto / fast / strict。')
-    if "hashAlgorithm" in pack and pack["hashAlgorithm"] != "sha256":
-        raise ConfigError('packaging.hashAlgorithm 目前只支持 "sha256"。')
     if "hashChunkBytes" in pack:
         _check_number(pack["hashChunkBytes"], "packaging.hashChunkBytes",
                       lo=4096, integer=True)

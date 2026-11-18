@@ -12,8 +12,7 @@
   "packaging": {
     "_verify": "auto（默认）= 网页状态用廉价指纹、安装/卸载用完整 SHA-256，由工具自己判断，你不用管；fast = 连状态也走指纹（最快，状态显示可能有极小误差）；strict = 一律读内容比对（最准，最慢）。",
     "verify": "auto",
-    "_hash": "内容指纹算法与流式块大小。sha256 + 1MiB 块 = 内存占用恒定，不受单个文件大小影响。",
-    "hashAlgorithm": "sha256",
+    "_hash": "内容指纹的流式块大小。固定 sha256 + 1MiB 块 = 内存占用恒定，不受单个文件大小影响。",
     "hashChunkBytes": 1048576,
     "excludeNames": [
       "__pycache__",

@@ -4,6 +4,31 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.41.0 — 2026-11-18（任务弹窗可读性 + 精简清理 + 独立评审加固）
+
+### 修复
+
+- 任务弹窗 artifact 下载 URL 不再被 `word-break:break-all` 撕成锯齿：长 URL 压成
+  `https://host…/文件名`（hover 看全文、点击复制），步骤标记 `[1/4]` 高亮，
+  行尾标点只在无配对时剥离（wiki 式 `...Foo_(bar)` 的 `)` 不再被截）。
+  URL 全部经 HTML 转义后渲染，无 XSS。
+- 「后台继续」按钮改为运行中也可用（旧版只有任务完成才解禁，名不副实）。
+  评审发现并发任务会串台（后台任务 A 完成会覆盖前台任务 B 的进度 / 隐藏取消按钮），
+  加 `activeJid` 守卫：弹窗 DOM 只由当前显示任务写，后台任务照常出完成提示。
+
+### 变更
+
+- 精简清理（ponytail 审计后逐项复核零引用）：删 adapter 4 个旧名别名及 re-export、
+  死配置 `packaging.hashAlgorithm`、死常量 `API_VERSION` / `WORKBUDDY_ADAPTER_VERSION`、
+  两个前端孤儿导出 `favSet` / `ICON`。 selftest 身份断言同步改真名。
+
+### 文档
+
+- README 补独立「许可」章节、`## 简介 · 30 秒了解它`、两处 `/plugin` 命令块标 `text`
+  （文档工作台体检：代码块语言标注率 60% → 100%）。
+- 使用本项目自身的可变产物链路下载 obra/superpowers（15 个工程 skill）做自举验证，
+  并用其 `requesting-code-review` 对本次改动做独立评审。
+
 ## 2.40.0 — 2026-11-07（回收站 restore + 独立代码评审两轮加固）
 
 - **回收站能出了**（`trash.restore_from_trash`）：

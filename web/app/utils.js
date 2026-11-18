@@ -3,7 +3,7 @@
 
 export const $ = s => document.querySelector(s);
 
-export const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","设计":"◆","科研":"⚛","效率":"⚡","商业":"¥","安全":"🛡","未分类":"◇"};
+const ICON = {"写作":"✍","开发工具":"⚙","自动化":"⟳","官方":"★","合集":"▣","测试":"⌘","设计":"◆","科研":"⚛","效率":"⚡","商业":"¥","安全":"🛡","未分类":"◇"};
 export const iconOf = c => ICON[c] || "◇";
 export const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export const attr = s => String(s).replace(/"/g,"&quot;");

@@ -259,8 +259,14 @@
     margin:12px 20px 16px;    padding:12px 14px;background:var(--code-bg);border:1px solid var(--line);
     border-radius:var(--r-md);max-height:240px;overflow:auto;overscroll-behavior:contain;
     font-size:12px;line-height:1.65;
-    font-family:var(--mono);color:var(--code-ink);white-space:pre-wrap;word-break:break-all;
+    /* v2.41：URL 在 jobs.js 里已压成「域名 … 文件名」，这里只兜底超长普通词。
+       break-all 会把整条 URL 拆成锯齿（downl/oad），改为只在词无法放下时才断。 */
+    font-family:var(--mono);color:var(--code-ink);white-space:pre-wrap;overflow-wrap:anywhere;
   }
+  /* 任务日志里的紧凑 URL（v2.41）：hover 出全文、点击复制，虚线下划线示意可交互 */
+  pre.out .jstep{color:var(--accent-text);font-weight:600}
+  pre.out .jurl{color:var(--accent-text);border-bottom:1px dashed var(--accent-line);cursor:copy}
+  pre.out .jurl:hover{color:var(--accent);border-bottom-style:solid}
   .modal-foot{padding:0 20px 18px;display:flex;gap:9px;justify-content:flex-end;flex:0 0 auto}
 
   .grp{margin:0 0 14px}

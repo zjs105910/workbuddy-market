@@ -127,10 +127,8 @@ from workbuddy_market.importer import (      # noqa: E402,F401  （v2.39 新增�
     commit_import,
 )
 from workbuddy_market.adapters.workbuddy import (   # noqa: E402,F401  （v2.17 新增）
-    WORKBUDDY_ADAPTER_VERSION, read_known, _read_known, read_known_or_die,
-    _read_known_or_die, backup_known, _prune_backups, is_registered,
-    entry_for, _entry_for, commit_known, _commit_known,
-    register, unregister, capabilities, known_health,
+    read_known, read_known_or_die, backup_known, _prune_backups, is_registered,
+    entry_for, commit_known, register, unregister, capabilities, known_health,
 )
 from workbuddy_market.uninstaller import (   # noqa: E402,F401  （v2.14 R5 新增）
     classify_skill, inspect_skill, plugin_uninstall_plan, uninstall_local_plugin,

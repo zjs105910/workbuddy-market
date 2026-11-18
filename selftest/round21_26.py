@@ -45,7 +45,7 @@ def round21():
         "schemaVersion": 2, "marketId": "wb-local-market",
         "name": "本机插件市场", "owner": {"name": "WorkBuddy Local Market"},
         "localPlugins": [], "remoteSources": [],
-        "packaging": {"verify": "auto", "hashAlgorithm": "sha256"},
+        "packaging": {"verify": "auto"},
         "trash": {"maxAgeDays": 30, "maxSizeBytes": 2147483648},
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

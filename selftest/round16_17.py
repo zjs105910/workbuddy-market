@@ -412,10 +412,10 @@ def round17():
        core.register is wb.register
        and core.unregister is wb.unregister
        and core.backup_known is wb.backup_known
-       and core._read_known is wb.read_known
-       and core._read_known_or_die is wb.read_known_or_die
-       and core._entry_for is wb.entry_for
-       and core._commit_known is wb.commit_known
+       and core.read_known is wb.read_known
+       and core.read_known_or_die is wb.read_known_or_die
+       and core.entry_for is wb.entry_for
+       and core.commit_known is wb.commit_known
        and core.is_registered is wb.is_registered)
     ck("★ patch 落点盯防：core 上 setattr 不会拦到 adapter 内部调用",
        wb.register.__module__ == "workbuddy_market.adapters.workbuddy")

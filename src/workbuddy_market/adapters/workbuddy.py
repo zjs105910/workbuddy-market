@@ -12,17 +12,17 @@ market_core 的注册段里。宿主程序未来最容易变化的就是这些�
   · known_marketplaces.json 的读取（含 strict 口径：坏了宁可报错也不覆盖）；
   · 备份（纳秒戳）与轮转；
   · 条目构造（directory 型市场）；
-  · 乐观合并写入（_commit_known，与 WorkBuddy 自身写入竞争的防线）；
+  · 乐观合并写入（commit_known，与 WorkBuddy 自身写入竞争的防线）；
   · register / unregister 编排；
   · capabilities()：宿主能力矩阵（未来版本探测的落点）；
   · known_health()：known 文件的健康检查（deep_check 消费）。
 
 注入点纪律（R4/R5 延续）：register() 依赖 core 的 _sync_packaging（注入点），
 在调用点晚绑定 ``import market_core``。本模块内部的互调（register →
-_commit_known → _read_known_or_die）走**本模块命名空间** —— selftest 的
+commit_known → read_known_or_die）走**本模块命名空间** —— selftest 的
 patch 落点随迁 ``workbuddy_market.adapters.workbuddy``（与 R4 把
 ownership/trash 的 patch 落点迁到包内同一先例）。core 侧名字全部
-re-export，``core.register`` / ``core._read_known_or_die`` 仍是同一对象，
+re-export，``core.register`` / ``core.read_known_or_die`` 仍是同一对象，
 但 **patch 语义随迁**：要拦截注册链路里的读，请 patch 本模块。
 
 未来 WorkBuddy 6.x 若改了市场格式，改这一个文件就够了 —— 这就是
@@ -42,8 +42,6 @@ from ..fsutil import atomic_write_text, read_json
 from ..locking import locked
 from ..logging import log
 from ..paths import BACKUP_DIR, BACKUP_KEEP, KNOWN_PATH, MARKET_ROOT, WB
-
-WORKBUDDY_ADAPTER_VERSION = 1
 
 # 宿主能力矩阵：未来探测宿主版本后按版本收紧/放开。
 # 现在如实标注当前已实现/已验证的能力（v2.17 口径）。
@@ -323,10 +321,3 @@ def known_health() -> str | None:
         except ConfigError as exc:
             return f"known_marketplaces.json 不可用：{exc}"
     return None
-
-
-# v2.17 之前的旧名字（market_core / 第三方老脚本可能引用）：同一对象。
-_read_known = read_known
-_read_known_or_die = read_known_or_die
-_entry_for = entry_for
-_commit_known = commit_known

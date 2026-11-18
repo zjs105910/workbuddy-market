@@ -4,5 +4,5 @@
 
 import { REG } from "./state.js";
 
-export function favSet(){ return new Set((REG.favorites||[]).map(r => String(r).toLowerCase())); }
+function favSet(){ return new Set((REG.favorites||[]).map(r => String(r).toLowerCase())); }
 export function isFav(repo){ return favSet().has(String(repo).toLowerCase()); }

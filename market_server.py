@@ -1090,7 +1090,6 @@ def _registry_fresh(force: bool) -> dict:
 # ---------------------------------------------------------------- HTTP
 
 API_V1_PREFIX = "/api/v1/"
-API_VERSION = 1                    # 与 /api/v1 前缀对应；接口破坏性变化时 +1
 
 
 def _normalize_api_path(path: str) -> str:

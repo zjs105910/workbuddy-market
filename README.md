@@ -26,7 +26,7 @@ $ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market
 
 > 此命令会下载并运行本项目公开的安装脚本。需要 Windows 10/11、可访问 GitHub 和 Python 包源的网络环境；网络限制、设备策略或 Python 安装失败等情况仍可能导致安装中断。
 
-## 30 秒了解它
+## 简介 · 30 秒了解它
 
 - **管理自己的 Skills**：将本机技能打包、同步，并注册到 WorkBuddy 插件面板。
 - **发现社区技能**：浏览精选目录，也可以搜索 GitHub 上的公开仓库。
@@ -66,7 +66,7 @@ $ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market
 
 在对话框（或 CodeBuddy Code CLI）执行：
 
-```
+```text
 /plugin marketplace add zjs105910/workbuddy-market
 ```
 
@@ -74,7 +74,7 @@ $ErrorActionPreference='Stop'; $u='https://github.com/zjs105910/workbuddy-market
 
 想要**每日重建的完整社区目录**（25+ 精选技能，按人工审核的 sourceCommit 固定来源）：
 
-```
+```text
 /plugin marketplace add https://github.com/zjs105910/workbuddy-market.git#marketplace
 ```
 
@@ -282,4 +282,8 @@ cd workbuddy-market
 | 查看版本变化 | [CHANGELOG](CHANGELOG.md) |
 | 提交 Bug / 功能建议 | [GitHub Issues](https://github.com/zjs105910/workbuddy-market/issues) |
 
-欢迎 Star、提 Issue、提交可复现的问题与 PR。项目采用 MIT License。
+欢迎 Star、提 Issue、提交可复现的问题与 PR。
+
+## 许可
+
+本项目采用 [MIT License](LICENSE)。`bundled/` 下的插件分发副本各自遵循其上游许可，见对应目录的说明。
