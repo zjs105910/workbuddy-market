@@ -1,0 +1,51 @@
+export function sampleSkillText(options: {
+  readonly name: string;
+  readonly alternative: string;
+}): string {
+  return [
+    "---",
+    `name: ${options.name}`,
+    'description: \'Use before you call a change done. Also use it when the user says "make sure it works" or "check this before merging". Runs the command that the user runs, and reads every line of the real output. Reports the exit code and the line that shows the result, so that a wrong count shows before handoff. Not for writing new tests (use `' +
+      options.alternative +
+      "`).'",
+    "metadata:",
+    "  shadowclone-category: review",
+    "  shadowclone-section: workflow",
+    "  shadowclone-applies-when: before you say the work is done",
+    "---",
+    "# Check the Real Output",
+    "",
+    "## Use when",
+    "",
+    "The work is ready for a final check.",
+    "",
+    "## Gates",
+    "",
+    "1. Run the command the user runs.",
+    "2. Read every line of its output.",
+    "3. Report the exit code.",
+    "",
+    "## Process",
+    "",
+    "1. Run the command in a throwaway home.",
+    "2. Compare each count with what happened.",
+    "",
+    "## Example",
+    "",
+    "**Situation:** A summary line said two agents were installed.",
+    "**Easy route:** Trust the passing unit test.",
+    "**Hidden cost:** The command still printed the wrong count.",
+    "**Best route:** Run the command and read the summary line.",
+    "**Evidence:** The rerun printed one agent installed and exit code 0.",
+    "",
+    "## Guardrails",
+    "",
+    "Keep the check read-only.",
+    "",
+    "## Completion",
+    "",
+    "- The command and its exit code.",
+    "- The output line that shows the result.",
+    "",
+  ].join("\n");
+}

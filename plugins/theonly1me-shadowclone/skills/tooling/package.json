@@ -1,0 +1,16 @@
+{
+  "name": "@shadowclone/tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/skills": "workspace:*",
+    "prettier": "3.9.9",
+    "typescript": "~5.9",
+    "zod": "^4.5.4"
+  }
+}

@@ -1,0 +1,425 @@
+import { createHash } from 'node:crypto';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { TARGET_IDS } from '../../targets/index.js';
+import { resolveAgentNames } from '../../targets/agents.js';
+import { loadManifest, skillsForProfile } from './manifest.js';
+import { readManifest } from './manifest-file.js';
+import { replaceRetired } from './retired-skills.js';
+import { managedPathsForInstall } from '../install-apply.js';
+
+export const ONBOARDING_SCHEMA_VERSION = 1;
+export const ONBOARDING_VALUES = Object.freeze({
+  technicalLevel: ['non-technical', 'mixed', 'technical'],
+  projectKind: ['software', 'operations', 'research', 'content', 'mixed'],
+  softwareScope: ['small', 'growing', 'complex'],
+  // How code changes land: straight on the default branch, or on branches closed with a pull request.
+  workflow: ['main', 'branches'],
+});
+
+const ignored = new Set([
+  '.git', '.rsc', 'node_modules', '.venv', '.next', 'dist', 'build', 'coverage', '__pycache__', '.dart_tool',
+  '.claude', '.codex', '.cursor', '.opencode', '.amp', '.jules', '.zed', '.gemini', '.antigravity',
+  '.windsurf', '.clinerules', '.roo', '.continue', '.junie', '.kiro', '.aider',
+]);
+const manifests = new Set(['package.json', 'pyproject.toml', 'go.mod', 'Cargo.toml', 'pubspec.yaml', 'requirements.txt']);
+const sourceExt = new Set(['.js', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.dart', '.java', '.kt', '.swift', '.php', '.rb']);
+
+const clean = (value) => String(value ?? '').trim();
+const oneOf = (field, value, values) => {
+  if (!values.includes(value)) throw new Error(`invalid ${field}: expected ${values.join('|')}`);
+  return value;
+};
+
+/** The workflow to recommend at install: branches + PR only for complex code. */
+export const recommendedWorkflow = (softwareScope) => (softwareScope === 'complex' ? 'branches' : 'main');
+
+export function normalizeOnboarding(raw = {}) {
+  const schemaVersion = Number(raw.schemaVersion ?? ONBOARDING_SCHEMA_VERSION);
+  if (schemaVersion !== ONBOARDING_SCHEMA_VERSION) throw new Error(`invalid schemaVersion: expected ${ONBOARDING_SCHEMA_VERSION}`);
+  const technicalLevel = oneOf('technical-level', clean(raw.technicalLevel).toLowerCase(), ONBOARDING_VALUES.technicalLevel);
+  // `accompaniment` is retired: `technical_level` alone sets the register (technical, or with
+  // analogies). Old scripts still send it, so it is ignored here — not validated, not recorded, and
+  // therefore not part of the plan id either.
+  const projectKind = oneOf('project-kind', clean(raw.projectKind).toLowerCase(), ONBOARDING_VALUES.projectKind);
+  const goal = clean(raw.goal).replace(/\s+/g, ' ');
+  if (!goal) throw new Error('invalid goal: a concrete goal is required');
+  const targets = [...new Set((Array.isArray(raw.targets) ? raw.targets : clean(raw.targets).split(','))
+    .map((target) => clean(target).toLowerCase()).filter(Boolean))].sort();
+  if (!targets.length || targets.some((target) => !TARGET_IDS.includes(target))) {
+    throw new Error(`invalid target: expected one or more of ${TARGET_IDS.join(',')}`);
+  }
+  const needsScope = projectKind === 'software' || projectKind === 'mixed';
+  const softwareScope = clean(raw.softwareScope).toLowerCase();
+  if (needsScope) oneOf('software-scope', softwareScope, ONBOARDING_VALUES.softwareScope);
+  // Asked at install (2026-10-06, Eric): branches and PRs are for long-lived, complex code; research,
+  // content and simple scripts work on the default branch. Absent → the recommendation for the scope.
+  const workflow = needsScope
+    ? (clean(raw.workflow) ? oneOf('workflow', clean(raw.workflow).toLowerCase(), ONBOARDING_VALUES.workflow) : recommendedWorkflow(softwareScope))
+    : 'main';
+  return {
+    schemaVersion,
+    technicalLevel,
+    projectKind,
+    goal,
+    ...(needsScope ? { softwareScope } : {}),
+    workflow,
+    targets,
+  };
+}
+
+function extension(file) {
+  const dot = file.lastIndexOf('.');
+  return dot < 0 ? '' : file.slice(dot);
+}
+
+export function scanProject(root = process.cwd()) {
+  const absolute = realpathSync(resolve(root));
+  const signals = [];
+  const stacks = new Set();
+  const complexitySignals = new Set();
+  let markdownCount = 0;
+  let sourceFileCount = 0;
+  const visit = (dir) => {
+    // A directory we are not allowed to open is a fact about that directory, not a reason to abandon
+    // the install. Reported from a real Windows box: the global harness died walking `Temp\WinSAT`,
+    // which Windows protects, on 1.3.2 and again on 1.3.6 — so it had never worked there at all.
+    // The safe form already existed in `detect-repo.js` and was simply not reused here.
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (ignored.has(entry.name) || entry.isSymbolicLink()) continue;
+      const path = join(dir, entry.name);
+      const rel = relative(absolute, path).split(sep).join('/');
+      if (rel.startsWith('../') || rel === '..') throw new Error('project scan escaped the selected root');
+      if (rel === '02-DOCS/wiki/harness' || rel.startsWith('02-DOCS/wiki/harness/')) continue;
+      // Mismo motivo que la línea de arriba, y descubierto igual de tarde: el instalador escribe
+      // `01-TOOLS/_TEMPLATE/` y sus dos `.md` entraban como evidencia de proyecto, moviendo la
+      // identidad del plan. El segundo `onboard --accept-plan <id>` moría con RSC_PLAN_CHANGED, y
+      // con él el reintento que la documentación pide tras reparar el suelo. Los proveedores reales
+      // que el usuario añada bajo `01-TOOLS/` sí siguen contando: son suyos, no nuestros.
+      if (rel === '01-TOOLS/_TEMPLATE' || rel.startsWith('01-TOOLS/_TEMPLATE/')) continue;
+      // Y los artefactos de la propia cadena SDD, por el mismo invariante y por una razón que costó
+      // un release descubrir: la constitución es un `.md`, así que contaba como evidencia de
+      // proyecto. Eso movía la identidad del plan justo después de que el agente la escribiera —
+      // obedeciendo a `site/llms.txt`, que le manda reparar el suelo y reintentar hasta obtener
+      // READY— y hacía ese reintento imposible. Arreglar sólo `01-TOOLS/_TEMPLATE/` tapó la mitad
+      // del agujero: la que produce el instalador, no la que produce la reparación.
+      // `inbox/` y `raw/` NO se excluyen: eso es material del usuario y sí es evidencia.
+      if (rel === '02-DOCS/wiki/sdd' || rel.startsWith('02-DOCS/wiki/sdd/')) continue;
+      if (entry.isDirectory()) { visit(path); continue; }
+      if (!entry.isFile()) continue;
+      let isSignal = manifests.has(entry.name) || entry.name.endsWith('.md');
+      // Codex stores the always-on layer in AGENTS.md. Ignore a file that contains
+      // only our managed block, while retaining a user's surrounding instructions
+      // as real project evidence across repair/re-onboarding.
+      // El `CLAUDE.md` raíz es el Knowledge map, y lo escriben las propias fases de rsc: la
+      // `constitution` añade su fila «create CLAUDE.md if absent», y el instalador puede dejar ahí
+      // la sombra de AGENTS.md. Contarlo como evidencia movía la identidad del plan justo después de
+      // completar el suelo, y el `--accept-plan` del mismo id moría con RSC_PLAN_CHANGED sin que
+      // nada se hubiera elegido distinto (reproducido con 3.0.8). La cuenta de markdown no decide
+      // nada del plan —sólo su identidad—, así que no se pierde ninguna decisión.
+      if (rel === 'CLAUDE.md') isSignal = false;
+      if (entry.name === 'AGENTS.md') {
+        const human = readFileSync(path, 'utf8')
+          .replace(/\n*<!-- rsc-suggest:start -->[\s\S]*?<!-- rsc-suggest:end -->\n*/g, '')
+          .trim();
+        isSignal = Boolean(human);
+      }
+      if (isSignal && manifests.has(entry.name)) signals.push(`manifest:${entry.name}`);
+      else if (isSignal) markdownCount++;
+      if (sourceExt.has(extension(entry.name))) sourceFileCount++;
+      const lowerRel = rel.toLowerCase();
+      if (/(^|[/_.-])(auth|login|oauth|session)([/_.-]|$)/.test(lowerRel)) complexitySignals.add('authentication');
+      if (/(^|[/_.-])(payment|billing|checkout)([/_.-]|$)/.test(lowerRel)) complexitySignals.add('payments');
+      if (/(^|[/_.-])(database|persistence|migration|schema)([/_.-]|$)/.test(lowerRel)) complexitySignals.add('persistence');
+      if (/(^|[/_.-])(integration|webhook|connector)([/_.-]|$)/.test(lowerRel)) complexitySignals.add('external-integrations');
+      if (entry.name === 'package.json') {
+        try {
+          const pkg = JSON.parse(readFileSync(path, 'utf8'));
+          const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+          for (const [name, stack] of [['next', 'nextjs'], ['react', 'react'], ['vue', 'vue'], ['svelte', 'svelte']]) if (deps[name]) stacks.add(stack);
+          stacks.add('node');
+          const names = Object.keys(deps).join(' ').toLowerCase();
+          if (/(passport|auth0|clerk|next-auth|better-auth)/.test(names)) complexitySignals.add('authentication');
+          if (/(stripe|paypal|adyen|braintree)/.test(names)) complexitySignals.add('payments');
+          if (/(prisma|typeorm|sequelize|mongoose|postgres|mysql|sqlite|supabase|firebase)/.test(names)) complexitySignals.add('persistence');
+          if (/(webhook|octokit|twilio|sendgrid|slack)/.test(names)) complexitySignals.add('external-integrations');
+        } catch { stacks.add('node'); }
+      }
+      if (entry.name === 'pyproject.toml' || entry.name === 'requirements.txt') stacks.add('python');
+      if (entry.name === 'go.mod') stacks.add('go');
+      if (entry.name === 'Cargo.toml') stacks.add('rust');
+      if (entry.name === 'pubspec.yaml') stacks.add('flutter');
+    }
+  };
+  visit(absolute);
+  if (markdownCount) signals.push(`markdown:${markdownCount}`);
+  let parentHarness = null;
+  let cursor = dirname(absolute);
+  while (cursor !== dirname(cursor)) {
+    if (existsSync(join(cursor, '.rsc.json'))) {
+      parentHarness = relative(absolute, cursor).split(sep).join('/') || '..';
+      break;
+    }
+    cursor = dirname(cursor);
+  }
+  const evidence = {
+    schemaVersion: 1,
+    signals: [...new Set(signals)].sort(),
+    stacks: [...stacks].sort(),
+    complexitySignals: [...complexitySignals].sort(),
+    sourceFileCount,
+    parentHarness,
+  };
+  Object.defineProperty(evidence, 'root', { value: absolute, enumerable: false });
+  return evidence;
+}
+
+function selected(id, kind, reason, provenance = 'declared-intent') {
+  return { kind, id, state: 'selected', reason, provenance, reevaluateWhen: [] };
+}
+function deferred(id, kind, reason, reevaluateWhen, triggerRules = [], provenance = 'proportionality-policy') {
+  return { kind, id, state: 'deferred', reason, provenance, reevaluateWhen, triggerRules };
+}
+function excluded(id, kind, reason, provenance = 'separate-consent-boundary') {
+  return { kind, id, state: 'excluded', reason, provenance, reevaluateWhen: [], triggerRules: [] };
+}
+
+export function buildOnboardingPlan(record, evidence) {
+  const normalized = normalizeOnboarding(record);
+  const isSoftware = normalized.projectKind === 'software' || normalized.projectKind === 'mixed';
+  const goalSignals = [];
+  const goal = normalized.goal.toLowerCase();
+  if (/auth|login|oauth|sesión|session/.test(goal)) goalSignals.push('authentication');
+  if (/payment|billing|checkout|pago|cobro/.test(goal)) goalSignals.push('payments');
+  if (/database|persistence|persistencia|base de datos/.test(goal)) goalSignals.push('persistence');
+  if (/integration|integración|webhook|third-party|tercero/.test(goal)) goalSignals.push('external-integrations');
+  const complexitySignals = [...new Set([...(evidence.complexitySignals || []), ...goalSignals])].sort();
+  // One harness. WHICH SKILLS you get no longer depends on a prediction nobody can make at minute
+  // zero — the kind of project, and how big the work will turn out to be. The old default installed
+  // eight skills and none of the ten phases the always-on layer routes work to, so the first real
+  // request of every new install stopped to install what the harness had just demanded.
+  //
+  // What still depends on this being a code project is the machinery that EXECUTES: subagents, code
+  // hooks and the gitmoji guard. A company-ops workspace has no git to hook and no diff to review,
+  // and writing those anyway is acting outside the plan the user accepted (P4) — the onboarding
+  // route-inventory gate refuses it, which is how this boundary was found rather than guessed.
+  const profile = 'core';
+  const codeProject = isSoftware;
+  const needsSdd = codeProject;
+  // Installed is not the same as practised, and conflating them is how "everyone gets the chain"
+  // turns into "everyone is told they are missing a constitution". The skills ship with every
+  // harness so the chain is always reachable; the FLOOR — the artifacts a project is expected to
+  // actually have — keeps asking the question it always asked: is this code, and is the work big
+  // enough that the chain will really be run here?
+  const practisesSdd = isSoftware && (normalized.softwareScope !== 'small' || complexitySignals.length > 0);
+  const catalog = loadManifest();
+  const catalogIds = new Set(catalog.skills.map((skill) => skill.id));
+  const detectedSkills = (evidence.stacks || []).filter((stack) => catalogIds.has(stack));
+  // Skills the user asked for BY NAME are kept across an update; skills a profile handed out are not.
+  //
+  // Without this, an update recomputed the set from the profile and the detected stacks alone, and
+  // the install step then deleted from disk whatever was not in that fresh set. Reported from the
+  // field: six skills added with `rsc add` — seo-geo, astro, landing-copy, brand-identity, press-kit,
+  // article-writing — deleted by the update. And "volvió a borrar": every single time, because
+  // nothing ever taught the recomputation to look at the manifest.
+  //
+  // But preserving everything declared is too blunt, and a test older than this fix says so: choosing
+  // a narrower scope on purpose has to be able to REMOVE what the wider one installed. Both cases are
+  // "onboard ran again with a different record", so the difference cannot come from how it was
+  // invoked — it has to come from where the skill came from.
+  //
+  // And there it is, already in the catalog: a profile skill declares its profiles, and a skill you
+  // can only get by naming it declares none. So — what a profile gave you, a profile may take away;
+  // what you asked for by name, only you may. Filtered against the catalog on the way in, because
+  // preserving a declaration is not the same as trusting it.
+  //
+  // `readManifest` returns null on a first install, which is the most common path of all; reaching
+  // through that null would have broken every fresh install in order to protect updates.
+  const inAnyProfile = new Set(catalog.skills.filter((s) => (s.profiles || []).length).map((s) => s.id));
+  const declared = replaceRetired(readManifest(evidence.root ?? process.cwd())?.skills ?? [])
+    .filter((id) => catalogIds.has(id) && !inAnyProfile.has(id));
+  const skills = [...new Set([...skillsForProfile(catalog, profile), ...detectedSkills, ...declared])].sort();
+  const baseAgents = practisesSdd;
+  const hooks = practisesSdd;
+  const agents = baseAgents ? resolveAgentNames(skills, []).sort() : [];
+  const gitmojiGuard = hooks && normalized.targets.includes('claude');
+  // The danger guard is NOT code machinery, and tying it to `hooks` was the mistake behind #273. The
+  // three guards above need a code project with git — a branch to protect, a commit to lint. This one
+  // stops recursive deletes, history-rewriting pushes and friends, which are exactly as irreversible
+  // in an invoicing workspace, and `init` promises it by technical level: non-technical and mixed get
+  // it, whatever the project is. The guard also decides at runtime from the profile, so the plan only
+  // chooses whether it is present, never whether it bites.
+  //
+  // And since 3.0.8 it is present for EVERYONE. A technical user used to get nothing, so a small
+  // project with `main` open had no guard at all (E2E 2026-10-07). The runtime still decides the
+  // bite: deny for non-technical, `ask` — only on lost work or rewritten history — for technical.
+  const dangerGuard = true;
+  // The FTD/SDD lane decision belongs to every software project, small ones included: without it
+  // the agent never sees the lanes (E2E 2026-10-07: five sessions, zero feature documents).
+  const laneGate = isSoftware;
+  // `sdd` is installed everywhere now, but its DECISION is about practice, not presence — so where
+  // the chain is not practised the explicit `deferred` entry below must be the only one, or the
+  // generic "installed → selected" mapping would shadow it and `reassess` would see nothing to watch.
+  const decisions = skills.filter((id) => practisesSdd || id !== 'sdd').map((id) => detectedSkills.includes(id)
+    ? selected(id, 'skill', `Detected ${id} evidence inside the selected project root.`, 'workspace-evidence')
+    : selected(id, 'skill', needsSdd
+      ? (id === 'sdd' && complexitySignals.length
+        ? `Included because the accepted work has ${complexitySignals.join(', ')} complexity.`
+        : `Included in the development workflow for ${normalized.softwareScope} software.`)
+      : `Included in the lightweight foundation for this ${normalized.projectKind} project.`));
+  const sddTriggers = ['multiple related features', 'authentication or persistence', 'external integrations', 'cross-cutting changes'];
+  const softwareTriggers = [
+    { type: 'source-growth', atLeast: 5 },
+    { type: 'complexity-added', atLeast: 1 },
+    { type: 'manifest-with-implementation' },
+  ];
+  // Deferred means "not practised here yet", NOT "not installed". The skills ship with every harness
+  // so the chain is always one request away; this decision is what `reassess` watches, and what the
+  // floor reads. Collapsing the two would have deleted reassess's reason to exist as a side effect
+  // of an installer change, which is not a decision an installer change gets to make.
+  // The reason says both halves, because the plan lists `.claude/skills/sdd` under managed paths
+  // and a bare "deferred" next to it read as a contradiction (E2E 2026-10-07). Only the wording
+  // changes: the decision stays the one deferred `workflow/sdd` entry that reassess watches.
+  const whyDeferred = isSoftware
+    ? 'the software scope is small, so specification overhead is not justified yet.'
+    : 'SDD applies to substantial software work, which is not the declared project purpose.';
+  const sddReason = skills.includes('sdd')
+    ? `The sdd skill is installed, so the chain is one request away; the practice is deferred: ${whyDeferred}`
+    : whyDeferred.charAt(0).toUpperCase() + whyDeferred.slice(1);
+  if (!practisesSdd) decisions.push(deferred('sdd', 'workflow', sddReason, sddTriggers, softwareTriggers));
+  if (baseAgents) {
+    for (const id of agents) decisions.push(selected(id, 'agent', 'The accepted substantial software workflow requires this implementation or review role.'));
+  } else {
+    decisions.push(deferred('base-agents', 'agent', 'No substantial software implementation is planned.', ['substantial software implementation is introduced'], softwareTriggers));
+  }
+  decisions.push(hooks
+    ? selected('code-hooks', 'hook', 'The accepted software workflow needs its deterministic code gates.')
+    : deferred('code-hooks', 'hook', 'Code-only gates would add unrelated behavior to this project.', ['a substantial software workflow is accepted'], softwareTriggers));
+  decisions.push(gitmojiGuard
+    ? selected('gitmoji-guard', 'guard', 'Claude Code supports the commit guard and the accepted code policy includes it.')
+    : deferred('gitmoji-guard', 'guard', 'No selected target and project policy justify this Claude-only commit guard.', ['Claude Code is selected and a governed software workflow adopts the convention'], [{ type: 'software-trigger-and-claude' }]));
+  decisions.push(selected('memory', 'capability', 'Local bounded project memory supports continuity without an external account.'));
+  decisions.push(selected('harness-documents', 'route', 'The accepted profile and plan are persisted under 02-DOCS/wiki/harness/.'));
+  decisions.push(excluded('context7', 'integration', 'External MCP connections require a separate, provider-specific consent flow and are outside this local harness plan.'));
+  decisions.sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+  const policy = {
+    skills,
+    targets: normalized.targets,
+    baseAgents,
+    agents,
+    alwaysOn: true,
+    codeHooks: practisesSdd,
+    gitmojiGuard,
+    dangerGuard,
+    laneGate,
+    memory: true,
+    context7: false,
+  };
+  const root = evidence.root;
+  const governedPaths = root ? [...new Set([
+    '.rsc.json', '.rsc/backups/',
+    ...(existsSync(join(root, '.git')) ? ['.gitignore'] : []),
+    '02-DOCS/wiki/harness/user-profile.md',
+    '02-DOCS/wiki/harness/decisions.md',
+    '02-DOCS/wiki/harness/installation-plan.md',
+    '.rsc/.no-context7',
+    // The install-time workflow answer (applyWorkflowDecision): the one marker it writes.
+    ...(normalized.workflow === 'branches' ? ['.rsc/.no-trunk-open'] : normalized.workflow === 'main' ? ['.rsc/.no-trunk-guard'] : []),
+    ...normalized.targets.flatMap((target) => managedPathsForInstall({ skillIds: skills, target, cwd: root, policy })
+      .map((path) => relative(root, path).split(sep).join('/'))),
+  ])].sort() : ['.rsc.json', '.rsc/', '02-DOCS/wiki/harness/'];
+  // El suelo viaja dentro del plan a propósito: así un recibo aceptado por una versión anterior no
+  // lo trae y queda exento sin que exista ninguna lista de exentos (P3, el contenido es el ledger).
+  // La constitución entra SÓLO si el plan eligió SDD, porque los criterios 5 y 17 de la spec de
+  // onboarding la posponen a propósito en workspaces no-software y en software pequeño.
+  const floorPaths = [
+    '01-TOOLS/_TEMPLATE/',
+    '02-DOCS/wiki/harness/',
+    ...(practisesSdd ? ['02-DOCS/wiki/sdd/constitution.md'] : []),
+  ].sort();
+  return {
+    schemaVersion: 1,
+    record: normalized,
+    evidence: {
+      schemaVersion: evidence.schemaVersion,
+      signals: [...evidence.signals], stacks: [...evidence.stacks],
+      complexitySignals: [...(evidence.complexitySignals || [])],
+      sourceFileCount: evidence.sourceFileCount, parentHarness: evidence.parentHarness,
+    },
+    decisions,
+    policy,
+    governedPaths,
+    floorPaths,
+  };
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+  }
+  return value;
+}
+
+export const canonicalJson = (value) => JSON.stringify(canonical(value));
+export const identifyPlan = (plan) => createHash('sha256').update(canonicalJson(plan)).digest('hex');
+export const shellQuote = (value) => `'${String(value).replaceAll("'", `'"'"'`)}'`;
+export const encodeGoal = (value) => Buffer.from(String(value), 'utf8').toString('base64url');
+export const decodeGoal = (value) => {
+  try {
+    const decoded = Buffer.from(String(value), 'base64url').toString('utf8');
+    return encodeGoal(decoded) === String(value).replace(/=+$/, '') ? decoded : undefined;
+  } catch { return undefined; }
+};
+
+export function recommendDeferredComponents(acceptedPlan, currentEvidence) {
+  const baseline = acceptedPlan?.evidence || {};
+  const grewBy = (currentEvidence?.sourceFileCount || 0) - (baseline.sourceFileCount || 0);
+  const addedManifests = (currentEvidence?.signals || []).filter((signal) => signal.startsWith('manifest:') && !(baseline.signals || []).includes(signal));
+  const addedComplexity = (currentEvidence?.complexitySignals || []).filter((signal) => !(baseline.complexitySignals || []).includes(signal));
+  const manifestWithImplementation = addedManifests.length && grewBy > 0;
+  const facts = { grewBy, manifestWithImplementation: Boolean(manifestWithImplementation), addedComplexity: addedComplexity.length };
+  const evidence = addedComplexity.length
+    ? `The project added ${addedComplexity.join(', ')} evidence.`
+    : grewBy >= 5
+    ? `The project grew by ${grewBy} source files since the accepted plan.`
+    : `The project added software manifest evidence: ${addedManifests.join(', ')}.`;
+  const suggestedRecord = {
+    ...acceptedPlan.record,
+    projectKind: ['software', 'mixed'].includes(acceptedPlan.record.projectKind) ? acceptedPlan.record.projectKind : 'mixed',
+    softwareScope: 'growing',
+  };
+  const matches = (rule) => {
+    if (rule.type === 'source-growth') return facts.grewBy >= rule.atLeast;
+    if (rule.type === 'complexity-added') return facts.addedComplexity >= rule.atLeast;
+    if (rule.type === 'manifest-with-implementation') return facts.manifestWithImplementation;
+    if (rule.type === 'software-trigger-and-claude') return acceptedPlan.record.targets.includes('claude') && (facts.grewBy >= 5 || facts.addedComplexity > 0 || facts.manifestWithImplementation);
+    return false;
+  };
+  return (acceptedPlan.decisions || [])
+    .filter((decision) => decision.state === 'deferred' && (decision.triggerRules || []).some(matches))
+    .map((decision) => ({
+      kind: decision.kind,
+      id: decision.id,
+      explanation: `${evidence} This matches: ${decision.reevaluateWhen.join('; ')}.`,
+      requiresNewPlan: true,
+      suggestedRecord,
+    }));
+}
+
+export function missingOnboardingFields(raw = {}) {
+  const missing = [];
+  if (!clean(raw.technicalLevel)) missing.push('technical-level');
+  if (!clean(raw.projectKind)) missing.push('project-kind');
+  if (!clean(raw.goal)) missing.push('goal');
+  const kind = clean(raw.projectKind).toLowerCase();
+  if ((kind === 'software' || kind === 'mixed') && !clean(raw.softwareScope)) missing.push('software-scope');
+  if (!(Array.isArray(raw.targets) ? raw.targets.length : clean(raw.targets))) missing.push('target');
+  return missing;
+}

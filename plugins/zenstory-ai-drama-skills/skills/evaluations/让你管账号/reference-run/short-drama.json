@@ -1,0 +1,41 @@
+{
+  "created_at": "2026-08-19T03:27:00.466296Z",
+  "creator_authority": {
+    "constraints": [],
+    "decisions_artifact": "创作者决策/",
+    "delivery_surface": {
+      "aspect": null,
+      "overlay_regions": [],
+      "source_ref": null,
+      "status": "unset"
+    },
+    "production_profile": {
+      "choices": {
+        "imagery": "生成模型承担画面",
+        "live_action": false,
+        "realism": "半写实"
+      },
+      "status": "accepted"
+    },
+    "visual_direction": {
+      "choices": {
+        "look_development": null
+      },
+      "status": "unset"
+    }
+  },
+  "format": {
+    "aspect_ratio": "9:16",
+    "episode_count": null,
+    "pacing": {
+      "seconds_per_action_paragraph": 2.5,
+      "spoken_characters_per_second": 5.0
+    },
+    "prompt_language": "en",
+    "target_seconds_per_episode": 90
+  },
+  "language": "zh-CN",
+  "project_id": "SD-40F82968AD87",
+  "schema_version": "1.0.0-draft",
+  "title": "让你管账号，你高燃混剪炸全网"
+}

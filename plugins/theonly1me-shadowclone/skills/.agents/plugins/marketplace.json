@@ -1,0 +1,20 @@
+{
+  "name": "shadowclone",
+  "interface": {
+    "displayName": "Shadowclone"
+  },
+  "plugins": [
+    {
+      "name": "shadowclone",
+      "source": {
+        "source": "local",
+        "path": "./plugins/shadowclone"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

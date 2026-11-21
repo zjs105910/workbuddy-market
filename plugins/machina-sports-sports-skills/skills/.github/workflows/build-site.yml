@@ -1,0 +1,120 @@
+name: Sports Skills Site Build
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  APP_NAME: sports-skills-site
+  AKS_CLUSTER_NAME: mks-community-cluster
+  AKS_RESOURCE_GROUP: mks-community-group
+  DEPLOYMENT_NAME: sports-skills-site-deployment
+  CONTAINER_NAME: sports-skills-site
+  NAMESPACE: default
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Setup Git
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: sports-skills
+
+      - name: Checkout machina-templates (for pro-tier skills)
+        uses: actions/checkout@v4
+        with:
+          repository: machina-sports/machina-templates
+          path: machina-templates
+
+      - name: Get tag name as release version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "RELEASE_NAME=site-${GITHUB_SHA}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          fi
+
+      - name: Resolve ghcr.io image path (lowercase owner)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ env.APP_NAME }}" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build site (renders dist/ from SKILL.md files)
+        working-directory: sports-skills
+        env:
+          MACHINA_TEMPLATES_DIR: ${{ github.workspace }}/machina-templates
+          # Live GitHub / PyPI / skills.sh numbers for the homepage (best-effort; a
+          # failed fetch only hides that number).
+          SITE_FETCH_STATS: "1"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install --quiet -e '.[site]'
+          python site/build.py
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sports-skills/site
+          file: ./sports-skills/site/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.RELEASE_NAME }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        uses: azure/aks-set-context@v3
+        with:
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+
+      - name: Deploy to AKS
+        run: |
+          kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} ${{ env.CONTAINER_NAME }}=${{ env.IMAGE }}:${{ env.RELEASE_NAME }} -n ${{ env.NAMESPACE }}
+          kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} -n ${{ env.NAMESPACE }}
+
+      - name: Notify Slack - Build Success
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: your-slack-channel
+          SLACK_USERNAME: GitHub Actions
+          SLACK_COLOR: 'good'
+          SLACK_TITLE: 'Sports Skills Site Build Successful'
+          SLACK_MESSAGE: 'Build of ${{ env.APP_NAME }}:${{ env.RELEASE_NAME }} completed successfully and pushed to registry.'
+          SLACK_ICON: ':heavy_check_mark:'
+        if: success()
+
+      - name: Notify Slack - Build Failed
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: your-slack-channel
+          SLACK_USERNAME: GitHub Actions
+          SLACK_COLOR: 'danger'
+          SLACK_TITLE: 'Sports Skills Site Build Failed'
+          SLACK_MESSAGE: 'Build of ${{ env.APP_NAME }}:${{ env.RELEASE_NAME }} failed.'
+          SLACK_ICON: ':x:'
+        if: failure()

@@ -1,0 +1,276 @@
+# Changelog
+
+All notable changes to this project are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.15.2] - 2026-10-03
+
+### Fixed
+- Use the supported Creativity category in public OpenAI plugin metadata. Keep the repository marketplace's Design category unchanged.
+- Validate the public category before packaging to catch unsupported submission metadata locally.
+- Shorten the public subtitle to the final directory limit and bundle the required square composer icon. Validate listing text, prompts, and both image paths before packaging.
+
+## [2.15.1] - 2026-10-03
+
+### Added
+- Portable Agent Plugins manifest and presentation assets for ChatGPT and Codex, alongside existing Claude and Gemini compatibility.
+- A separate allowlisted plugin ZIP with a root manifest and checksum in every release.
+
+### Fixed
+- Make journaling and source maintenance opt-in and recipient-owned. Installing the skill no longer implies permission to change upstream files or publish lessons.
+- Exclude the author's historical learning journal from the npm package and plugin ZIP; the skill works independently of that journal.
+
+## [2.15.0] - 2026-09-27
+
+### Added
+- §9.D: measure dynamic text at its widest value. A no-wrap label assembled from parts that data or the viewer's settings choose (counts, language, 12/24-hour clock, time-zone offset, date order) has no single width, so build the string from each part's widest form and measure it against the slot the container allots, never against the control's own auto-sized width. When it does not fit and the tail carries meaning, split it into lines by meaning instead of letting the ellipsis cut the offset or unit. Measured on a 320px tray popup: a reset caption fitted its 256px slot at 244px in Vietnamese 24-hour and overflowed at 258–298px in 12-hour, half-hour-zone and English builds; split into a time line and a qualifier line, the worst English case measured 210.5px and 149.5px.
+- §11: anti-pattern #27, a composed caption checked in one locale and one clock.
+- §13.C: a Responsive checklist item for it.
+
+## [2.14.0] - 2026-09-26
+
+### Added
+- §4.C: in a flex row, decide which item yields. The long, tail-tolerant text (a name, an email, a path) truncates with an ellipsis, while buttons and plan or status badges are `flex:none`, because flex shrink otherwise lands on whatever can give. Measured on one 320px tray popup: a `flex:none` card title of 283px in a 209px slot squeezed the plan badge that told two accounts apart to 0px, and a `min-width:0` button in a label row was squeezed from 102px to 79px, clipping its label. After the swap the title truncated at 166px, the badge kept its 37.8px and the button its 102px.
+- §11: anti-pattern #26, no item told to yield in a flex row.
+- §13.C: an Alignment checklist item for it.
+
+## [2.13.0] - 2026-09-24
+
+### Added
+- §8.I: a resize is a round trip. Toolkits keep sizes they measured while the container was narrow — grid rows auto-sized only while visible, `GrowOnly` controls, fill ratios adjusted when a column hit its minimum width, virtualized-list height caches — so re-measure every item, off-screen ones included, once the width settles, and test narrow → wide → narrow. Measured on a WinForms table: rows grown to 78px kept 78px after widening where 54px was needed, and the name / status / file columns came back as 216 / 151 / 112px instead of 226 / 157 / 96px. Includes the WinForms `DataGridView` fix (public `AutoResizeRows` only caches heights while an autosize mode is on) and the rule that the settle pass must ignore the width events it raises itself, or it re-arms forever.
+- §13.C: Responsive checklist item for the round trip.
+- §11: anti-pattern #25 — checking each width once, never the trip between them.
+## [2.12.2] - 2026-09-20
+
+### Fixed
+- §4.C: `margin-top:auto` is a claim on free space, so in a hug-height container (`flex:none`, `height:auto`, a `max-content` cell) it computes to `0` and the footer sits flush against the block above — the declaration is present and the gap is not. Measured 44px in a landscape build and 0px in the portrait build of the same layout. Use it only where stretch is guaranteed; otherwise a literal scale value.
+- §8.E: anything composited over the layout — burnt-in captions, a player control bar, a HUD, a watermark — is a safe area that `env()` cannot see, so the band must be reserved in the layout. Measured on a 1920×1080 slide: 72px of block-end padding against a 46px caption at `MarginV 56` covered the last two lines of a panel; 184px cleared it.
+- §11: anti-patterns #23 (auto-margin used as a gap with no slack) and #24 (layout padded as if nothing will be drawn over it).
+
+## [2.12.1] - 2026-09-17
+
+### Added
+- Publish the complete skill and native plugin manifests as `@minhspark/spacing-skill` on npm, with an explicit package file allowlist and GitHub Actions trusted publishing.
+- Link the npm package from the README and document npm installation without implying automatic agent registration.
+
+## [2.12.0] - 2026-09-09
+
+### Added
+- §10.B: settings/list row with a single action — make the whole 64px row the tap target (icon tile + label + chevron) instead of embedding a button; ~1.7× the tap area and it dissolves the §4.C icon-column alignment problem. Costs: one action per row, long copy moves to a group note.
+- Tag-triggered GitHub Releases with changelog notes, a portable plugin ZIP, SHA-256 checksums, and validation on Linux, macOS, and Windows with Node 22 and 24.
+
+### Fixed
+- Synchronize Claude marketplace, Codex plugin, and Gemini extension versions with the skill release. Future version bumps update all manifests together, and CI rejects version drift.
+
+## [2.11.0] - 2026-09-09
+
+### Added
+- §4.C: a hug-width child (`w-auto` / `fit-content`) inside a `flex-direction:column` Stack is still stretched across the cross axis by the default `align-items:stretch` — it needs `align-self:start`. Measured 640px → 184px on one settings screen.
+- §4.C: in an icon + title/description row, the action must be indented by `icon width + gap` so it shares the text column's left edge; drop the indent below `sm`, where the control goes full-width for touch.
+
+## [2.10.0] - 2026-09-05
+
+### Added
+- §12: the `@page` margin box doubles as the browser's print header/footer canvas — `margin: 0` is the only way to remove them, the whitespace moves to `padding` on the print root, and that is safe only for single-page documents because root padding is not per-page.
+- Anti-pattern #22 for zeroing the page margin on a multi-page document.
+
+## [2.9.1] - 2026-09-05
+
+### Added
+- §4.C: bottom-aligned rows that mix an editable control with static text align the boxes, not the text — the control's touch-target `min-height` makes its box taller, so give every slot the same box and vertically center the static ones.
+- Anti-pattern #21 for the same failure.
+
+## [2.9.0] - 2026-08-30
+
+### Added
+- **§12 — unlayered CSS outranks every layered utility** (from a real field bug):
+  a design system on `@layer` (Tailwind v4 puts utilities in `@layer utilities`)
+  loses to any rule written outside a layer regardless of specificity, because
+  layer order is resolved before specificity. Measured on one login screen: an
+  unlayered critical `<style>` holding `input{font:inherit}` silently pulled the
+  field from 22px to 18px while the class stayed on the element, the rule stayed
+  in the stylesheet, and the whole suite stayed green. Wrap critical CSS in the
+  system's own base layer.
+- **§12 — only `<input>` visibly resizes when the stylesheet is late**: the UA
+  sheet renders body text at 16px but form controls at ~13.3px, so late CSS is
+  reported as "the box where you type shrinks then grows" and gets hunted in the
+  field component instead of in CSS delivery.
+- **Anti-pattern #20** — unlayered critical CSS beside a layered design system.
+
+## [2.8.0] - 2026-08-17
+
+### Added
+- **§4.E — centering acts on the box, not on the ink** (from a real field bug):
+  the four centering strategies all assume an item's box *is* its content. When
+  `max-content` exceeds the container the item is clamped to the container, the
+  text wraps inside it, and the trailing dead space becomes pure offset — so
+  `align-items:center` centers a box wider than anything it paints and the group
+  drifts toward the leading edge. The drift is that leftover, so it grows with
+  the container: one logo + company-name lockup measured 10.7px off at 375px
+  wide and 63.2px off at 674px from identical markup, meaning a phone-only check
+  certifies it as fine. Fix the sizing, not the position — make the wrap
+  deterministic so `max-content` equals the longest line, then centering bites.
+  Acceptance test is `item box width === longest rendered line` at the widest
+  supported viewport, not an eyeball at one width.
+- **Anti-pattern #19** — centering a clamped text box.
+
+## [2.7.0] - 2026-08-13
+
+### Added
+- **§5.E — floor-not-clamp extends to the inline axis** (from a real field bug):
+  an icon rail / logo strip / avatar column given a fixed `width` to line up a
+  text column is the same clamp as a fixed control `height`, and fails louder.
+  A too-short box clips or scrolls; a too-narrow slot whose children are
+  `shrink-0` (or hold an image at `max-w-none`) overflows and **paints over the
+  next flex sibling** — no clip, no scrollbar, no warning. It stays invisible
+  until one row gains item N+1, so it reads as one broken row rather than a
+  sizing error. Measured on a checkout method list: a rail sized 64px for one
+  badge met a row needing 96px (Visa + `gap-1` + Mastercard) and put 32px of
+  logo 20px deep into its own description text. Fix is `min-width`. Also records
+  the tie-break: when a shared alignment spine fights the §6.B proximity ladder,
+  the ladder wins — let the fat row run wider instead of inflating a sparse
+  row's icon↔label gap past its inter-item gap.
+- **Anti-pattern #18** — fixed-width icon/logo rail.
+
+## [2.6.1] - 2026-08-06
+
+### Changed
+- **§12** — clarified that converting inline layout properties to classes is a
+  judgement per site rather than a find-and-replace: the class you move to has
+  to carry §8.B's question (what the narrower cell holds), so at least two are
+  needed — one that collapses and one that stays two-up. Sending every site to
+  the collapsing class reproduces anti-pattern #16. Evidence from one sweep of
+  82 sites: 59 collapse, 23 do not.
+
+## [2.6.0] - 2026-08-06
+
+### Added
+- **§12 — an inline style outranks every media query** (from a real field bug):
+  a layout property written inline (`style={{ gridTemplateColumns: … }}`) has no
+  responsive behaviour at all, and the failure is silent — the breakpoint rule
+  is written and correct, it fires, and the layout does not move. Measured on
+  one app: four dashboards stayed two-column on a phone with the narrow side at
+  107px while the collapse rule sat in the stylesheet. The fix is to let the
+  inline set a **custom property** and keep the property itself in CSS, since a
+  variable does not outrank a media query; `!important` wins at every width
+  rather than the one you meant.
+- **Anti-pattern #17** — layout property written inline.
+
+## [2.5.0] - 2026-08-06
+
+### Added
+- **§8.B — column count follows the narrowest cell, not the grid** (from a real
+  field bug): the compressible-vs-not test was written only about *gaps*, while
+  §9.D's reflow language invites a blanket `@media (max-width:760px) { .cols-*
+  { 1fr } }`. Reflow requires no *horizontal scroll*, not a single column. A
+  cell holding one number and its label wants about half a phone's width; a
+  cell holding a table, a chart or prose wants all of it. Measured on one
+  dashboard: four one-number stat cards took **822px** of a 375px screen before
+  any real content, **371px** after the same four went two-up. Target the row
+  that holds the small cells (`:has(> .stat)`, or a modifier class as fallback)
+  rather than the breakpoint as a whole.
+- **Anti-pattern #16** — blanket one-column collapse on mobile.
+
+## [2.4.1] - 2026-07-04
+
+### Added
+- **§9.D — scroll-region overflow** (from a real field bug): an intentional
+  `overflow-x-auto` scroller (pill nav, toolbar, chip row) still blows the page out
+  when its wrapper sits in an `auto`-sized grid/flex track — the track grows to the
+  scroller's max-content and the scroll never engages. A grid defined with only a
+  desktop `lg:grid-cols-[…]` template falls back to an implicit `auto` column on
+  mobile. Fix: cap the track with an explicit `grid-cols-1` (`minmax(0, 1fr)`) plus
+  `min-w-0` on the item; verify `scrollWidth` at the narrowest width.
+
+## [2.4.0] - 2026-07-04
+
+### Added
+- **§9.A — net-zero hit-box expansion.** Reaching the target-size floor by adding
+  padding alone spreads a tight control cluster (header icon buttons, a VN/EN toggle)
+  and breaks its `gap` rhythm. Pair the padding with an **equal negative margin** so the
+  hit box grows while the margin-box — every sibling gap and edge — stays put
+  (`-m-2.5 p-2.5` → a 20px icon becomes a 40px target, layout unmoved; `-my-*`/`py-*`
+  for a vertical-only grow). Plus: re-anchor an `absolute` badge/dot to an inner
+  wrapper around the icon so it doesn't jump to the padded box's corner.
+
+## [2.3.0] - 2026-06-30
+
+### Added
+- **§5.A — stacked-diacritic heading floor.** Multi-line headings in scripts whose
+  marks stack both above *and* below a letter (Vietnamese, Thai, Arabic, Devanagari)
+  must hold line-height ≥ 1.1; display leading under ~1.05 collides an under-dot on
+  one line with a circumflex/breve on the next. Gated by content language, not taste.
+- **§11 anti-pattern #15** — tight display leading colliding stacked diacritics, with the fix.
+
+## [2.2.1] - 2026-06-29
+
+### Added
+- **§9.D — no-wrap overflow guidance** (from a real field bug): `white-space:nowrap`
+  stat/KPI values overflow the card when a multi-column metric grid sits inside a
+  narrow (`lg:grid-cols-2`) card. Fix: size the value to fit (font cap / fluid
+  `clamp()` / container-query) **and** drop columns when the container is narrow;
+  verify at the narrowest column, not the widest.
+
+## [2.2.0] - 2026-06-29
+
+### Added
+- **§15 Continuous Improvement — the field-learnings loop.** The skill now
+  improves from use: every real spacing/alignment edit is captured in
+  `LEARNINGS.md` (Space Read + real numbers + a `covered` / `gap` / `refinement`
+  verdict), and lessons that generalize are distilled back into §0–§14 with a
+  version bump. README section count 15 → 16.
+- **`LEARNINGS.md`** — append-only field journal that seeds the loop, kept out of
+  the context-loaded `SKILL.md` so it can grow without bloating the skill.
+
+## [2.1.0] - 2026-06-21
+
+### Added
+- **§14 Document & Long-Form (Word / Google Docs / PDF / Markdown)** — page margins
+  (academic / business / bound), measure in documents, line-spacing presets, the
+  indent-vs-space single-separator rule, heading styles with asymmetric spacing,
+  lists/quotes/tables in prose, print pagination (widow/orphan, keep-with-next),
+  a concept→tool mapping table (CSS / Word / Docs / Markdown), and a document
+  pre-flight checklist. Scope and description broadened to cover written documents.
+
+## [2.0.1] - 2026-06-21
+
+### Removed
+- All references to other skills from the README and SKILL.md.
+
+### Fixed
+- Applied a 4-lens adversarial review (accuracy / coherence / intelligence / completeness).
+  - Snapped off-scale recipe values to the scale (inline inset `28→24`; landing `clamp()` MAX `200/80 → 160/64`, now with the required `rem` term).
+  - Reconciled the optical-nudge ceiling to a single value (≤4px) across §2.D / §7 / §11.
+  - Added the DENSITY computation rule (start at range midpoint → sum §1.B deltas → clamp `[1,10]`; content shifts override the surface band) and override-clamp semantics.
+  - Mapped the modular-scale ratio to DENSITY; clarified derived control insets, baseline-RIGOR precedence, and the Material line-box note.
+
+### Added
+- New coverage: chart/data-viz spacing, scroll-padding/scroll-margin under sticky headers, forced-colors/dark-mode, motion, print/email, intrinsic sizing, multi-line wrap gaps, and intentional truncation.
+
+## [2.0.0] - 2026-06-21
+
+### Changed
+- Substantial rewrite into the most complete edition (14 sections). Built from a
+  multi-agent research pass across 12 spacing/alignment dimensions, synthesized
+  into one coherent skill. Install name unchanged (`design-spacing-rhythm`).
+
+### Added
+- **§0 Space Inference** — signals, the one-line "Space Read", anti-default discipline.
+- **§4 Layout grid & alignment** — 12-col grid, measure (45–75ch), flex/grid alignment toolkit, subgrid for aligned card internals.
+- **§9 Accessibility floors** — verified WCAG numbers: 2.5.8 (24px AA) + spacing exception, 2.5.5 (44px AAA), 1.4.12 text-spacing, 1.4.10 reflow at 320px, focus-ring spacing; Apple 44pt / Material 48dp.
+- **§12 Implementation per stack** — Tailwind, plain CSS, MUI/Chakra/Radix/shadcn, design tokens, debugging.
+- **§13 Operating procedure** — 8-step pipeline, conversational override protocol, full pre-flight checklist.
+- Expanded scale (px-keyed, Tailwind-aligned), primitive vs semantic tokens, modular-scale macro tier, container queries, fluid `clamp()` spacing, logical properties, safe-area insets, and a 14-row anti-pattern catalog.
+
+## [1.0.0] - 2026-06-21
+
+### Added
+- Initial release of `spacing-skill` (`design-spacing-rhythm`).
+- Three-dial configuration: `SPACING_STEP`, `DENSITY`, `ALIGNMENT_RIGOR`.
+- Single Tailwind-compatible spacing scale (no magic numbers).
+- Sections: space inference, spacing primitives, vertical rhythm, whitespace
+  hierarchy, optical alignment, responsive spacing, component recipes,
+  anti-pattern catalog, pre-flight checklist, and stack-specific notes.
+- Claude Code plugin manifests (`.claude-plugin/plugin.json`,
+  `.claude-plugin/marketplace.json`).

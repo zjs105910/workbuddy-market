@@ -1,0 +1,519 @@
+"""Nevobo (Nederlandse Volleybalbond) data connector.
+
+Fetches volleyball data from the open Nevobo API at https://api.nevobo.nl.
+Two interfaces:
+  - JSON-LD / Hydra: paginated collections (competitions, poules, clubs, regions)
+  - RSS Export: per-poule standings, schedules, results; per-club feeds
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+import urllib.error
+import urllib.request
+
+from sports_skills import _feeds, _replay
+
+_BASE = "https://api.nevobo.nl"
+
+# Simple rate limiter: min seconds between requests
+_MIN_INTERVAL = 0.5
+_last_request_time = 0.0
+
+# TTL cache for Hydra responses
+_cache: dict[str, tuple[float, object]] = {}
+_CACHE_TTL = 300  # seconds
+
+# Resolved poule paths change at most once a season, so they can be held far
+# longer than ordinary responses.
+_POULE_CACHE_TTL = 21600  # 6 hours
+
+
+def _throttle():
+    global _last_request_time
+    now = time.monotonic()
+    elapsed = now - _last_request_time
+    if elapsed < _MIN_INTERVAL:
+        time.sleep(_MIN_INTERVAL - elapsed)
+    _last_request_time = time.monotonic()
+
+
+def _hydra_request(path, params=None):
+    """Fetch a JSON-LD / Hydra endpoint and return parsed JSON."""
+    url = f"{_BASE}{path}"
+    if params:
+        qs = "&".join(f"{k}={urllib.request.quote(str(v))}" for k, v in params.items() if v is not None)
+        if qs:
+            url = f"{url}?{qs}"
+
+    now = time.monotonic()
+    cached = _cache.get(url)
+    if cached and (now - cached[0]) < _CACHE_TTL:
+        return cached[1]
+
+    raw, err = _replay.fetch(url, lambda: _live_hydra_fetch(url))
+    if err is not None:
+        return _public_error(err)
+    try:
+        data = json.loads(raw.decode())
+    except Exception as e:
+        return {"error": True, "message": str(e)}
+    _cache[url] = (time.monotonic(), data)
+    return data
+
+
+def _live_hydra_fetch(url):
+    """Live GET for ``_replay.fetch``: (data_bytes, None) or (None, error_dict)."""
+    _throttle()
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/ld+json",
+        "User-Agent": "sports-skills/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read(), None
+    except urllib.error.HTTPError as e:
+        # status_code lets _replay record the 4xx; _public_error drops it again.
+        return None, {"error": True, "status_code": e.code, "message": f"HTTP {e.code}: {e.reason}"}
+    except urllib.error.URLError as e:
+        return None, {"error": True, "message": f"Connection error: {e.reason}"}
+    except Exception as e:
+        return None, {"error": True, "message": str(e)}
+
+
+def _raise_replay_failure(data):
+    """Poule resolution falls back silently on errors; a replay gap must not."""
+    if isinstance(data, dict) and (data.get("replay_miss") or data.get("replay_error")):
+        raise _replay.ReplayFailure(data)
+
+
+def _public_error(err):
+    """This module's error shape (no status_code), keeping replay flags."""
+    error = {"error": True, "message": err.get("message", "")}
+    for flag in ("replay_miss", "replay_error"):
+        if err.get(flag):
+            error[flag] = True
+    return error
+
+
+_POULE_CODE_RE = re.compile(r"^nationale-competitie-([a-z0-9]+)-\d+$")
+
+
+def resolve_poule_path(competition_family, poule_code, fallback=None):
+    """Look up a national poule's current path from the Nevobo API.
+
+    Both halves of a poule path carry a season counter that Nevobo increments
+    each season — ``competitie-eredivisie-1`` becomes ``competitie-eredivisie``,
+    ``…-eh-11`` becomes ``…-eh-12`` — so a hardcoded path 404s once the season
+    turns over. Resolving by the parts that stay put (the competition family and
+    the poule's letter code) survives the rollover.
+
+    Args:
+        competition_family: slug stem, e.g. "competitie-eredivisie".
+        poule_code: poule letter code, e.g. "eh" for Eredivisie Heren.
+        fallback: path to return when resolution fails.
+
+    Returns:
+        A poule path suitable for the RSS export endpoints, or ``fallback``.
+    """
+    cache_key = f"_poule:{competition_family}:{poule_code}"
+    now = time.monotonic()
+    cached = _cache.get(cache_key)
+    if cached and (now - cached[0]) < _POULE_CACHE_TTL:
+        return cached[1]
+
+    competition = _find_national_competition(competition_family)
+    if not competition:
+        return fallback
+
+    data = _hydra_request("/competitie/poules", {"competitie": competition, "itemsPerPage": 100})
+    _raise_replay_failure(data)
+    if isinstance(data, dict) and data.get("error"):
+        return fallback
+    for item in (data or {}).get("hydra:member", []):
+        ref = str(item.get("@id", ""))
+        match = _POULE_CODE_RE.match(ref.rsplit("/", 1)[-1])
+        if match and match.group(1) == poule_code:
+            # Strip the "/competitie/poules/" prefix the export paths omit.
+            path = ref.split("/competitie/poules/", 1)[-1]
+            _cache[cache_key] = (time.monotonic(), path)
+            return path
+    return fallback
+
+
+def _find_national_competition(family):
+    """Return the @id of the national competition whose slug matches `family`."""
+    for page in (1, 2, 3, 4, 5, 6):
+        data = _hydra_request(
+            "/competitie/competities", {"itemsPerPage": 30, "page": page}
+        )
+        _raise_replay_failure(data)
+        if isinstance(data, dict) and data.get("error"):
+            return None
+        members = (data or {}).get("hydra:member", [])
+        if not members:
+            return None
+        for item in members:
+            ref = str(item.get("@id", ""))
+            if "/nationale-competitie/" not in ref:
+                continue
+            slug = ref.rsplit("/", 1)[-1]
+            # Tolerate the trailing season counter: "competitie-eredivisie-1".
+            if slug == family or re.fullmatch(rf"{re.escape(family)}-\d+", slug):
+                return ref
+    return None
+
+
+def current_season():
+    """Return the season Nevobo currently serves (e.g. "2026-2027"), or None.
+
+    Reads the first page of the competitions list — the same request
+    ``_find_national_competition`` starts with, so it is usually cached.
+    """
+    data = _hydra_request("/competitie/competities", {"itemsPerPage": 30, "page": 1})
+    _raise_replay_failure(data)
+    if isinstance(data, dict) and data.get("error"):
+        return None
+    for item in (data or {}).get("hydra:member", []):
+        season = str(item.get("seizoen") or "")
+        if season:
+            return season.rsplit("/", 1)[-1]
+    return None
+
+
+def _rss_request(export_path):
+    """Fetch and parse an RSS export feed."""
+    url = f"{_BASE}/export/{export_path}"
+    if _replay.mode() != _replay.REPLAY:
+        _throttle()
+    try:
+        feed, err = _feeds.parse(url)
+        if err is not None:
+            return _public_error(err)
+        if hasattr(feed, "status") and feed.status >= 400:
+            return {"error": True, "message": f"HTTP {feed.status}"}
+        if feed.bozo and not feed.entries:
+            return {"error": True, "message": f"Feed parse error: {feed.bozo_exception}"}
+        return feed
+    except Exception as e:
+        return {"error": True, "message": str(e)}
+
+
+# Title prefixes ahead of "Team A - Team B": an optional status word
+# ("Vervallen: " = cancelled) and a date/time ("12 mrt 19:30: "). Matches not yet
+# scheduled carry no date, leaving a bare ": " in front of the home team.
+_TITLE_PREFIX_RE = re.compile(
+    r"^(?:[A-Z][a-z]+:\s+(?=\d))?(?:\d{1,2}\s+\w+(?:\s+\d{1,2}:\d{2})?)?:\s*"
+)
+
+
+def _strip_title_prefix(title):
+    return _TITLE_PREFIX_RE.sub("", title, count=1)
+
+
+def _dedupe_entries(entries):
+    """Drop repeated feed items; a club feed lists an intra-club match once per team."""
+    seen = set()
+    unique = []
+    for entry in entries:
+        key = entry.get("id") or entry.get("link") or entry.get("title")
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
+
+
+# ---------------------------------------------------------------------------
+# Standings parser
+# ---------------------------------------------------------------------------
+
+def _parse_standings_description(description):
+    """Parse standings from a single RSS entry description.
+
+    The Nevobo RSS returns all standings in one entry's description,
+    with rows separated by <br /> tags. Each row looks like:
+        "1. Team Name, wedstr: 14, punten: 40"
+    """
+    if not description:
+        return []
+
+    lines = re.split(r"<br\s*/?>", description)
+    standings = []
+    for line in lines:
+        line = re.sub(r"<[^>]+>", "", line).strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"(\d+)\.\s+(.+)", line)
+        if not m:
+            continue
+        rank = int(m.group(1))
+        rest = m.group(2).strip()
+
+        row = {"rank": rank}
+
+        # Extract "wedstr: N" (matches played)
+        wedstr = re.search(r"wedstr:\s*(\d+)", rest)
+        if wedstr:
+            row["matches_played"] = int(wedstr.group(1))
+
+        # Extract "punten: N" (points)
+        punten = re.search(r"punten:\s*(\d+)", rest)
+        if punten:
+            row["points"] = int(punten.group(1))
+
+        # Team name is everything before the first comma
+        team = rest.split(",")[0].strip()
+        row["team"] = team
+
+        standings.append(row)
+
+    return standings
+
+
+def get_poule_standings(poule_path):
+    """Get standings for a poule from RSS."""
+    feed = _rss_request(f"poule/{poule_path}/stand.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    standings = []
+    for entry in feed.entries:
+        desc = entry.get("description", entry.get("summary", ""))
+        standings.extend(_parse_standings_description(desc))
+
+    return {
+        "poule_path": poule_path,
+        "standings": standings,
+        "count": len(standings),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Schedule parser
+# ---------------------------------------------------------------------------
+
+def _parse_schedule_entry(entry):
+    """Parse a schedule RSS entry.
+
+    Title format: "12 mrt 19:30: Team A - Team B"
+    Description: "Wedstrijd: ..., Datum: ..., Speellocatie: ..."
+    """
+    title = entry.get("title", "")
+    desc = entry.get("description", entry.get("summary", ""))
+    published = entry.get("published", "")
+
+    match = {}
+
+    # Strip status/date prefix from title: "12 mrt 19:30: Team A - Team B"
+    teams_part = _strip_title_prefix(title)
+
+    t = teams_part.split(" - ", 1)
+    if len(t) == 2:
+        match["home_team"] = t[0].strip()
+        match["away_team"] = t[1].strip()
+
+    if desc:
+        text = re.sub(r"<[^>]+>", " ", desc).strip()
+        # Extract venue from "Speellocatie: ..."
+        venue_m = re.search(r"Speellocatie:\s*(.+?)(?:,\s*Datum:|$)", text)
+        if not venue_m:
+            venue_m = re.search(r"Speellocatie:\s*(.+)", text)
+        if venue_m:
+            match["venue"] = venue_m.group(1).strip().rstrip(",")
+
+    # Unscheduled matches have an empty pubDate; keep the key so rows align.
+    match["date"] = published or None
+    if entry.get("nevobo_status"):
+        match["status"] = entry["nevobo_status"]
+
+    return match
+
+
+def get_poule_schedule(poule_path):
+    """Get upcoming schedule for a poule from RSS."""
+    feed = _rss_request(f"poule/{poule_path}/programma.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    matches = [_parse_schedule_entry(e) for e in feed.entries]
+    return {
+        "poule_path": poule_path,
+        "matches": matches,
+        "count": len(matches),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Results parser
+# ---------------------------------------------------------------------------
+
+def _parse_result_entry(entry):
+    """Parse a results RSS entry.
+
+    Title format: "Team A - Team B, Uitslag: 3-1"
+    Description: "Wedstrijd: Team A - Team B, Uitslag: 3-1, Setstanden: 25-21, 25-18, 21-25, 25-20"
+    """
+    title = entry.get("title", "")
+    desc = entry.get("description", entry.get("summary", ""))
+    published = entry.get("published", "")
+
+    result = {}
+
+    # Split title on ", Uitslag:" to separate teams from score
+    title = _strip_title_prefix(title)
+    uitslag_m = re.match(r"(.+?),\s*Uitslag:\s*(\d+-\d+)", title)
+    if uitslag_m:
+        teams_part = uitslag_m.group(1).strip()
+        result["score"] = uitslag_m.group(2).strip()
+        # Split teams on " - " (the separator between home and away)
+        t = teams_part.split(" - ", 1)
+        if len(t) == 2:
+            result["home_team"] = t[0].strip()
+            result["away_team"] = t[1].strip()
+    else:
+        # Fallback: try simple split
+        t = title.split(" - ", 1)
+        if len(t) == 2:
+            result["home_team"] = t[0].strip()
+            result["away_team"] = t[1].strip()
+
+    if desc:
+        # Extract set scores after "Setstanden:"
+        setstanden_m = re.search(r"Setstanden:\s*(.+)", desc)
+        if setstanden_m:
+            set_part = setstanden_m.group(1).strip()
+            set_scores = re.findall(r"\d{1,2}-\d{1,2}", set_part)
+            if set_scores:
+                result["set_scores"] = set_scores
+
+    result["date"] = published or None
+    if entry.get("nevobo_status"):
+        result["status"] = entry["nevobo_status"]
+
+    return result
+
+
+def get_poule_results(poule_path):
+    """Get results for a poule from RSS."""
+    feed = _rss_request(f"poule/{poule_path}/resultaten.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    results = [_parse_result_entry(e) for e in feed.entries]
+    return {
+        "poule_path": poule_path,
+        "results": results,
+        "count": len(results),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Club feeds
+# ---------------------------------------------------------------------------
+
+def get_club_schedule(club_id):
+    """Get upcoming schedule for a club across all teams."""
+    feed = _rss_request(f"vereniging/{club_id}/programma.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    matches = [_parse_schedule_entry(e) for e in _dedupe_entries(feed.entries)]
+    return {
+        "club_id": club_id,
+        "matches": matches,
+        "count": len(matches),
+    }
+
+
+def get_club_results(club_id):
+    """Get results for a club across all teams."""
+    feed = _rss_request(f"vereniging/{club_id}/resultaten.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    results = [_parse_result_entry(e) for e in _dedupe_entries(feed.entries)]
+    return {
+        "club_id": club_id,
+        "results": results,
+        "count": len(results),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hydra / JSON-LD endpoints
+# ---------------------------------------------------------------------------
+
+def _extract_hydra_items(data):
+    """Extract items from a Hydra collection response."""
+    if isinstance(data, dict) and data.get("error"):
+        return data
+    members = data.get("hydra:member", data.get("member", []))
+    total = data.get("hydra:totalItems", data.get("totalItems", len(members)))
+    return {"items": members, "total": total}
+
+
+def get_poules(params=None):
+    """List poules from the Hydra API."""
+    data = _hydra_request("/competitie/poules", params)
+    return _extract_hydra_items(data)
+
+
+def get_clubs(params=None):
+    """List clubs from the Hydra API."""
+    data = _hydra_request("/relatiebeheer/verenigingen", params)
+    return _extract_hydra_items(data)
+
+
+def get_competitions():
+    """List competitions from the Hydra API."""
+    data = _hydra_request("/competitie/competities")
+    return _extract_hydra_items(data)
+
+
+# ---------------------------------------------------------------------------
+# General RSS feeds
+# ---------------------------------------------------------------------------
+
+def get_tournaments(limit=None):
+    """Get tournament calendar from RSS."""
+    feed = _rss_request("toernooien.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    items = []
+    for entry in feed.entries:
+        items.append({
+            "title": entry.get("title", ""),
+            "link": entry.get("link", ""),
+            "date": entry.get("published", ""),
+            "description": entry.get("description", entry.get("summary", "")),
+        })
+
+    if limit:
+        items = items[:int(limit)]
+
+    return {"tournaments": items, "count": len(items)}
+
+
+def get_news(limit=None):
+    """Get federation news from RSS."""
+    feed = _rss_request("nieuws.rss")
+    if isinstance(feed, dict) and feed.get("error"):
+        return feed
+
+    items = []
+    for entry in feed.entries:
+        items.append({
+            "title": entry.get("title", ""),
+            "link": entry.get("link", ""),
+            "date": entry.get("published", ""),
+            "summary": entry.get("summary", entry.get("description", "")),
+        })
+
+    if limit:
+        items = items[:int(limit)]
+
+    return {"news": items, "count": len(items)}

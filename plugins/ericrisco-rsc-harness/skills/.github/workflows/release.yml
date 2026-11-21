@@ -1,0 +1,132 @@
+name: release
+
+# Publishes rsc-universal to npm and forces a new version on every push to main.
+# Manual runs (workflow_dispatch) let you pick patch / minor / major.
+#
+# The version-bump commit carries "[skip ci]" so it does NOT re-trigger this
+# workflow (no publish loop).
+#
+# Requires repo secret NPM_TOKEN (npm automation token). Needs main to allow
+# the GITHUB_TOKEN to push (no protection rule blocking Actions, or use a PAT).
+#
+# After publishing to npm it also cuts a GitHub Release for the new tag, with
+# notes auto-generated from the commits/PRs since the previous tag.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write      # push the version-bump commit + tag
+  id-token: write      # npm provenance via OIDC
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      # --- gates: never publish a broken catalog -------------------------------
+      - name: validate frontmatter + recommends
+        run: npm run validate
+      - name: manifest is current
+        run: npm run manifest:check
+      - name: tests
+        run: npm test
+      - name: eval-lint
+        run: bash scripts/eval-lint.sh
+      - name: originality
+        run: npm run originality:check
+
+      # --- bump version (auto-patch on push; chosen bump on manual run) ---------
+      - name: Configure git identity
+        run: |
+          git config user.name "Eric Risco"
+          git config user.email "erisco@icloud.com"
+      # The registry is the source of truth for "what is already released". If a previous run
+      # published and tagged but failed to push the bump commit back (main advanced under it),
+      # package.json is left behind and every later run recomputes the SAME version, hits
+      # "tag already exists" and dies — wedging releases permanently. Reconciling first makes
+      # the pipeline self-healing instead.
+      - name: Reconcile version with the registry
+        run: |
+          PUBLISHED="$(npm view @ericrisco/rsc version 2>/dev/null || echo 0.0.0)"
+          LOCAL="$(node -p "require('./package.json').version")"
+          HIGHEST="$(printf '%s\n%s\n' "$PUBLISHED" "$LOCAL" | sort -V | tail -1)"
+          echo "published=$PUBLISHED local=$LOCAL highest=$HIGHEST"
+          if [ "$HIGHEST" != "$LOCAL" ]; then
+            npm version "$HIGHEST" --no-git-tag-version --allow-same-version
+            git add package.json package-lock.json manifest.json
+            git commit -m "🔧 chore: realign version with the registry ($LOCAL -> $HIGHEST) [skip ci]"
+          fi
+
+      # No tag here on purpose. The tag is created after the commit is pushed (see below), so
+      # it can only ever point at something that actually landed on main.
+      - name: Bump version
+        id: bump
+        run: |
+          npm version "${{ github.event.inputs.bump || 'patch' }}" --no-git-tag-version
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git add package.json package-lock.json manifest.json
+          git commit -m "🔖 chore(release): $VERSION [skip ci]"
+
+      # --- publish + push the bump back ----------------------------------------
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # main can advance while this job runs (a PR merging behind it), which rejects the push as
+      # non-fast-forward — so rebase and retry. Tagging is deliberately NOT part of this step:
+      # a rebase rewrites the commit's sha, and a tag made beforehand would be left pointing at
+      # an orphan. Push the commit, then tag whatever landed.
+      - name: Push version commit
+        run: |
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; exit 1; }
+            if git push origin HEAD:main; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected, retrying ($attempt/3)"
+            sleep 5
+          done
+          echo "::error::could not push the version commit after 3 attempts"
+          exit 1
+
+      # The invariant this pipeline lost for four days: a tag never exists without its commit.
+      # Tagging only after a successful push is what guarantees it, in both directions.
+      - name: Tag the released commit
+        run: |
+          V="v${{ steps.bump.outputs.version }}"
+          git tag -a "$V" -m "🔖 chore(release): ${{ steps.bump.outputs.version }}"
+          git push origin "$V"
+
+      # --- cut a GitHub Release for the new tag --------------------------------
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes

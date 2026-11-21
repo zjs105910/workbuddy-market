@@ -1,0 +1,411 @@
+---
+title: 配置
+sidebar:
+  order: 5
+---
+
+配置文件在 `~/.opencodereview/config.json`，你有三种方式编辑它：
+
+- **交互式 TUI** —— `ocr config provider` / `ocr config model`，带引导菜单。
+- **命令行** —— `ocr config set <key> <value>`，适合脚本与 CI。
+- **手动编辑（不推荐）** —— 该 JSON 文件（下次 `ocr config set` 写入时会重新格式化）。
+
+## 配置模型
+
+### 推荐：交互式设置
+
+```bash
+ocr config provider
+```
+
+它会让你选择一个内置或自定义 provider、填入 API key、挑选 model，保存到配置文件后自动运行一次 `ocr llm test` 验证端点。之后想换模型：
+
+```bash
+ocr config model
+```
+
+### 非交互设置（CI / 无 TUI 环境）
+
+用 `ocr config set` 写入同一份配置：
+
+```bash
+ocr config set provider                    anthropic
+ocr config set model                       claude-opus-4-6
+ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
+```
+
+### 内置 provider
+
+下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
+若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`chatgpt`
+改用 `ocr auth login` 创建的 ChatGPT 凭证。
+
+| 名称 | 协议 | Base URL | API key 环境变量 |
+|---|---|---|---|
+| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `chatgpt` | openai-responses | `https://api.openai.com/v1` | 不适用（Sign in with ChatGPT） |
+| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
+| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
+| `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
+| `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
+| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
+| `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
+| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
+| `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
+| `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
+| `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+内置 provider 的模型列表只为 `ocr config model` 提供选择建议，不限制 `--model`。
+如果指定的模型既不在内置列表中，也不在 `providers.<name>.models` 中，OCR 会向
+stderr 输出警告；发送请求时由 provider 验证模型。自定义 provider 仍遵循原有的
+`--model` 校验规则。
+
+## ChatGPT 登录预览版
+
+此预览版新增通过公开 Responses API 使用的内置 `chatgpt` provider，没有 API key 环境变量。 请参阅 [ChatGPT 预览版指南](../chatgpt-preview/)了解登录、同意和使用限制。
+
+使用 `ocr config set` 配置 provider 和可选请求字段。可从 `ocr llm models` 选择模型，也可显式设置模型 slug：
+
+```bash
+ocr auth login --provider chatgpt
+ocr config set provider chatgpt
+ocr config set providers.chatgpt.model <model-slug>
+ocr config set providers.chatgpt.extra_body '{"reasoning":{"effort":"low"}}'
+ocr llm test
+```
+
+即使账户模型目录没有列出，显式模型仍会传递。`extra_body` 仅接受 `reasoning`、`text` 和 `prompt_cache_key`；端点、协议和凭证覆盖会被拒绝。
+
+### 覆盖内置 provider 的 Base URL
+
+每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
+指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
+`http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+`chatgpt` 预览版例外：其公开端点固定，不接受 URL 覆盖。
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
+被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
+
+### AWS Bedrock
+
+`bedrock` 默认使用 `anthropic-bedrock` 协议，调用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
+接受用它替代签名：
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+如果将 `providers.bedrock.protocol` 设为 `openai` 来连接 OpenAI 兼容网关，请在 `providers.bedrock.url` 中配置网关地址，并通过 `providers.bedrock.api_key` 或 `providers.bedrock.api_key_cmd` 提供网关的 API key。在 `ocr config provider` 中切换模型会保留已保存的 API key。
+
+| 字段 | 含义 |
+|---|---|
+| `providers.bedrock.aws_region` | 处理请求的 `bedrock-runtime` 主机所在区域。未设置时回退到 `AWS_REGION` 或当前 profile。 |
+| `providers.bedrock.aws_profile` | 解析凭证所用的具名 profile。未设置时回退到 `AWS_PROFILE` 或环境中的凭证链。 |
+
+两者都是可选的：不设置时由标准凭证链决定，与其他 AWS 工具一致。显式固定可以
+让运行结果可复现，无需先导出 `AWS_PROFILE`——在默认值不同的 CI runner 上尤为
+重要。
+
+模型标识符同时受账号**和**区域限制，因此 OCR 内置的列表只是起点，而非封闭集合：
+只要在你的账号中有效，推理配置文件 ID 或应用推理配置文件 ARN 即使不在列表中也
+会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
+账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
+
+使用默认的 `anthropic-bedrock` 协议时，主机由区域决定，`ocr llm test` 显示区域和 profile
+而不是 URL：
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` 和 `OCR_LLM_PROTOCOL` **不支持** bedrock。该配置块描述的是一个
+URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个值都不使用，因此
+会被明确拒绝，而不是接受后悄悄忽略。
+
+### 自定义 provider
+
+任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
+（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
+`anthropic-bedrock`）：
+
+```bash
+ocr config set provider                             my-gateway
+ocr config set custom_providers.my-gateway.url      https://gateway.internal.com/v1
+ocr config set custom_providers.my-gateway.protocol openai
+ocr config set custom_providers.my-gateway.model    llama-3-70b
+ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+```
+
+当 provider 或模型要求使用 OpenAI Responses API（`/v1/responses`）时，使用
+`openai-responses` 协议：
+
+```bash
+ocr config set provider                                               openai-responses-gateway
+ocr config set custom_providers.openai-responses-gateway.url          https://api.openai.com/v1
+ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
+ocr config set custom_providers.openai-responses-gateway.model        gpt-5
+ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+使用 `anthropic-bedrock` 协议的自定义 provider 不需要 `url`——主机由区域决定——
+并且可以使用与内置 provider 相同的 AWS 字段。第二个区域或 profile 就是这样拥有
+自己的条目的：
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
+```
+
+`url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。
+
+用 Ollama 跑本地模型，就是一个指向本地 OpenAI 兼容端点的自定义 provider：
+
+```bash
+ocr config set provider                          ollama
+ocr config set custom_providers.ollama.url       http://127.0.0.1:11434/v1
+ocr config set custom_providers.ollama.protocol  openai
+ocr config set custom_providers.ollama.model     qwen3:32b
+ocr config set custom_providers.ollama.api_key   ollama
+```
+
+Ollama 会忽略 API key，但自定义 provider 要求非空的 `api_key`（自定义
+provider 没有环境变量回退），所以设任意占位值即可。模型本身必须支持原生
+工具调用——选型前请先看 FAQ 中的
+["No tool calls parsed"（本地模型 / Ollama）](../faq/#no-tool-calls-parsed-本地模型-ollama)。
+
+### 超时
+
+任务超时和单次请求超时相互独立：
+
+- `ocr review --timeout` 和 `ocr scan --timeout` 以**分钟**为单位设置并发任务的
+  时间预算（默认 **15**；`0` 关闭任务期限）。预算包括任务中的所有 LLM 调用、
+  工具执行和重试等待。review 会按 effort 的评审轮数放大预算。
+- 单次 HTTP 请求超时以**秒**为单位（默认 **300**）。调大 `--timeout` 不会改变
+  请求超时，关闭任务期限也不会关闭请求超时。如果任务的剩余预算更短，则以
+  剩余任务预算为限。
+
+每个 LLM 请求都有 HTTP 超时，默认 **300 秒**。慢的本地模型（或大文件）可能
+需要更长的时间。三个配置项，作用域递增：
+
+- `providers.<name>.timeout_sec` / `custom_providers.<name>.timeout_sec`
+  ——per-provider，单位秒。
+- `llm.timeout_sec`——用于旧版 `llm` 配置段，单位秒。
+- `OCR_LLM_TIMEOUT` 环境变量——整数秒；对每条解析路径都覆盖配置文件里
+  的值。
+
+两个 `timeout_sec` key 都可以使用 `ocr config set` 设置：
+
+```json
+{
+  "custom_providers": {
+    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+  }
+}
+```
+
+例如，`OCR_LLM_TIMEOUT=900 ocr review --timeout 30` 允许单次请求在任务预算内
+最多运行 15 分钟。如果没有设置该环境变量或 `timeout_sec`，即使使用
+`--timeout 30`，请求仍会在 5 分钟后超时。
+
+单次请求期限耗尽后会结束调用，不会自动重放请求，包括在读取响应体或流式响应时
+超时的情况。对于持续较慢的请求，应调大请求超时，而不是用相同的时限重试。
+现有 SDK 重试策略保持不变：可重试的连接和 HTTP 错误最多重试 5 次，采用退避
+等待并遵守服务端的 `Retry-After` 提示。SDK 的单次尝试期限也会约束重试等待。
+取消任务或任务期限耗尽时，请求和重试等待都会停止。
+
+诊断信息会区分 `LLM request timeout`（检查 `OCR_LLM_TIMEOUT` 或 provider 的
+`timeout_sec`）和 `caller deadline exceeded`，后者表示调用方操作的上下文期限已耗尽。
+如果耗尽的是 review/scan 任务期限，应检查 `--timeout`；后台内存压缩、`ocr llm test`
+等其他操作有各自独立的期限。
+
+### 通过命令获取 API key
+
+除了把 key 直接写进配置文件，还可以用 `api_key_cmd` 在运行时从密钥管理器
+（1Password、`pass`、`gopass` 等）获取。命令去除首尾空白后的单行 stdout 即为
+key。旧版 `llm` 配置块也有对应的 `auth_token_cmd`。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+操作系统自带的密钥环同理，直接用系统已有的命令即可，key 保存在 Keychain 或
+Secret Service 中，而不是 `config.json` 里：
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service：GNOME Keyring、KWallet 等）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+优先级：静态 `api_key` 始终优先（两者都设置时忽略命令并打印警告）；否则运行
+`api_key_cmd`；只有两者都未设置时，OCR 才回退到 provider 对应的环境变量。
+
+命令在每次 `ocr` 调用时运行一次，且必须成功：非零退出、空输出、多行输出或超过
+64KiB 的输出都会被视为硬错误（OCR 绝不会静默回退）。命令须在 60 秒内完成，这也
+包括你回应提示所花的时间。命令会继承你终端的 stdin 和 stderr，因此交互式提示
+（pinentry、Touch ID）既能显示也能作答。如果命令留下了仍持有其 stdout 管道的后台
+守护进程（`gpg-agent`、首次使用时启动的 `op` 守护进程），凭据依然能取到，但每次
+`ocr` 调用都会额外等待 5 秒直到该管道关闭——把守护进程的输出重定向掉
+（`>/dev/null 2>&1`）即可消除这段等待。
+
+在 Windows 上命令通过 `cmd.exe` 而非 `sh` 执行，因此为其中一方编写的命令通常
+无法直接移植到另一方：`%VAR%` 和 `^` 是 `cmd.exe` 的元字符，而 `$VAR` 展开和 `\`
+转义在那里并不适用。带引号的参数会原样传递，因此
+`op read "op://Private/My Vault/api-key"` 可以按原样使用。
+
+由于这个值会作为 shell 命令执行，`config.json` 属于可信输入——请确保它归你所有、
+其他用户不可写（OCR 写入时使用 `0600` 权限）。
+
+### 额外的重试状态码
+
+有些 LLM 提供商会用非标准的 4xx 状态码表示临时错误，例如在限流时返回 `403` 或
+`400`。可通过 `retry_codes` 让 OCR 对这类请求使用 SDK 现有的重试机制。
+
+`retry_codes` 是整数数组，可配置为 `llm.retry_codes` 或
+`custom_providers.<name>.retry_codes`。通过 `ocr config set` 设置时，以逗号分隔
+传入状态码：
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+只接受 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 SDK 重试；直接从配置文件
+读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，OCR 还会输出
+警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
+因此不能加入 `retry_codes`。
+
+### 提示词上限
+
+`max_tokens` 是单个子任务的**提示词**（输入）上限（一个文件或一组相关文件）。
+内置模板默认值为 `ocr review` 200,000 token、`ocr scan` 58,888。如果模型上下文窗口不同，可以通过保存
+`max_tokens` 来调整：
+
+```bash
+ocr config set max_tokens 400000
+```
+
+该设置同时作用于 `ocr review` 和 `ocr scan`。使用 `--max-tokens` 可以在不修改
+已保存配置的情况下临时覆盖一次：
+
+```bash
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
+```
+
+单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
+的默认值。该上限只约束**提示词**：模型的输出上限由单独的
+`MAX_COMPLETION_TOKENS`（默认 `16384`）控制，因此调高 `max_tokens` 不会连带放大
+输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
+可以用 `ocr config unset max_tokens` 恢复为内置默认值。
+
+### 评审投入档位（effort）
+
+`effort` 决定每个子任务要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），
+`high` = 3 轮。轮数越多召回越高，耗时与 token 消耗也越多。
+
+```bash
+ocr config set effort high     # 持久化
+ocr review --effort low        # 仅本次运行
+ocr config unset effort        # 恢复默认的 medium
+```
+
+优先级为：`--effort` 参数 > 已保存的 `effort` > 默认 `medium`。
+
+### 验证连通性
+
+```bash
+ocr llm test
+```
+
+### 复用已有的环境变量
+
+如果你已经配好了 Claude Code 的 `ANTHROPIC_*`，或 OCR 自己的 `OCR_LLM_*`环境变量，OCR 会自动识别，无需再写配置文件。
+
+### 使用 CC-Switch
+
+如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了
+[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，
+可以将供应商的 `url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
+
+```bash
+# Claude（Anthropic 兼容）
+ocr config set providers.anthropic.url http://127.0.0.1:15721
+
+# Codex / OpenAI 兼容 — 将该供应商的 url 键设为代理地址
+ocr config set providers.<name>.url http://127.0.0.1:15721/v1
+```
+
+`api_key` 可设置为任意值。`extra_body`（及其他按供应商字段）依然生效。
+
+### 发送厂商专属字段
+
+某些 provider 需要非标准的请求字段（如 Bedrock 风格的 `thinking`）。用`extra_body`（合并进每次请求）即可发送，无需改源码：
+
+```bash
+ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### 提示词缓存的会话亲和性
+
+OCR 为每个 LLM 对话派生一个提示词缓存亲和性密钥，作用域为评审会话及其中的任务（`<会话 ID>-<任务类型>-<作用域哈希>`）。提示词缓存按前缀匹配，因此按对话划分密钥可让每个不断增长的对话（如某个文件的评审工具循环）稳定路由到同一缓存节点，而不是把整次运行压在一个热点密钥上；密钥中的会话 ID 前缀可将供应商侧缓存日志与 `ocr session` 记录对应。
+
+要启用，请在供应商期望的位置——`extra_headers` 或 `extra_body` 的值中——嵌入 `{ocr_session_key}` 模板变量。OCR 会在每个请求中将其替换为该对话的密钥；未配置时不会发送任何内容：
+
+```bash
+# 通过 OpenAI 风格的请求体字段传递（例如 prompt_cache_key）
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# 通过 HTTP 请求头传递（例如 x-session-affinity）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
+```
+
+## 配置评审语言
+
+`language` 决定评审评论用哪种语言输出，未设置时默认英文：
+
+```bash
+ocr config set language 中文
+ocr config set language English
+```
+
+## 另见
+
+- [快速开始](../quickstart/)——最小化设置与首次评审。
+- [CLI 参考](../cli-reference/)——review 命令接受的每个参数。

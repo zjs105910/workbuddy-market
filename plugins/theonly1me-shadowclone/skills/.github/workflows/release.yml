@@ -1,0 +1,87 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    uses: ./.github/workflows/ci.yml
+
+  prepare:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      tag: ${{ steps.pending.outputs.tag }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Find an unpublished release at this commit
+        id: pending
+        run: |
+          name="$(node -p 'require("./packages/core/src/product.json").name')"
+          version="$(node -p 'require("./packages/core/src/product.json").version')"
+          tag="v$version"
+          if ! git fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"; then
+            echo "$tag does not exist yet"
+            exit 0
+          fi
+          if [ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ]; then
+            echo "$tag belongs to another commit"
+            exit 0
+          fi
+          status="$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${name/\//%2f}/$version")"
+          case "$status" in
+            200) echo "$name@$version is already on npm" ;;
+            404) echo "tag=$tag" >> "$GITHUB_OUTPUT" ;;
+            *) echo "npm registry answered $status for $name@$version" >&2; exit 1 ;;
+          esac
+
+  publish:
+    needs: [prepare, gate]
+    if: needs.prepare.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    env:
+      TURBO_FORCE: true
+      TURBO_TELEMETRY_DISABLED: 1
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: bun install --frozen-lockfile
+      - run: bun run stage
+
+      - name: Match the tag to the package version
+        run: |
+          version="$(bun --print 'require("./packages/core/src/product.json").version')"
+          staged="$(bun --print 'require("./packages/cli/out/package/package.json").version')"
+          tag="${{ needs.prepare.outputs.tag }}"
+          if [ "${tag#v}" != "$version" ] || [ "$staged" != "$version" ]; then
+            echo "tag $tag, product.json version $version, and staged version $staged must match" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish ./packages/cli/out/package --access public --provenance

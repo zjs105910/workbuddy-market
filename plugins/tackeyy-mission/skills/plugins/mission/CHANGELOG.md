@@ -1,0 +1,479 @@
+# Changelog
+
+[Japanese](CHANGELOG.ja.md) | **English**
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [2.6.0] - 2026-08-14
+
+- test: schema v1-v4 golden snapshots now cover the known versions, and unknown schema versions fail closed during validation (#483).
+
+- docs: state-management and ADR-002 now reflect the implementation details instead of the earlier draft wording (#484).
+
+- docs: ADR-005 now documents the Typed Kernel / UnitOfWork migration path and its transition plan (#485).
+
+- fix: `plan-import` and `adopt-core` no longer publish evidence before lease validation completes, closing the premature-exposure window (#498).
+
+- chore: distribution mirrors and the Python compatibility gate now recurse through the package tree, matching Wave 3 / D1 expectations (#499).
+
+## [2.5.0] - 2026-08-14
+
+- feat: Added `planning adopt-core` so policy-v1 core planning can validate and publish a canonical `mission-plan/1`, then continue through the existing execution gate with matching `next` and failure guidance (#465).
+
+- fix: `planning adopt-core` guidance now requires the command before execution on both inline and planner paths, and invalid iterations or non-planning phases fail without mutating state (#469).
+
+- fix: `planning adopt-core` now accepts a freshly initialized session with `iteration=0`, fixing the regression that rejected every real `init` state and blocked the first plan adoption (#471).
+
+- fix: Publish transaction failures now include the comparison value and the mismatched fields, making rejected publish diagnoses explicit (#468).
+
+- test: FIFO artifact tests now classify timeout failures as a distinct observable outcome, so timeout exits can be separated from other failures (#480).
+
+- docs: ADR-003 now defines the review-tier boundary contract and the FP/FN corpus used to calibrate it (#481).
+
+- fix: Artifact commands now wait for lease validation before publishing files, closing the window where `init`, `render`, `export`, or `publish` could expose artifacts too early (#475).
+
+- fix: Review-tier keyword matching now uses lexical boundaries, preventing partial-word matches from escalating tier incorrectly (#482).
+
+- fix: `MISSION_CLI_VERSION` and the distribution version now share one source of truth, removing the mismatch between the CLI constant and the published package version (#479).
+
+- fix: Successful evidence completion now records the terminal outcome in `next_action`, so `report-terminal` is emitted when evidence work finishes (#477).
+
+- fix: Specialist evidence is now referenced by invocation ID plus content digest, giving each invocation a unique content-addressed handle (#478).
+
+- fix: Stop-hook freshness checks now run through one Python implementation, keeping freshness decisions consistent across code paths (#476).
+
+## [2.4.0] - 2026-08-14
+
+- feat: Added `iteration_recovery` aggregation to `stats` and `audit` so recovery counts are summarized for #461.
+
+- fix: Learning brief now falls back automatically to the worktree main root, and `--root` was added for explicit override (#463).
+
+- test: Strengthened boundary-value tests and intent comments/docstrings around `iteration_recovery` (#462).
+
+## [2.3.0] - 2026-08-13
+
+- Added bounded command outcome telemetry for review import/finalization, transition gates, and command providers. Records classify `ok`, `expected-gate`, `invalid-input`, `external`, or `internal-error`, retain opaque retry lineage, preserve state bytes for rejected gates, and report deduplicated root-event/retry/corruption counts through `stats` and audit (#386).
+
+- Scoring now keeps quality assessment to four axes and records reviewer agreement separately. Manual score imports use a dedicated typed, content-addressed capture route: all score fields must be finite non-boolean values in range, and open High counts must be non-boolean non-negative integers. Audit/statistics show score provenance status (#383).
+
+- Review aggregates now re-derive every gate value from archived inputs at write and pass boundaries, rejecting missing or self-consistent-but-false claims. Force approvals bind a versioned terminal-state projection and audit detects copied or mutated terminal state. Approval verifier trust is the user-only `$XDG_CONFIG_HOME/mission/approval-verifiers.json` `mission-approval-verifier-registry/2`: its unique registration pins `entry_point`, `distribution`, `version`, and `source_digest`; parent and child recheck that pin, and load plus callback run in a reaped bounded child process (#383).
+
+- New score writes record immutable, content-addressed scoring and review provenance regardless of a mutable or missing schema marker; a successful write upgrades state to schema v4 while historical terminal data remains read-only. Forced passes require a canonical request/response/receipt envelope with a consumed marker rather than a boolean assertion. Hosts may map only safe verifier and installed entry-point identifiers in fixed repository/user registries; malformed or linked registries, uninstalled/ambiguous entry points, arbitrary providers, load errors, invalid typed responses, and timeouts fail closed. Audit validates that same envelope before classifying it verified (#383).
+
+### Added
+
+- Learning brief now aggregates `failure_ledger` general fix rules across sessions and archived terminal states, returning recurrence-ordered guidance via the read-only `learning brief` command; SKILL guidance injects it into planner and executor briefs while keeping reviewers independent (#457).
+- Planning-provider KPI conformance, structured plan contract validation/import, lifecycle handoff, and provider preflight/application hardening now keep plan evidence, provider identity, and invocation packets fail-closed (#417, #418, #415, #414, #413).
+- State/archive/review instrumentation now records host execution correlation, review-generation lineage, immutable audit snapshots, benchmark calibration, specialist checkpoints, review-import structured outcomes, and resume docs (#410, #409, #408, #407, #406, #405, #404).
+- Pre-Gate evaluation cache now records `pregate record/check`, keys entries by `issue_ref`, and tracks `subject_digest` hits, misses, stale data, and fail-safe fallback during `init` reference recording (#430).
+- Pregate digest now supports an ahead-of-time fill recipe that preloads the digest before the next check, keeping the cache warm for repeated runs (#437).
+- Non-accepted pregate verdicts now trigger explicit `init` and `next` warnings so the operator sees the mismatch before continuing (#439).
+- Checker evidence handoff now uses local `publish` / `await` / `verify` flow with atomic writes, digest comparison, and timeout exit 3, which removes GitHub comment polling from the normal path (#427).
+- Parallel mission merge queue now supports `enqueue`, `status`, `next`, `verify`, and `mark`, and invalidates queued work when the base moves so the flow can refreeze cleanly (#431).
+- `queue enqueue --from-state` now auto-matches `revision_scope` from the current state, so follow-up queue entries stay aligned with the originating revision (#440).
+- lane-report now breaks out wall-clock, active, and waiting time by `session_role`, applies SLO classification, and groups reports by `root_run_id` for bench collection and SLO aggregation (#429, #441, #438).
+- invalid-input and expected-gate failures now emit self-repair HINTs with a correct invocation example, a `--json` guidance array, and telemetry marking so the next retry can recover faster (#428).
+- Smaller release-window follow-ups are also retained here for traceability: #432, #433, #434, #435, #436, #444, #446, #447, #448, #449, #450, #454.
+- Repository-managed `make test-smoke`, `make test`, and `make test-e2e` targets now share the CI entrypoint, create a pinned test environment when needed, and emit exact tree/test-manifest reports (#391).
+- State archive compaction now records canonical and superseded state relations in immutable content-addressed generations without deleting physical lineage. Audit reads materialized canonical records by default and exposes full physical lineage with `--forensic` (#391).
+- Stop-hook block output now fingerprints the unfinished session set, phase, and lease fields. It emits full detail only on change or after the heartbeat TTL, otherwise returning a compact blocker category plus one next command. Project-local `mission-stop-guard/1` state keeps atomic block/reinjection/detail/heartbeat counters without mutating the fenced session (#389).
+- Parallel missions can now create a versioned planned-child manifest, classify each child as planned/running/waiting/pass/halt, and close the group only after every planned child is terminal and all leases are released. Group status reports actual artifact, activity, and review-provenance coverage; duplicate, unplanned, malformed, or unsafe manifests fail closed without rewriting rejected state (#388).
+- Specialist selection and invocation now use a provider-neutral lifecycle contract: every new session begins with an explicit selection checkpoint, recommendation records share one opaque `selection_id`, and invocation records use a unique `invocation_id` through started-to-terminal transitions. `mark-passes` rejects pending selection or selected providers without matching terminal evidence unless `--specialist-waiver` records an explicit reason; legacy missing checkpoints remain read-only and are reported separately as `missing-legacy` (#387).
+- Planning-provider registry selection now fails closed on unknown complexity, malformed version 2 contracts, provider-id tombstone drift, duplicate physical inputs (including hardlinks and symlinks), mutable/non-regular/oversize registry snapshots, and nonportable command execution configuration. JSON/YAML numbers share bounded strict parsing and invalid numeric input follows normal precedence-barrier semantics instead of globally aborting higher valid input; nested flow collections share strict depth rejection. Command timeouts require exact bounded integers, v1 source metadata is discovery-owned, FD read/metadata errors are structured, and projections mark irreversible external locators as `explicit-resupply-required`. Until current-registry runtime revalidation lands in #395, command providers require a bare PATH command with empty arguments/environment and no explicit result contract. A recursive public-record allowlist now validates every nested specialist surface before output or atomic state writes and prevents private paths, raw nested provider configuration, unsafe legacy state, and POSIX/Windows evidence paths from reaching stdout, backups, archives, audit snapshots, or invocation evidence. Invocation pending entries, selection metadata, bounded iteration/timeout, and planned evidence locators are validated before state mutation, process spawn, or archive publication; staged archives roll back if state publication fails. Evidence input uses one bounded stable non-symlink regular-file descriptor and shared cross-platform path sanitization, including Windows network/device/drive-relative forms and bare or path-bearing home locators. Bare drive labels, embedded general tilde text, ordinary multi-letter colon tokens, and strictly allowlisted HTTP(S) URLs remain unchanged. URL protection accepts only ASCII DNS/IPv4/bracketed IPv6 authorities, optional bounded numeric ports, valid percent escapes, and no user information; path, query, and fragment are also validated against their raw RFC 3986 component grammars, with explicit Unicode retention. Malformed components fail closed, and every `file:` form is treated as local. Embedded local paths after punctuation are rejected/redacted, and candidate scores use overflow-safe 0..1 validation (#394).
+- Activity measurement now starts automatically with planning, follows portable defaults for every non-terminal phase, and lets `advance --phase` use that default unless an explicit activity override is supplied. Review aggregation atomically begins scoring measurement, terminal writers close any open segment, and recovery records bounded unobserved-gap reasons. Audit reports explicit elapsed conservation and treats coverage below 70% as an instrumentation gap before emitting slow-run findings (#382).
+
+- Artifact production now has an end-to-end portable contract: init records `pending` applicability, executor handoff resolves it before review, and nested `artifact` identity stores repository-relative path, SHA-256 digest, byte size, and producer run id. Aggregate review and pass marking share a bounded regular non-symlink validator and reject mutation or substitution. Stats and audit report terminal, profile-aware coverage with conserved eligible/observed/missing/invalid and clean/findings counts; explicit not-applicable is skipped rather than clean, rollout remains warning-only below 95%, and the gate activates per profile after reaching that threshold. Top-level `artifact_path` remains a read-only legacy fallback (#381).
+- Session state schema v3 adds a role-aware `terminal_outcome` taxonomy shared by state writers, `stats`, and audit. Implementer pass rate now compares only `completed_pass`, `failed`, and `incomplete` implementer outcomes; checker/planning/analyze evidence completion is reported separately, `routed-goal` becomes the neutral `routed_elsewhere` outcome, and active/release/non-comparative records cannot distort `low-pass-rate`. Legacy v1/v2 records are derived read-only, contradictory explicit outcomes fail closed, and the 31-record sanitized evidence fixture is conserved without actionable-halt pollution (#380).
+- Bounded-context execution is now observable without changing its trigger, fallback, or review gates: `context-manifest` records each iteration's path, SHA-256 digest, and generation time in session state; `aggregate-reviews` archives expected/effective manifest evidence and emits an exit-0 warning when bounded context was expected but not generated; `stats --json` reports expected, generated, and full-fallback counts; and bounded mission-reviewer output identifies `context: bounded` in its notes. Manifest observations require strict positive-integer iterations (excluding booleans and floats) and a timezone-aware ISO generation timestamp before aggregate or stats count them. Malformed or unreadable paths, including embedded-NUL tampering, are treated as ungenerated without aborting aggregation or stats (#352).
+- Adaptive Simple-task routing now supports a configurable goal dispatch provider (#355): portable `inline` remains the default, while explicit mission guidance, `--goal-dispatch`, project `.mission/routing.yml`, or user configuration can select `host-native`. Init, set, and next verdicts record the effective dispatch; unknown hosts and invalid configuration warn and fail safe to inline without changing routing gates or `--force-mission` behavior.
+
+### CI / Testing
+
+- `pytest-xdist` now parallelizes the test suite and achieved a measured 5.5x speedup on the release run (#451).
+- Docs/results-only PRs now take the guard-only fast path, and the merge workflow documents the updated behavior (#453).
+- Quality timeout is now 25 minutes, and pregate digest tests cover the previously unverified path with the public digest helper (#445).
+- The SLO run was recorded for 2026-08-13, and lane-report auto-collection remained wired into the bench runner (#443).
+
+### Documentation
+
+- Worktree-run mission init placement rules are now documented in `SKILL.md` references (#455).
+- Merge-operation guidance now covers auto-merge and `update-branch` handling alongside the docs-only fast path note (#453).
+
+### Fixed
+
+- Stop-guard CWD resolution now prefers hook input, which avoids the agent CLI test false failures (#442).
+- `review_tier` derivation no longer fires on compound technical nouns such as public API wording (#452).
+- `archive-worktree` now handles repository-managed artifacts with repo-artifact references, index-independent verification, staged diagnostics, and symlink refusal (#456).
+- `aggregate-reviews` now runs a WARN-only structural lint when state declares `artifact_path`, detecting empty H1-H3 sections and English/Japanese forward-reference-only stubs without changing reviewer findings, scores, or exit status. Results are recorded in review aggregate evidence and state, while `stats --json` reports empty-section, stub-forward-reference, and clean counts for measuring incidence before any future gate decision. Path-resolution and read failures, including embedded-NUL tampering and non-regular files, fail open as `artifact_lint_status=skipped`, clear any prior lint observation to prevent stale stats, and remain distinct from a successful `clean` observation. Empty ATX titles, closing hash sequences, and invalid backtick-fence info strings follow Markdown syntax (#351).
+- `aggregate-reviews` now requires `--reviewer-window` for every perspective when two or more reviewers are supplied, exiting 2 with the missing perspectives and required format; `review-finalize` inherits the fail-closed gate and never pushes a score after this aggregation failure. Single-reviewer runs remain exempt, while reported serial execution remains WARN-only (#350).
+- Reviewer output bounds are now observable without becoming a quality gate (#353): `aggregate-reviews` measures each input's `mission-review/1` JSON bytes and template-external prose bytes/ratio, records the evidence and cross-session p50/p90 stats, and emits an exit-0 warning above provisional 20 KB / 0.7 thresholds. Scoring, findings, and agreement results are unchanged.
+- Session ownership now uses a 15-minute fenced lease CAS (`owner_session_id`, random `lease_id`, monotonic `fencing_epoch`, and `lease_expires_at`) instead of PID as the source of truth. Mutating commands renew the lease; read-only commands do not. Unexpired foreign writers and stale tokens exit 2, expired takeover increments the epoch and appends `lease_history`, `resume` performs the takeover, and lease-free legacy states acquire epoch 1 without rejection. `cleanup-stale` now prioritizes expired lease plus missing post-expiry activity heartbeat, while legacy states retain the prior PID rules (#354).
+  Lease-bearing states require the explicit `MISSION_LEASE_ID` even when the session ID or PID fallback matches; Stop hook and `resume` no longer let diagnostic PID liveness override lease ownership, and renewal never shortens expiry during clock rollback. A token-free legacy acquisition now emits a machine-readable `MISSION_LEASE_CARRIER` only after atomic publish so an independent next process can explicitly carry the issued token without reading it from state. Stop-hook cleanup of an expired idle lease now reuses the `cleanup-stale --execute` janitor CAS, which revalidates expiry and heartbeat under lock and refuses a concurrent renewal or takeover without impersonating the owner token.
+
+- Mission audit now classifies explicit owner freeze / intentional close / replacement-switch halt reasons as non-actionable `intentional-freeze-switch` while preserving raw halt counts, reducing false-positive P1 `halted-runs` in operational state-debt audits (#347).
+
+## [2.2.0] - 2026-08-02
+
+### Added
+
+- Critic-scope recording is now a hard gate (#326): `aggregate-reviews` (and `review-finalize`, which inherits it) exits 2 at `iteration >= 2` when the session state has no `critic_has_new_scope`, with the decision rule and `set` command in the error. The #309 guidance-layer enforcement was observed bypassed by an orchestrator that skipped `next` before reviewing (disc-v3); the aggregation-side gate is fail-closed with no escape hatch, and iteration 1 is unchanged.
+
+- The mission-vs-goal benchmark adds a `portfolio` cohort (`tasks.portfolio.json`, 8 tasks: 3 Simple / 3 Standard / 2 Complex) measuring the routing-inclusive effective overhead of the mission entrance: Simple tasks exercise adaptive routing (#276) to the goal contract, Standard tasks reuse focused subsets of the discriminating fixtures, and Complex tasks reuse the fail-first audits. Both its own answer key and the reused discriminating answer key are hidden from run clones. Structure, complexity mix, answer-key hiding, fixture existence, and marker discoverability are test-enforced.
+
+- The irreversible-keyword escalator now suppresses noun references to "release" — a match immediately followed by a number, version, `brief`, `notes`, or `mission` (e.g. "Release 6", "Release brief") no longer escalates a Standard mission to full tier, recorded as `noun-reference-non-operation` in the audit trail. The 2026-08-01 production audit measured a 36% false-positive rate from document/version names; verb usage ("release the hotfix") still escalates (#313).
+
+- Sessions carry a `session_role` (`implementer`/`checker`/`planning`/`analyze`/`release`, set via `init --role`, default `implementer`), a new `evidence-submitted` halt category marks the normal checker exit, and `summarize_pass_rate_population` adds additive `role_counts` plus an implementer-only pass rate — the 2026-08-01 production audit found 75% of sessions are checker-family roles whose by-design iter-0 exits were polluting the pass-rate statistics. Existing fields keep their all-role meaning; old states without the field count as implementer (#311).
+
+### Changed
+
+- `next` now returns a `command_sequence` — the happy-path commands from the current phase through `closeout` — which the orchestrator may execute without re-consulting `next` unless a gate fails (exit 2), and Standard-complexity iteration-1 missions plan inline (`plan-inline`) instead of spawning the mission-planner subagent, with the same plan artifact requirements (#339). Grounded in portfolio-v4: mission used 19-31 turns vs goal's 5, and the time ratio (6.9-14.5x) exceeding the token ratio (4.0-4.7x) is per-turn context reprocessing. Complex, full-tier, and iteration>=2 planning keep the subagent path; gate semantics unchanged.
+
+- The benchmark now observes adaptive routing instead of suppressing it (#333): the mission-arm prompt permits following a routing verdict (goal-contract artifact with the routing noted in Evidence) and no longer forces the loop, records carry a first-class `mission_routed` flag (routed-goal halts, and Simple tasks completing without state via init-path routing — the latter no longer invalidated by the #261 guard), per-arm summaries count `routed_records`, and the portfolio cohort's three Simple tasks are replaced with minutes-scale versions (120-constant reference audit, 90-SKU reconciliation, 43-booking overlap scan) so the routing entrance overhead can fit within the V1 parity band.
+
+### Fixed
+
+- Reviewer parallel execution is now verifiable and tracked (#338): `aggregate-reviews` warns when reviewer windows are unreported for 2+ reviewers (portfolio-v4 measured all three Standard runs serial, API time ~= wall time), the parallel/serial/unknown observation is persisted to the session state as `last_parallel_execution`, `stats` aggregates `parallel_review_counts`, `next` marks run-reviewers with `parallel_spawn_required`, and the SKILL contract makes single-message parallel spawn mandatory for Claude Code with the measured cost of serial spawning. Gate semantics unchanged.
+
+- The benchmark mission arm now pins the implementer contract (#341): the prompt requires completing at least one scored review iteration before stopping (portfolio-v4's cx-ledger record halted checker-style with evidence submitted and no scored review, so its wall-clock measured no gated loop), records carry a first-class `mission_evidence_only` flag extracted from the halt category, per-arm summaries count `evidence_only_records`, and any such record appends a comparability warning to the summary limitations.
+
+- Adaptive routing is now enforced at the command layer (#330): `set complexity=Simple` itself executes the routing verdict when conditions hold — the state is atomically halted as `routed-goal` and the command prints the goal-contract guidance, no longer depending on the orchestrator consulting `next` (which portfolio-v2 measured firing only 1 of 3 times). Exclusions (signals, `--issue-ref`, `--force-mission`, checker roles, user-pinned tiers, scored missions) are unchanged, and the #325 next-layer gate remains as defense in depth.
+
+- Adaptive routing now also covers the post-init classification path (#325): when complexity is settled to Simple after `init` (the `set complexity=Simple` flow that portfolio-v1 showed bypassing #276 entirely), `next` at planning returns `route-to-goal` — close the state with the new `routed-goal` halt category (excluded from completed/implementer pass-rate denominators as `routed_count`) and complete under the goal contract. Signals, `--issue-ref`, `--force-mission` (now recorded in state), checker roles, user-pinned tiers, and scored missions all keep the loop.
+
+- Activity-segment coverage no longer depends on which agent runs the mission (#312): `next` command hints now guide phase transitions through the atomic `advance --phase --activity` (they previously suggested the non-recording `set phase=` path, explaining the 13% Claude Code vs 86% Codex coverage measured in the 2026-08-01 audit), and `set phase=<non-terminal>` opens a phase-appropriate activity segment as a fallback when none is open — starting at the set time, never repainting the past, and never replacing an already-open segment.
+
+- `cleanup-stale` no longer applies the live-PID no-score stale judgment to checker-family roles (`session_role != implementer`), whose by-design scoreless sessions were batch-staled when sharing a parent process PID (7 production cases on 7/25-27); dead-PID orphan collection still applies. The command also emits a `duplicate-pid` warning when multiple active sessions share one PID, making parent-managed parallel missions observable (#314).
+
+## [2.1.0] - 2026-08-02
+
+### Added
+
+- `mission-state.py resolve-archive` attaches auditable resolution metadata (`resolved`/`superseded`/`closed`, owner issue, evidence URL, note) to terminal halted records under `.mission-state` without altering `halt_reason`, with fail-closed validation of target paths and record states (#301).
+
+- `issue_ref` is normalized at save time so format variants can no longer bypass duplicate-work detection (#295), and the S3 duplicate-work WARN now also covers halted-but-unfinished sessions with a stale annotation (#296).
+
+- `resolve-archive` gains a `--frozen-snapshot` opt-in flag (#318). Archive-resident frozen snapshots (records with `loop_active=true` or empty `halt_reason` saved mid-flight) can now receive resolution once the corresponding live session (`sessions/<session_id>.json`) is absent or terminal (`loop_active=false`). An active live session rejects even with the flag (fail-closed). Application to `sessions/` remains rejected. `_validate_resolve_archive_record` project_root check is relaxed to allow the record's project_root to resolve to the cwd or any subdirectory of cwd (e.g. worktrees), using `Path.relative_to` for safe path comparison instead of string prefix matching. `is_stale_active_no_score` now excludes records whose `resolution_status` is `resolved`/`superseded`/`closed` from the stale-active-no-score tally (#318).
+
+- `mission-state.py review-finalize` runs aggregate-reviews and push-score as one transactional command (aggregation failure pushes no score), and `closeout` runs mark-passes and next in order, returning combined JSON — gate failure keeps the mark-passes exit code, emits next-style guidance, and leaves state untouched. Both reuse the existing validators (min-reviewers, strict review validation, findings gate, re-push protection, threshold, agreement, specialist accounting) without duplicating them, cutting two orchestration turns per iteration from the standard flow. Split commands remain fully supported (#283).
+
+- `aggregate-reviews` gains `--reviewer-window <perspective>=<start>..<end>` (repeatable, optional): the orchestrator self-reports each reviewer's execution window, and the command records `parallel_execution: true|false|"unknown"` plus the reported windows in the aggregate evidence and result JSON. Disjoint windows emit a WARN (serial execution detected) but keep exit 0 — observation only, no gate change, review JSON verbatim contract untouched. Malformed windows, unknown perspectives, duplicates, and end-before-start are rejected strictly; naive timestamps are normalized to UTC (#282).
+
+- The orchestrator prompt layer gains three output/turn disciplines grounded in the discriminating-v2 measurement that mission wall-clock tracks total generated tokens almost 1:1: final reports and artifacts are bounded to evidence tables + tool-computed gate values + archive reference paths (no verbatim re-quoting of reviewer output, #280); mission-reviewer output is bounded to the scoring/issues template + `mission-review/1` JSON with re-derivation kept internal (#281); independent tool calls are issued in parallel within a single message while dependent operations stay sequential (#284).
+
+- Session states now carry `last_activity_at`, stamped automatically by `atomic_write_json` on every agent-driven session write and explicitly skipped (`administrative=True`) by janitor writers such as `cleanup-stale` / `halt --all` terminalization (#310). `duration_sec` and both state-age chains prefer `last_activity_at` over `updated_at`, stopping the wall-clock inflation (up to 500x on company-os #583) caused by resolution/batch writes overwriting `updated_at`. Old states without the field keep their previous behavior.
+
+- `next` now mechanically enforces the #258 critic-scope recording (#309): at `phase=reviewing` with `iteration >= 2` and `critic_has_new_scope` unset, it returns `record-critic-scope` (with the decision rule in the summary) instead of `run-reviewers`, closing the path where agents skipped the prose instruction — the 2026-08-01 production audit found 0 recordings across 115 sessions, leaving the #240/#241 diff-review optimizations permanently dormant. Once recorded, run-reviewers guidance resumes with the #240 reviewer reduction and #241 context mode; iteration 1 and pass-gate semantics are unchanged.
+
+- Adaptive routing (#276) is now disabled whenever `init` receives `--issue-ref` (#304): Issue-bound work implies a governance wrapper contract — such as company-os's `mission-company-os`, whose strict preflight requires active mission state immediately after init — so a Simple-classified Issue task stays on the mission loop instead of being routed to the goal contract with no state. Routing now fires only for issue-ref-free, Simple, signal-free, unforced missions.
+
+- `mission-state.py init` now performs adaptive routing (#276): a Simple-complexity mission with no irreversible/security signals returns `route: \"goal\"` and creates no session state — the orchestrator skips the mission loop entirely and completes the task directly under the goal contract (Goal / Result / Evidence / Assumptions / Stop Condition), stating the routing in its final report and claiming no mission pass. Grounded in the clean discriminating-v2 measurement (quality tied, mission 5.4x wall-clock / 4.9x cost) and the production observation that ~95% of missions pass at iteration 1. Simple missions carrying risk signals stay on the mission loop, an explicit `--review-tier` keeps the loop (user intent), and `--force-mission` forces the loop unconditionally. Works identically in Claude Code and Codex via the shared canonical skills (#276).
+
+- The mission-vs-goal benchmark runner gains `--parallel N` (default 1, fully backward compatible): independent records — already isolated in per-record clones — execute on a worker pool, cutting a 10-record run from ~2.8 hours to ~1 hour at 3 workers. JSONL appends and progress lines are serialized under a lock, worker exceptions propagate, and `--stop-on-blocked` stops launching new entries after a blocked record while letting in-flight entries finish (#270).
+
+- The benchmark runner now detects and prevents permission-mode contamination (#268): every child `claude` process runs with `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` so the runner's `--permission-mode acceptEdits` is no longer silently downgraded to default when launched from a Claude Code session, each record carries a first-class `permission_mode_degraded` flag detected from the child's stderr, per-arm summaries count degraded records, and any degraded record appends a cross-run-comparability warning to the summary limitations.
+
+- The mission-vs-goal benchmark gains a `discriminating` cohort (`tasks.discriminating.json`, 5 tasks) designed to remove the quality ceiling observed in openworld-v1: 7-9 quality markers per task spread across 3-5 fixture files, documented-override / permitted-difference / valid-but-suspicious decoys scored via forbidden markers, and two `fail_first` tasks (36-cell config audit, five-document ledger reconciliation) built to make single-pass coverage fail review and force `iteration >= 2`, giving the #240/#241 diff-review path its first runtime observations. Structure, marker density, fail-first presence, fixture existence, and marker-discoverability-in-fixtures are all enforced by tests. An N>=10 adoption runbook (`discriminating-cohort-runbook.ja.md` / `.md`) defines the smoke gate, the main-run command, and mechanical adoption gates (#262).
+
+- The mission-vs-goal benchmark runner now invalidates mission-arm records whose run never initialized the mission loop: when `.mission-state` is absent after a mission-arm run, the record is reclassified as `run_status=failed` / `failure_kind=mission_loop_not_initialized` / `comparable_attempt=false` (externally blocked records keep their original classification, and corrupted-but-present state is not invalidated because the loop demonstrably started). Per-arm summaries gain `comparable_average_quality_score`, `comparable_average_elapsed_minutes`, and `comparable_cost_usd_mean` computed over comparable records only, so an invalid record can no longer dilute headline speed/cost comparisons; existing aggregate fields keep their historical all-records meaning (#261).
+
+- The mission orchestrator (`skills/mission/SKILL.md`) now wires the #240/#241 state contract into the prompt layer: the Planner-spawn decision also records `critic_has_new_scope` (false when every critic plan step maps to an existing finding id, true when any `new` step exists), the diff-review section follows `next`'s `details.reviewer_count` (state-driven independent 2, replacing the contradictory single-reviewer prose) and always passes `--min-reviewers` to `aggregate-reviews`, and a new bounded-context section generates the context manifest when `details.context_mode == "bounded"`, passing it to reviewers with a fail-safe fallback to full context on generation failure. `mission-reviewer` documents the optional context-manifest input: manifest + specified diff become the primary review scope while scoring rules and the Step-0 test obligation stay unchanged (#258).
+
+- `mission-state.py context-manifest --iteration N --out <path>` generates a bounded context manifest JSON (`mission-context-manifest/1` schema) containing mission goal, iteration, and prior findings extracted from `score_history`. The `_derive_next_action` reviewing block now returns `context_mode` in its details: `"bounded"` when `iteration >= 2` and `critic_has_new_scope is False`, `"full"` otherwise. This enables reviewer forks to receive only the evidence manifest instead of full parent history, reducing context waste on diff reviews (#241).
+
+- The mission-vs-goal benchmark adds an `openworld-discovery` cohort (`tasks.openworld.json`) with 3 tasks that test open-world finding discovery — the solver must independently identify divergences, contradictions, or root causes without a pre-enumerated checklist. Task designs: constant-hunt (cross-service timeout audit against canonical defaults), contradiction-chain (real contradiction + decoy that is actually consistent), incremental-reveal (chronological incident log where the obvious hypothesis is wrong). Scoring uses the same `quality_markers` / `forbidden_markers` / `hidden_paths` infrastructure as the tail cohort (#251).
+
+- `_derive_next_action` returns `reviewer_count: 2` (instead of full count) when `iteration >= 2` and `critic_has_new_scope` is `false`, reducing diff-only review overhead by up to 1/3 of reviewer model work. The `critic_has_new_scope` field is settable via `set` and defaults to absent (safe: full count). `aggregate-reviews` gains `--min-reviewers N` which rejects inputs with fewer than N reviewer JSONs (exit 2), preventing agreement forgery. The `next` command_hint automatically includes `--min-reviewers` when the effective reviewer count is >= 2 (#240).
+
+- `mission-state.py init --budget-minutes <N>` declares a wall-clock time budget, and the read-only `next` command now returns a `budget_pressure` signal derived from `started_at`: `warn` at 80% (advisory to stop spawning optional specialists/critics) and `exceeded` at 100%, where spawn-heavy next actions (`run-planner`/`run-executor`/`run-reviewers`) are replaced with `consider-halt` guidance to finalize the current artifact and end with `mark-halt --category partial-done`. Cheap local finishing moves (`aggregate-reviews`, `mark-passes`), terminal reports, and `await-user` are never overridden, and gate semantics are unchanged. This prevents the total-loss failure observed on 2026-07-22 where a mission burned its full USD budget and was killed with no artifact. The benchmark runner gains `--mission-budget-minutes` to pass the budget into the `/mission` prompt and now records `total_cost_usd` as a first-class result field so wasted spend on blocked/failed runs is aggregatable (#238).
+
+- `mission-state.py advance --phase <phase> --activity <kind>:<reason>` performs the phase transition and the activity switch in one lock and one atomic write, so a state where the phase advanced but the activity stayed empty can no longer be produced (a structural cause of the 9.96% activity coverage measured in the 2026-07-22 execution-speed audit). Validation (phase normalization, kind/reason enum) happens before the lock and rejects without writing; transitions to `done`/`halted` stay exclusive to `mark-passes`/`mark-halt` so `advance` cannot bypass the pass gate. Calling `advance` with the current phase switches only the activity segment (#237).
+
+- Local authoring now performs a fail-closed source bootstrap before mission state initialization. It fetches `origin/main`, fast-forwards only a clean `main` checkout, verifies the local and remote-tracking commits match, and requires the updated `SKILL.md` to be reread. Dirty, non-main, detached, ahead/diverged, missing-remote, and network-failure cases stop without stale fallback or history rewriting (#229).
+
+- `mission-state.py stats` and `mission-audit.py` now share an exclusive pass-rate health classification and expose finite `raw_pass_rate` and `completed_pass_rate` values with explicit numerators and denominators. Fresh active work remains visible but outside the completed population; stale active work remains actionable and enters that population as non-passing health debt. Separate active, active-no-score, stale, halt, and abandoned counts are always present in JSON and console output. The deprecated `pass_rate` alias preserves each command's historical meaning, and stats now reads the current immutable worktree archive generation used by audit (#208).
+
+- `mission-audit.py --current-since` now maps detected record/item evidence through one registry-driven shared finding model and partitions force-pass, halt/slow/scoring, and specialist-provenance risks with the same inclusive UTC cutoff. One parser handles date/ISO bounds for `--since`, `--until`, and `--current-since`. JSON exposes canonical all/current/historical evidence lists, severity/code conservation counts, and compact count/index views by code; Markdown lists current P0/P1/P2 before historical risks. Historical evidence retains its original severity and provenance but does not enter the current improvement prompt. Missing/invalid timestamps stay current, and omitting the cutoff preserves the prior all-period behavior. Pass severity, required-specialist result gates, and force-approval gates are unchanged (#207).
+
+- Mission state now records bounded, explicit activity segments for active work, external waits, approval waits, reviewer waits, and idle time. `mission-state.py stats` and `mission-audit.py` share one reducer for task/phase R7 p50/p90, kind/reason totals, coverage, unclassified time, and anomaly counts. Crash/resume gaps remain unclassified, legacy phase durations are preserved, and review/pass gates are unchanged (#211).
+
+- `mission-state.py archive-worktree` now copies a terminal worktree session and its state-referenced evidence to an existing separate checkout in the same Git common directory. Updates publish content-addressed immutable generations before atomically advancing `current.json`, so a crash or parallel reader never loses the previous valid generation. A `mission-worktree-archive/1` manifest records session/mission/iteration identity, evidence type, private relative source/archive references, SHA-256, and size; duplicate paths, escapes, symlinks, missing evidence, and integrity failures fail closed. `mission-audit.py` snapshots and preflights the discovered generation before loading its state, resolves scoring and specialist evidence from the validated manifest, and caches validation once per record. It verifies `.mission-state` readiness before descent and records later walk access errors. Non-directory, unreadable, or symlinked `.mission-state` and archive roots, symlinked bundle or generation ancestors, bundles resolving outside the regular archive root, archive/pointer/generation access failures, malformed or unsafe pointers, missing or invalid archived state, and missing or invalid generation manifests produce one deduplicated `invalid-worktree-archive` finding rather than reading outside the root, silently omitting the archive, or falling back to stale files; legacy compatibility applies only when pointer absence is confirmed by `lstat` (#212).
+
+### Changed
+
+- `skills/mission/SKILL.md` shrinks from 217 to ~202 lines with a tightened regression guard (< 260 lines) and adds a per-turn context discipline: read state values via `get --field` / `next` JSON instead of echoing full state, hand reviewer JSON over by path without re-reading it, and lazy-load refs — reducing the per-turn context that the orchestrator re-processes on every turn (#285).
+
+- Complex missions without irreversible/security signals now derive `review_tier=standard` (2 independent reviewers) instead of `full` (3); Critical missions and signal-escalated Complex missions keep `full` with 3 reviewers, and all pass-gate semantics (threshold / open_high / findings evidence / agreement) are unchanged. Grounded in the discriminating-v1 profile where reviewer-wait consumed 62% of mission wall-clock on quality-tied tasks while the third reviewer produced no additional marker detections, and in #240's precedent that two independent reviewers are the minimum viable agreement set (#266).
+
+- The mission-vs-goal benchmark runner now supports `--repeats N` to run every (task, arm) cell N times with `run_index` recorded per record, and the summary reports per-arm marker-score variance plus total/mean `total_cost_usd` (including wasted spend on blocked runs), so flakiness and noise can be separated from real quality differences (#249). Mission-arm records additionally capture `mission_review_tier`, `mission_iterations`, `mission_complexity`, `mission_passes`, and `mission_halt_category` extracted fail-open from the run's mission state, making tier-level cost/quality attribution possible (#250).
+
+- The mission-vs-goal benchmark scorer no longer pins every completed markered record to the 5.0 ceiling. Markered tasks now score `1.0 + 1.0 × validator_fraction + 3.0 × marker_score` (gradient v2) so content recall dominates, while marker-less tasks keep the legacy binary 1.0/4.0 meaning; new records are machine-distinguishable via `quality_score_method` (`..._gradient_v2_...`) and old JSONL results are untouched (#247). The validator gate is now symmetric across arms: only the headings required from both arms (Evidence/Assumptions) gate `validator_pass`, and missing arm-specific headings (3 for goal, 6 for mission) are recorded as `missing_arm_specific_headings` without gating, removing the completion-difficulty asymmetry and the verbosity reward (#248). Both runners share identical `score_from_signals` semantics, enforced by tests.
+
+### Fixed
+
+- The benchmark runner passes explicit `--allowedTools` to child `claude` processes, restoring intended permissions after Claude Code 2.1.219 hardening disabled the `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` opt-out (#292).
+
+- Switching missions within the same session now generation-separates `assumptions` files safely instead of reusing the previous mission's assumptions (#302).
+
+- `cleanup-stale` no longer immediately halts missions whose PID was recorded via the `getppid()` fallback path (i.e. when the agent CLI is not discoverable in the process tree). `find_agent_pid()` now sets `pid_source` to `"fallback"` or `"agent"` in state, and `cleanup-stale` skips fallback-sourced PIDs that died recently (age < stale threshold) instead of treating them as orphans. Truly abandoned fallback sessions (age >= threshold) are still halted. Legacy state without `pid_source` retains the existing immediate-halt behavior (#239).
+
+- `mission-audit.py` now recognizes real-world delegated handoff and explicit merge-approval halt reasons when deriving actionable P1 `halted-runs`. Raw halt counts remain unchanged, stale/orphan states still fail closed as actionable, and the classifier no longer lets Japanese root-handoff or approval-wait wording depress actionable pass rate (#233).
+
+- `mission-audit.py` now preserves raw halt counts while deriving P1 `halted-runs` and a separate `actionable_pass_rate` only from terminal states that still require root-cause action. Structured approval waits, delegated partial completion, user aborts, explicit resolved/superseded evidence, and narrowly recognized external waits remain visible in disposition breakdowns without depressing actionable quality; stale, stagnated, conflicting-gate, unknown, and ambiguous halts fail closed as actionable. The deprecated `pass_rate` alias remains the completed-session rate (#221).
+
+- Non-interactive mission startup now grants only the packaged and repository-local state CLI commands needed by the orchestrator. `mission-state.py init` performs content-preserving, fsynced write probes for the session state directory and assumptions evidence before task execution. A failed probe exits 2 with a structured `blocked-external` halt; if state persistence is also unavailable, the same structured evidence is emitted on stdout without asking for approval. `permission-preflight --json` exposes the same check for explicit diagnostics (#220).
+
+- Irreversible `review_tier` keywords are now evaluated per occurrence with operation-anchored clause and structural-unit context. Negation requires a direct grammatical anchor to that operation rather than any cue within a character window, including contractions, `cannot`, active `not perform/execute`, passive `will/should not be performed/executed`, and equivalent Japanese qualifier forms. Explicitly negated actual operations no longer escalate a Simple/Standard mission, while conditional exceptions, negated non-operation intent, and uncertainty remain conservative; multiple negation cues form a reversal only before the next operation. A global non-operation marker suppresses only candidates whose own context proves meta/non-operation intent, and any execution cue in the same logical unit that is not directly anchored to another named operation vetoes suppression as an ambiguous reference. Quote-only intent is overridden only when execution language immediately around that quote targets its command, including a passive modal immediately after it, not by wording inside the quote or execution of another named operation. Cached segment, operation-start, quote, meta/non-operation, negated-operation, negation-cue, and global-marker indexes avoid repeated full-text or dense-context scans. State adds per-match `review_tier_signal_details` provenance without changing the existing ordered string-list contract; security, high-risk, and Complex/Critical behavior is unchanged (#209).
+  Meta/non-operation proof requires the complete candidate context to match a strict meta-only grammar; unknown trailing content prevents suppression. Execution cues inside quote spans do not trigger the ambiguous-reference veto. Quote-only suppression likewise requires no unknown outside residual after removing its marker, harmless terminators, and actions explicitly anchored to another named operation.
+  Modal/contraction `not not` and outer negations such as `not the case that`, `not saying that`, and `cannot say that` are now treated as double negation. `except when`, `until`, pending-approval, and passive emergency exceptions remain conditional. Cross-sentence `follow/apply + pronoun` and Japanese `適用` / `従う` references now veto global meta-only suppression as ambiguous execution.
+  Strong Japanese unconditional forms (`例外なく`, `緊急時にも`, and `原則ではなく絶対に`) no longer trigger broad exception markers. A causal assurance after a simple operation negation no longer turns its independent predicate negation into a false double negation.
+  Contracted auxiliaries and `never` now share the same operation-scoped simple/double-negation grammar, including contracted outer reporting negation. Approval gating also recognizes `before`, `prior to`, and `while ... is pending`; ambiguous execution references recognize `follow`, `apply`, and `proceed with` against pronouns or named procedures. Japanese causal assurances include impact statements.
+  Outer uncertainty now includes `not true that` and `no guarantee/assurance/certainty that`; contracted modal negation in the inner operation clause is handled by the same grammar as expanded auxiliaries.
+
+### Security
+
+- Manually halted missions now require the dedicated `reactivate --approved-by-user --expected-category ... --reason ...` transition. It atomically verifies the halt category, preserves the prior reason/category and approval reason in append-only `reactivation_history`, clears current halt fields, and resumes activity tracking. Generic `set` can no longer clear a halt or rewrite the approval audit. Automatic stale/orphan recovery remains on `resume` / `refresh-pid` and now also clears the current `halt_category`.
+
+- `codex-preflight --strict` now rejects the deprecated `MISSION_REQUIRE_SCORING_EVIDENCE=0` escape hatch (exit 2) and reports the run as not ok. This environment variable bypasses the scoring-evidence gate via the legacy `push-score --items` path, so an active hatch must never proceed to real work. The hatch itself still functions for the moment but is now labelled `DEPRECATED ESCAPE HATCH` and is scheduled for removal in the next minor release (#226).
+
+## [2.0.0] - 2026-07-20
+
+### Breaking
+
+- `mark-passes --force` now also requires `--approved-by-user` and exits 2 without it. The new flag is an explicit user-approval declaration, not a validation bypass on its own: orchestrators must not set it autonomously, and it is only used when the user explicitly instructs an override. State records `force_approved_by_user` alongside the existing `force_reason`, and `mission-audit.py` reports a new P0 finding for forced passes that lack it (#185, #193).
+- `set phase=` is now validated against a phase enum. Unknown values exit 2; the four known aliases (`execution`, `review`, `plan`, `score`) normalize to their canonical form with a warning. A real run previously set `phase=execution` unchecked and polluted `phase_duration_totals` (#188, #191).
+
+### Added
+
+- `mission-state.py stats` now reports `by_review_tier` (same shape as `by_complexity`) and `iteration_by_review_tier`, so light-tier rework can be monitored with a single command. States written before the tier existed aggregate under `unknown` (#180, #182).
+- State now records `cli_version`, and a version-skew detector scans the Claude Code and Codex plugin caches to surface a stale install against the running CLI (#186, #195).
+- `mark-halt` and `halt --all` accept `--category`, backed by a shared `HALT_CATEGORIES` enum (`blocked-external` / `awaiting-approval` / `partial-done` / `stagnation` / `user-abort` / `stale` / `other`). Missing or invalid values fall back to `other` with a warning, because an emergency stop must never fail on a bad category. Automatic halts now record `stale` (#190, #192).
+- `mark-passes` prints a warning when optional specialists were selected but never closed out with any invocation status, along with the `specialists log-invocation --status skipped` command that closes them. The pass gate itself is unchanged (#189, #194).
+
+### Changed
+
+- Explicit user instructions such as "release" or "deploy to production" now count as advance approval for that matching irreversible action. Mission does not repeat the same confirmation immediately before execution unless the target, scope, rollback conditions, or required destructive operations materially change (#197).
+- `_derive_next_action` now detects a score entry that is `score_source=scoring-json` but missing `findings_evidence_path`, and drives the retry through state instead of instructions alone. A real Codex run had escaped to `--force` when its `aggregate-reviews` output was unavailable, while other runs in the same period self-recovered (#187, #196).
+
+### Fixed
+
+- `task_profile.risk=high` keywords are calibrated with the same policy as #174: `prod` removed (redundant with `production`, and a false-positive source for `product`/`productivity`), `auth` replaced with `authenticat`/`authoriz`/`oauth`, and bare `token` replaced with six compound forms. Retroactive analysis over 506 missions: `risk=high` drops from 72 to 53, risk-driven escalation from 17 to 9, with missed cases unchanged at 3 (#175, #183).
+- `mission-audit.py` now recognizes scoring evidence stored as `iter-N-<mission8>/scoring.{json,md}` inside archived worktree bundles, preventing false historical `missing-scoring-evidence` findings after worktree cleanup (#201).
+
+## [1.2.0] - 2026-07-10
+
+### Added
+- `mission-state.py init` and `mission-state.py set` now derive and record a `review_tier` (`light`/`standard`/`full`) from session complexity and mission text, with a risk escalator (high-risk profiles, irreversible/production/security keywords) that only promotes, never demotes; `reviewer_count` is wired to the tier, pass gates and scoring thresholds are unchanged, and user-specified overrides are auditable through recorded `source` and `signals` (#168, #171).
+- ADR-003 documents the adaptive review-gating decision: tier derivation table, escalator semantics, gate-invariant declaration, and supporting context from tail-v1 results and the 451-mission production aggregate (#169, #172).
+- `docs/CASE_STUDIES.md` and `docs/CASE_STUDIES.ja.md` present anonymized evidence from 451 scored production missions, including pass-rate distribution, 24 forced iterations, 7 approval-gate halts on irreversible actions, and 6 representative case summaries with explicit provenance, limitations, and no comparative quality claims (#155, #158).
+- Benchmark runner now supports a tail-first-failure cohort with planted-defect task fixtures: quality markers are defect-specific content tokens, `forbidden_markers` subtract from the net score, `hidden_paths` sanitization deletes the answer-key task file from the cloned worktree before either arm runs, and `markers_hidden` keeps marker names out of both prompts (#153, #156).
+- Benchmark report for the tail-v1 paired run (10 tasks × 2 arms, claude-sonnet-5, 2026-07-07): arms tied on quality scores, mission arm used ~5.8× the time and ~7.4× the cost of the goal arm; iteration-1 self-gate passed on all five mission runs (#162).
+- Benchmark smoke-v2 (N=1, 2026-07-10) verifies the health-interval marker pattern fix: goal arm score recovered from 0.86 to 1.00; mission arm was `api_usage_limit`-blocked and excluded from the quality comparison (#170, #173).
+
+### Changed
+- Benchmark runners now apply form-stripped scoring before marker matching: `strip_form` removes headings, label-only lines, horizontal rules, and table separator rows so template structure earns no marker credit; the pre-strip score is preserved as `quality_marker_score_raw` and `quality_score_method` is updated to `automated_heuristic_form_stripped_not_blind_human` (#154, #157).
+- SKILL.md now documents light-tier operational discipline (one reviewer, required-only specialists, critic on failure only) and READMEs include an adaptive-gating summary paragraph; pass gate thresholds are unchanged (#169, #172).
+- READMEs now carry measured-evidence positioning: on the tail-v1 run both arms scored equally while mission used ~5.8× time and ~7.4× cost, and production value concentrates in the ~5% forced-iteration tail and approval halts (#161).
+
+### Fixed
+- `review_tier` escalator keywords are calibrated against a 505-mission retroactive analysis: `push`/`merge` removed (standard dev-flow false positives), bare `token`/`auth` replaced with compound/stem forms, and bare `削除` replaced with data-deletion compounds; Simple/Standard over-escalation drops from 39.1% to 32.2% with no increase in missed low-scoring missions (#174, #178).
+- `mission-audit.py` now treats `specialists_phase_plan` providers as advisory scheduling hints for `specialist-invocation-gap`, preventing planned-only providers from being reported as missing terminal invocations (#176).
+- Specialist phase-plan providers now count as selected evidence providers for shared accounting, preventing false `unselected-specialist-invocation` findings when planned execution/review/synthesis providers are invoked (#165).
+- `mission-audit.py` and `mission-state.py stats` now ignore non-session metadata JSON such as archived worktree `aggregate.json`, preventing false abandoned `unknown` sessions and low-pass-rate findings (#163).
+- `mission-audit.py --since` and `--until` now accept ISO timestamps as well as date-only values, preventing same-day records after an automation cutoff from being silently excluded (#159).
+- `mission-audit.py` now recognizes scoring evidence stored in `mission-archive/` worktree paths, preventing false `missing-scoring-evidence` findings after worktree cleanup (#151, #152).
+- Benchmark health-interval marker patterns now match `HEALTH_CHECK_INTERVAL_SECONDS=75`, `(75`, and `` 75` `` quoted forms; affects future runs only, recorded scores are unchanged (#162).
+
+## [1.1.1] - 2026-07-06
+
+### Fixed
+- Command providers can now classify explicit approval or human-input blockers as `awaiting-input` through `result_contract.awaiting_input_markers` or `result_contract.awaiting_input_exit_codes`, instead of flattening optional external-review blockers into generic failures (#145).
+
+### Changed
+- Specialist registry documentation now separates external-send, browser automation, browser session material, and paid quota consent scopes, making clear that first-use consent is not blanket approval for session-cookie reuse or paid model usage (#146).
+- Added Oracle command-provider safe-default guidance so local wrappers default to manual login or `awaiting-input`, and only pass `--copy-profile` after explicit browser-session-material approval (#147).
+
+## [1.1.0] - 2026-07-05
+
+### Added
+- `mission-state.py aggregate-reviews` now converts strict `mission-review/1` reviewer JSON into deterministic `push-score --scoring-json` payloads, including rubric caps, reviewer consensus, open High counts, and archived findings evidence (#119).
+- `mission-state.py specialists log-invocation --selection-source task-required` records task-mandated source retrieval or evidence providers as selected specialists without hard-coding private skill names (#115).
+- `mission-state.py resume` now prints the recovery order for active sessions, including the current mission state, latest artifact, next action, progress checkpoint, and stale-session hints (#123).
+- The benchmark runner now supports arm-blind scoring, counterbalanced order, explicit `model_id` capture, and updated result/report schemas for mission-vs-goal comparisons (#129, #130).
+
+### Changed
+- `aggregate-reviews` now keeps reviewer agreement out of score `items`, records it as independent `review_agreement` plus `agreement_detail`, and `mark-passes` gates very low agreement (`max-min > 1.5`) before passing (#126).
+- `mark-passes` now treats machine-derived findings evidence as the primary pass gate for `score_source=scoring-json`, rejecting missing `findings_evidence_path` values or mismatched High-finding counts before applying the score threshold (#121).
+- Standard Phase 5 orchestration now uses reviewer `mission-review/1` JSON, `aggregate-reviews`, and `push-score --scoring-json` without spawning `mission-scorer`; `mission-scorer` is now documented as a fallback prose-to-JSON converter only (#120).
+- `mission-state.py` and `mission-audit.py` now share mission state classification, duration, specialist checkpoint, and preparation-marker logic through `skills/mission/lib/mission_common.py`, reducing audit/state drift risk (#127).
+- `mark-passes` now rejects new Standard, Complex, and Critical sessions that lack a `task_profile` plus `specialists_decision.policy` checkpoint, while accepting explicit fallback/degraded decisions as valid checkpoints (#112).
+- `cleanup-stale` can now halt stale active no-score sessions even when their recorded agent PID is still alive, after the configurable `MISSION_STALE_ACTIVE_SECONDS` threshold (#113).
+- Public ref docs and packaged plugin mirrors were swept for OSS portability, removing maintainer-local home paths and private skill names from distributed setup examples (#118, #132).
+- README, Codex setup docs, critic/planner handoff guidance, and slimmed mission skill instructions now match the source scoring flow: `mission-review/1`, `aggregate-reviews`, `push-score --scoring-json`, independent review-agreement gating, and `open_high`/findings evidence pass checks (#128, #134, #137, #140, #141, #142).
+
+### Fixed
+- Mission audit now recognizes explicit `score_history[].scoring_evidence_path` values and JSON scoring evidence stored in normal or archived worktree `.mission-state` trees (#111).
+- Mission audit now separates fresh active no-score planning sessions from actionable specialist accounting debt, while reporting stale active no-score sessions explicitly in JSON and Markdown output (#113, #114).
+- `push-score --scoring-json` now rejects inflated self-reported scalar scores and requires `--resubmit-reason` before replacing a score for the same iteration, preventing silent score evidence overwrite or transcription inflation (#122, #131).
+- Documentation consistency guards now cover the `open_high` gate, `findings_evidence_path`, `--scoring-json`, `--root`, README test-count freshness, and the v1.1.0 release themes (#128, #134).
+
+## [1.0.7] - 2026-07-03
+
+### Fixed
+- `mission-state.py` and `mission-migrate.py` now import `from __future__ import annotations`, so PEP 604 union annotations no longer crash module load on Python 3.9 (macOS Xcode CLT `python3`), which previously killed every command from skill startup step 1 (#99).
+
+### Added
+- `mission-state.py codex-preflight` checks whether the current Codex `/mission` session has an active state, whether a user Stop hook references `mission-stop-guard.sh`, and whether the `mission-state.py next` fallback is available. It warns on skills-only Codex runs and can fail with `--require-stop-hook`, preventing Issue #108's "no state, no guard, premature final" failure mode.
+- `specialists recommend --user-specified <skill,skill>` treats skills the user explicitly named in the mission description as confirmed selections: they are recorded as `selected` with `selection_source: user-specified` even on high-risk task profiles, so later `log-invocation` calls no longer reject with a `--selection-source confirmed-user` demand (#100). If any named provider still needs first-use consent, or a required specialist is missing, the whole decision falls back to the normal confirmation flow.
+- `mission-state.py push-score --scoring-json <path>` (ADR-002 Stage 1) reads scorer items from a structured JSON file, recomputes `composite`/`min_item` server-side, rejects unknown item keys and out-of-range values, archives the payload as `iter-N-<mid8>-scoring.json` with `_meta`, and records `score_source`/`scoring_evidence_path` on the score entry — removing the orchestrator score-transcription layer.
+- `push-score` now rejects submissions where every item score is `<= 1.0` as suspected 0-1-normalized scale input (regression guard for a logged session that pushed composite 0.96 = 4.8/5).
+- `mission-state.py next` (ADR-002 Stage 3) derives the single next action from session state (`run-planner`/`run-reviewers`/`run-scorer`/`mark-passes`/`report-blocker`/...), giving Codex sessions and post-compaction resumes a harness-independent, deterministic progression guide instead of prose-only instructions.
+
+### Changed
+- Evidence-less `push-score` calls now hard reject by default. Use `--scoring-json` (preferred) or `--scoring-output`; `MISSION_REQUIRE_SCORING_EVIDENCE=0` remains as a temporary escape hatch for migration-only runs (#105).
+- Removed the generated scoring evidence fallback for evidence-less `push-score`, so successful score entries are no longer backed by reviewer-less `generated=true` archive files (#105).
+
+## [1.0.6] - 2026-07-02
+
+### Fixed
+- `mission-state.py init` now quarantines corrupt session JSON instead of crashing during same-session mission changes.
+- `mission-state.py set` now freezes pass, score history, and threshold fields so completion gates cannot be bypassed through raw state updates.
+- `mission-state.py push-score` now warns when supplied scalar scores diverge from the supplied item scores.
+- Stop hook CWD discovery now avoids slow `lsof` hangs, prefers Linux `/proc/<pid>/cwd`, honors direct session lookup, and skips stale auto-halt for `awaiting_user` sessions.
+- Specialist tie handling now auto-selects installed optional low/medium-risk providers deterministically and records the tie-break reason.
+- Mission executor now declares bounded allowed tools without `Agent` or `rm` access.
+- Specialist task-profile classification now recognizes architecture/system-design missions, so architecture-only project or user providers can be selected instead of being hidden behind documentation fallback.
+- Mission audit now recognizes scorer evidence stored in archived worktree `iteration-archive/` directories, preventing false `missing-scoring-evidence` findings when the scoring artifact is present.
+- Mission audit now classifies JSON-identical archive-only worktree state copies as resolved duplicates, preventing cross-root audits from reporting expected archive/archive copies as P1 `duplicate-state` findings.
+
+### Added
+- ADR-002 now defines the staged typed mission state object roadmap for Findings, Scores, Decisions, and Actions while preserving local JSON + flock storage.
+- `mission-state.py artifact` CLI manages local-first mission artifacts with archived evidence; see `docs/MISSION_ARTIFACTS.md`.
+- Specialist registry `kind: command` providers can now declare `env` and `timeout` runtime configuration, passed only to that provider process (CLI `--timeout` still overrides).
+
+## [1.0.5] - 2026-06-26
+
+### Added
+- Mission audit now reports unresolved `ask-user` specialist confirmations separately from unselected invocation findings.
+- Mission audit now reports slow sessions whose elapsed time is coarsely attributed to planning despite phase-duration data.
+- Mission audit self-improvement prompts now require duplicate issue checks and development/tech-lead review evidence before agents create GitHub issues.
+- `mission-state.py push-score` now writes generated scoring evidence when `--scoring-output` is omitted, so every score history entry has an auditable archive artifact.
+- `mission-state.py specialists log-invocation --selection-source` now records explicit/manual specialist selection metadata while logging inline or tool invocation evidence.
+- `mission-state.py specialists summary` now emits final-report specialist usage grouped as selected, used, degraded, and unselected-manual with provider `kind` and registry/source metadata.
+- Documented the versioning policy that separates ordinary merge releases from intentional distribution releases, so plugin versions are not bumped for every merged PR.
+- Added OSS portability guardrails in `AGENTS.md`, `CLAUDE.md`, and ADR-001 so personal/private specialist skills stay in user or project registries instead of public defaults.
+- Added `mission-state.py specialists accounting --json` as a pre-completion warning that reports available specialist/provider candidates without a terminal decision trail.
+- Shared candidate-accounting logic between `mission-state.py` and `scripts/mission-audit.py` so high-risk candidate findings use the same rules in live checks and retrospective audits.
+- Added a stable repository-root `scripts/mission-state.py` wrapper for the canonical state CLI.
+- Added `mission-state.py progress update/get/clear` checkpoints for long-running batches, with archived progress evidence and audit output on slow-session lines.
+- Specialist recommendations now include a bounded `specialists_phase_plan` for development and strategy-style registries without embedding maintainer-local skill names.
+- Mission audit now reports invalid score iterations and blank specialist invocation records as explicit findings.
+- Mission audit now accepts `--current-since` to keep historical audit debt visible while judging current regressions separately.
+- Release guardrails now require distribution releases to create and push the matching git tag, create or update the GitHub Release, and re-verify both before completion is reported.
+
+### Changed
+- Mission orchestrator guidance now requires explicit `phase=executing` / `phase=reviewing` transitions and progress checkpoints for long-running work.
+- Refined Complex specialist accounting to require explicit terminal decisions only for risk-bearing candidates, preserving hackable user plugins as optional evidence sources by default.
+- Database/backend candidates now require strong database signals such as schema, migration, query, SQL, or persistence before they are treated as high-risk accounting candidates.
+- Command providers can now classify preparation-only or too-short output as `prepared` using `result_contract`, preventing banners from being treated as completed review evidence.
+- `oracle-reviewer` now has a conservative default result contract for browser-review preparation banners, and `ask-user` specialist confirmations must be persisted with `--selection-source confirmed-user` before applied evidence counts as selected.
+- Broad orchestrator specialists are now bounded to non-execution evidence use and require `--bounded-purpose` when their applied plan/review evidence is recorded.
+- Standard or Complex audit/self-improvement missions now require explicit accounting for available testing, security, or risk specialist candidates.
+
+### Fixed
+- Mission audit now flags command-provider invocations that were marked `completed` even though their archived evidence is only an Oracle/browser review preparation packet.
+- Mission audit no longer reports active `ask-user` specialist waits as candidate-only specialist debt before the user decision can be recorded.
+- Mission audit no longer treats core mission subskills as unselected external specialist invocations.
+- Distribution-sync tests now guard the marketplace `mission-state.py` wrapper against dropping specialist-accounting/result-contract markers.
+- Mission audit pass-rate calculations now exclude active no-score checkpoints from the denominator while still reporting them as incomplete active sessions.
+- Mission audit now classifies nested `archive/worktree-*/sessions/*.json` copies as resolved archive duplicates, preventing cross-root audits from reporting exact live/archive copies as P1 `duplicate-state` findings.
+- `mission-state.py mark-passes` now blocks required specialist providers that lack applied result evidence, so `prepared`, `skipped`, or `failed` evidence cannot satisfy strict required-provider gates.
+- `mission-state.py push-score` now rejects iteration values below 1, preventing unauditable `score_history` entries.
+- `mission-state.py specialists log-invocation` now rejects blank `role` or `skill` fields before writing specialist evidence.
+- `mission-state.py stats` now includes nested `archive/worktree-*/sessions/*.json` files so its session counts match audit discovery.
+
+## [1.0.4] - 2026-06-22
+
+### Added
+- README now positions `mission` as a loop-engineering quality gate and links to launch-positioning guidance.
+- `mission-state.py stats` now accepts repeated `--root` arguments, aggregates all scanned roots, reports the scanned root list, and de-duplicates overlapping state identities.
+- Specialist invocation logging now accepts `skill-tool-applied`, requires an explicit reason for skipped/unavailable/failed decisions, and documents high-risk candidate accounting.
+- Mission audit now reports `candidate-only-specialists` when specialist candidates exist but no selection, invocation, or skip decision trail is recorded.
+- Mission audit now reports specialist invocations that have terminal evidence but no matching Phase 1 selection metadata.
+- Mission final-report guidance now includes a concise specialist summary for selected, used, degraded, and unselected-manual skills while preserving truthful `codex-inline` wording.
+- Specialist registries are now auto-discovered from project, user, and skill/plugin manifest locations, with project-level disable overrides.
+- Specialist provider schema now supports `kind: skill` and `kind: command`, first-use risk consent, and command-provider evidence invocation without hard-coding providers such as `oracle` into mission core.
+
+## [1.0.3] - 2026-06-20
+
+### Added
+- Mission audit now reports sessions started after the Phase 1 specialist-selection checkpoint rollout when selection metadata is missing.
+- Release checklist now requires reconciling `git log <previous-tag>..HEAD --oneline` with English and Japanese changelog entries before release completion.
+- Documentation consistency tests now guard the v1.0.2 release themes so future changelog edits cannot silently drop them.
+
+### Fixed
+- Corrected the v1.0.2 changelog entry to include the Phase 1 specialist selection checkpoint, specialist registry, file-overlap warnings, audit CLI, GitHub Flow guidance, contributor acknowledgements, reviewer/scorer safeguards, audit diagnostics, and Codex hook-packaging validation.
+
+## [1.0.2] - 2026-06-20
+
+### Added
+- Optional specialist registry support now lets mission classify task profiles, select available domain specialist skills, use them as evidence providers, and record invocation evidence.
+- Phase 1 now requires an executable specialist selection checkpoint after mission initialization by recording `specialists recommend --record-state --json` results in mission state.
+- `mission-state.py init` now accepts `--files` and warns when another active session targets overlapping files.
+- A read-only `scripts/mission-audit.py` CLI now audits local mission state, produces self-improvement prompts, and reports forced/ungated passes, duplicate state, halt, slow-session, and low-score-pass buckets.
+- Mission audit now discovers nested worktree archive sessions, surfaces missing scoring evidence, and reports specialist invocation gaps.
+- Slow-session reports now include a separate phase-duration observability breakdown.
+- GitHub Flow guidance now documents issue-linked missions, `Closes #N` pull request bodies, and merge-driven issue closure.
+- README now recognizes contributors and contribution types.
+
+### Fixed
+- Reviewer and scorer safeguards now use merge-base diff context and test-authenticity checks to reduce false regression reports and shallow test validation.
+- Audit deduplication now prefers completed pass/done records over stale halt copies for the same logical mission run.
+- Audit diagnostics now classify halt/incomplete root causes, slow-session buckets, and low-score pass risk buckets.
+- Release validation now guards the Codex plugin hook-packaging contract.
+
+## [1.0.1] - 2026-06-17
+
+### Added
+- **Q11 – stagnation auto-count**: `push-score` now increments `stagnation_count` automatically when the composite improvement (`cur − prev`) is in the range `[0, 0.1)`. Regression (score drop) and first-push are treated as non-stagnation and reset the counter to 0.
+- **S3 – duplicate issue-ref warning**: `init` gains an `--issue-ref <ref>` option. When another active session for the same project already carries the same `issue_ref`, a `WARNING [S3]` is printed to stderr (non-blocking). Self-detection on resume (same `session_id`) is excluded.
+
+### Fixed
+- **Q11 regression fix**: negative delta (score regression) was incorrectly treated as stagnation. Condition tightened to `0 <= delta < 0.1` using `_is_valid_composite()` for type safety.
+- Synced the copied Codex marketplace wrapper (`plugins/mission/`) with the canonical `skills/` and `scripts/` trees so it includes the latest stale auto-halt, High-gate, stats, and scoring-rubric fixes.
+- Added a regression test that fails when the Codex wrapper drifts from the canonical implementation.
+
+## [1.0.0] - 2026-06-15
+
+First public release.
+
+### Added
+- Mission orchestrator skill and five supporting skills (planner, executor, reviewer, critic, scorer).
+- `.mission-state` session-state CLI (`mission-state.py`) with multi-session isolation for Claude Code and Codex.
+- Threshold-gated completion with score history and review/critic loops.
+- Stop hook that blocks premature completion while a mission is active. Stale-state timestamp parsing is portable across macOS (BSD `date`) and Linux (GNU `date`).
+- Claude Code plugin metadata and a local plugin marketplace manifest.
+- Codex plugin packaging (`plugins/mission/`) and skill symlink guidance, with an opt-in Stop hook.
+- Python test suite covering state routing, scoring gates, and hook behavior.
+- GitHub Actions CI (`push`, `pull_request`, `workflow_dispatch`) with pytest and ShellCheck.
+
+[2.6.0]: https://github.com/tackeyy/mission/releases/tag/v2.6.0
+[2.5.0]: https://github.com/tackeyy/mission/releases/tag/v2.5.0
+[2.4.0]: https://github.com/tackeyy/mission/releases/tag/v2.4.0
+[2.3.0]: https://github.com/tackeyy/mission/releases/tag/v2.3.0
+[2.0.0]: https://github.com/tackeyy/mission/releases/tag/v2.0.0
+[1.2.0]: https://github.com/tackeyy/mission/releases/tag/v1.2.0
+[1.1.1]: https://github.com/tackeyy/mission/releases/tag/v1.1.1
+[1.1.0]: https://github.com/tackeyy/mission/releases/tag/v1.1.0
+[1.0.7]: https://github.com/tackeyy/mission/releases/tag/v1.0.7
+[1.0.6]: https://github.com/tackeyy/mission/releases/tag/v1.0.6
+[1.0.5]: https://github.com/tackeyy/mission/releases/tag/v1.0.5
+[1.0.4]: https://github.com/tackeyy/mission/releases/tag/v1.0.4
+[1.0.3]: https://github.com/tackeyy/mission/releases/tag/v1.0.3
+[1.0.2]: https://github.com/tackeyy/mission/releases/tag/v1.0.2
+[1.0.1]: https://github.com/tackeyy/mission/releases/tag/v1.0.1
+[1.0.0]: https://github.com/tackeyy/mission/releases/tag/v1.0.0

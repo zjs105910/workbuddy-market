@@ -1,0 +1,8 @@
+.DS_Store
+.superpowers/
+node_modules/
+reference
+out/
+*.vsix
+# This package is yarn-managed: keep npm's lockfile out (use yarn install).
+package-lock.json

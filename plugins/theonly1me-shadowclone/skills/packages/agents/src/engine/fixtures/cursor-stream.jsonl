@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/worktree","session_id":"cursor-session-fixture","model":"Claude 4 Sonnet","permissionMode":"default"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working"}]},"session_id":"cursor-session-fixture"}
+{"type":"tool_call","subtype":"completed","call_id":"tool-1","tool_call":{"readToolCall":{"result":{"success":{"content":"private tool result"}}}},"session_id":"cursor-session-fixture"}
+{"type":"result","subtype":"success","duration_ms":1234,"is_error":false,"result":"{\"rules\":[]}","session_id":"cursor-session-fixture"}

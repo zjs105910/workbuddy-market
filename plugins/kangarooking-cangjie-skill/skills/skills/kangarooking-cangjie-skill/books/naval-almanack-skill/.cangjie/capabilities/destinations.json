@@ -1,0 +1,62 @@
+{
+  "bundle_id": "bundle.naval-almanack",
+  "destinations": {
+    "cap.naval.wealth-structure": {
+      "promoted_to": "wealth-structure"
+    },
+    "cap.naval.productize-yourself": {
+      "promoted_to": "productize-yourself"
+    },
+    "cap.naval.decision-heuristics": {
+      "promoted_to": "decision-heuristics"
+    },
+    "cap.naval.hourly-rate-time": {
+      "promoted_to": "hourly-rate-time"
+    },
+    "cap.naval.reading-metaskill": {
+      "promoted_to": "reading-metaskill"
+    },
+    "cap.naval.screen-detox": {
+      "promoted_to": "screen-detox"
+    },
+    "cap.naval.judgment-training": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.long-term-compounding": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.principal-agent": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.happiness-skill": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.game-selection": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.acceptance": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.self-liberation": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.monkey-mind-meditation": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.peer-selection": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.identity-work": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.honesty-communication": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.rational-buddhism": {
+      "served_by": "naval-almanack"
+    },
+    "cap.naval.life-meaning": {
+      "served_by": "naval-almanack"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@shadowclone/sessions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@shadowclone/core": "workspace:*",
+    "@shadowclone/redact": "workspace:*"
+  }
+}

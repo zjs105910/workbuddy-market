@@ -1,0 +1,228 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getEntrypointCount, getOutputMode, loadCatalog, type RegistryEntry } from "@/lib/catalog";
+import { getAgentInstallPrompt, INSTALL_GUIDE_URL } from "@/lib/install";
+import { withBase } from "@/lib/urls";
+
+export async function getStaticPaths() {
+  const entries = await loadCatalog();
+  return entries.map((entry) => ({ params: { slug: entry.slug }, props: { entry } }));
+}
+
+interface Props { entry: RegistryEntry }
+const { entry } = Astro.props;
+const repositoryPath = new URL(entry.source_url).pathname.replace(/^\//, "");
+const installPrompt = getAgentInstallPrompt(entry);
+const qualityLabel = {
+  verified: "已验证",
+  community: "社区收录",
+  experimental: "实验性",
+}[entry.quality];
+---
+
+<BaseLayout title={entry.name + " — 仓颉 Skill"} description={entry.summary}>
+  <section class="detail-hero">
+    <div class="shell">
+      <a class="back-link" href={withBase("/skills")}>← Skills 目录 / {entry.slug}</a>
+      <div class="detail-heading">
+        <div class="skill-symbol" aria-hidden="true">技</div>
+        <div>
+          <div class="detail-badges">
+            <span class:list={["quality-badge", "quality-" + entry.quality]}>{qualityLabel}</span>
+            <span>安装后新增 {getEntrypointCount(entry)} 个可发现 Skill</span>
+            {getOutputMode(entry) !== "legacy-pack" && <span>{getOutputMode(entry) === "single" ? "单入口模式" : "Compact Pack"} · {entry.capability_count} 项能力</span>}
+            <span>{entry.domains.join(" · ")}</span>
+          </div>
+          <h1>{entry.name}</h1>
+          <p>{entry.summary}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <nav class="detail-tabs" aria-label="详情页导航">
+    <div class="shell">
+      <a href="#overview">概览</a>
+      <a href="#use-cases">使用场景</a>
+      <a href="#how-to-use">如何使用</a>
+      <a href="#source">来源信息</a>
+    </div>
+  </nav>
+
+  <div class="shell detail-grid">
+    <article class="detail-content">
+      <section id="overview">
+        <p class="eyebrow">Overview</p>
+        <h2>这个 Skill Pack 能做什么</h2>
+        <p class="section-lede">{entry.summary}</p>
+        <dl class="overview-stats">
+          <div><dt>{getEntrypointCount(entry)}</dt><dd>可发现入口</dd></div>
+          {getOutputMode(entry) !== "legacy-pack" && <div><dt>{entry.capability_count}</dt><dd>经验证能力</dd></div>}
+          <div><dt>{entry.domains.length}</dt><dd>覆盖领域</dd></div>
+          <div><dt>{entry.language.length}</dt><dd>支持语言</dd></div>
+        </dl>
+      </section>
+
+      <section id="use-cases">
+        <p class="eyebrow">Use cases</p>
+        <h2>适合解决的问题</h2>
+        <ul class="use-case-list">
+          {entry.use_cases.map((useCase, index) => (
+            <li><span>{String(index + 1).padStart(2, "0")}</span><strong>{useCase}</strong></li>
+          ))}
+        </ul>
+      </section>
+
+      <section id="how-to-use">
+        <p class="eyebrow">How to use</p>
+        <h2>安装后直接描述任务</h2>
+        <ol class="usage-steps">
+          <li><span>1</span><div><strong>把右侧提示词发给 Agent</strong><p>Agent 会自动识别自己的 Skills 目录，检查来源并完成安装。</p></div></li>
+          <li><span>2</span><div><strong>说清楚你的真实任务</strong><p>提供目标、背景材料和期望结果，不需要记忆特殊命令。</p></div></li>
+          <li><span>3</span><div><strong>确认调用了正确方法</strong><p>让 Agent 说明选用了哪个原子 Skill，以及将遵循哪些步骤。</p></div></li>
+        </ol>
+        <div class="task-prompt">
+          <span>调用示例</span>
+          <p>请使用「{entry.name}」中最适合的方法处理我的任务。开始前，先说明你选择了哪个原子 Skill，以及它要求遵循的工作流程。</p>
+        </div>
+      </section>
+
+      <section id="source">
+        <p class="eyebrow">Source</p>
+        <h2>公开来源与审核</h2>
+        <p class="section-lede">本站只负责索引和公开审核，Skill 源内容由对应仓库维护。安装前，Agent 会先读取来源、检查目录结构与潜在风险。</p>
+        <a class="source-row" href={entry.source_url} target="_blank" rel="noreferrer">
+          <span><small>GitHub Repository</small><strong>{repositoryPath}</strong></span><b>打开源仓库 ↗</b>
+        </a>
+      </section>
+    </article>
+
+    <aside class="detail-sidebar">
+      <section class="install-card">
+        <div class="agent-row" aria-hidden="true">
+          <span>C</span><span>Cl</span><span>Cu</span><span>W</span><span>+</span>
+        </div>
+        <p class="install-kicker">Agent Install</p>
+        <h2>把提示词发给你的 Agent</h2>
+        <p class="install-copy">无需选择平台或手动复制目录，Agent 会读取安装规范并适配当前环境。</p>
+        <div class="install-prompt"><p>{installPrompt}</p></div>
+        <button class="copy-prompt" type="button" data-copy={installPrompt}>复制安装提示词</button>
+        <div class="install-links">
+          <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer">查看安装规范</a>
+          <a href={entry.source_url} target="_blank" rel="noreferrer">查看源代码 ↗</a>
+        </div>
+      </section>
+
+      <section class="metadata-panel">
+        <h2>Registry 信息</h2>
+        <dl>
+          <div><dt>Slug</dt><dd><code>{entry.slug}</code></dd></div>
+          <div><dt>质量</dt><dd>{qualityLabel}</dd></div>
+          <div><dt>领域</dt><dd>{entry.domains.join("、")}</dd></div>
+          <div><dt>语言</dt><dd>{entry.language.join(" / ")}</dd></div>
+          <div><dt>来源</dt><dd>{entry.source_type === "github" ? "GitHub 仓库" : "仓库内置"}</dd></div>
+          <div><dt>状态</dt><dd><span class="active-dot"></span>{entry.status}</dd></div>
+        </dl>
+        <p>信息有误？通过 Pull Request 修改 <code>registry/{entry.slug}/entry.yaml</code>。</p>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "");
+        button.textContent = "已复制，可以发给 Agent";
+        button.classList.add("copied");
+        setTimeout(() => {
+          button.textContent = "复制安装提示词";
+          button.classList.remove("copied");
+        }, 1800);
+      });
+    });
+  </script>
+</BaseLayout>
+
+<style>
+  .detail-hero { padding: 38px 0 52px; border-bottom: 1px solid var(--line); background: var(--paper); }
+  .back-link { color: var(--muted); font-size: 13px; }
+  .back-link:hover { color: var(--accent); }
+  .detail-heading { display: grid; grid-template-columns: 70px minmax(0, 850px); gap: 24px; align-items: start; margin-top: 42px; }
+  .skill-symbol { display: grid; place-items: center; width: 70px; height: 70px; border-radius: 15px; background: var(--ink); color: white; font: 34px "Songti SC", serif; }
+  .detail-heading h1 { margin: 15px 0 10px; font-size: clamp(38px, 5vw, 58px); line-height: 1.08; letter-spacing: -.045em; }
+  .detail-heading p { max-width: 820px; margin: 0; color: var(--muted); font-size: 17px; }
+  .detail-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; color: var(--muted); font-size: 12px; }
+  .detail-tabs { position: sticky; top: 68px; z-index: 8; border-bottom: 1px solid var(--line); background: rgba(255, 254, 249, .95); backdrop-filter: blur(12px); }
+  .detail-tabs .shell { display: flex; gap: 36px; height: 56px; align-items: center; }
+  .detail-tabs a { height: 56px; padding-top: 17px; color: var(--muted); font-size: 14px; }
+  .detail-tabs a:first-child { border-bottom: 2px solid var(--ink); color: var(--ink); font-weight: 700; }
+  .detail-tabs a:hover { color: var(--ink); }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 730px) 360px; justify-content: space-between; gap: 56px; padding-top: 22px; }
+  .detail-content section { scroll-margin-top: 138px; padding: 48px 0 58px; }
+  .detail-content section + section { border-top: 1px solid var(--line); }
+  .detail-content h2 { margin: 0 0 14px; font-size: 30px; line-height: 1.2; letter-spacing: -.03em; }
+  .section-lede { margin: 0; color: var(--muted); font-size: 16px; line-height: 1.75; }
+  .overview-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 34px 0 0; border-top: 1px solid var(--ink); }
+  .overview-stats div { padding: 20px 0; border-bottom: 1px solid var(--line); }
+  .overview-stats div + div { padding-left: 22px; border-left: 1px solid var(--line); }
+  .overview-stats dt { font-size: 28px; font-weight: 750; letter-spacing: -.04em; }
+  .overview-stats dd { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+  .use-case-list { display: grid; gap: 0; margin: 30px 0 0; padding: 0; border-top: 1px solid var(--ink); list-style: none; }
+  .use-case-list li { display: grid; grid-template-columns: 52px 1fr; align-items: center; min-height: 72px; border-bottom: 1px solid var(--line); }
+  .use-case-list span { color: var(--accent); font: 12px "SFMono-Regular", monospace; }
+  .use-case-list strong { font-size: 16px; }
+  .usage-steps { display: grid; gap: 18px; margin: 30px 0; padding: 0; list-style: none; }
+  .usage-steps li { display: grid; grid-template-columns: 34px 1fr; gap: 14px; }
+  .usage-steps li > span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: white; font-size: 12px; }
+  .usage-steps strong { font-size: 15px; }
+  .usage-steps p { margin: 3px 0 0; color: var(--muted); font-size: 14px; }
+  .task-prompt { padding: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+  .task-prompt span { color: var(--accent); font-size: 11px; font-weight: 750; text-transform: uppercase; }
+  .task-prompt p { margin: 9px 0 0; color: #41443e; }
+  .source-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-top: 26px; padding: 19px 20px; border: 1px solid var(--line); border-radius: 8px; }
+  .source-row:hover { border-color: var(--ink); }
+  .source-row span { display: grid; }
+  .source-row small { color: var(--muted); font-size: 11px; }
+  .source-row strong { overflow-wrap: anywhere; }
+  .source-row b { color: var(--accent); font-size: 13px; white-space: nowrap; }
+  .detail-sidebar { position: sticky; top: 146px; align-self: start; display: grid; gap: 18px; padding-top: 26px; }
+  .install-card { padding: 24px; border: 1px solid var(--ink); border-radius: 12px; background: white; box-shadow: 8px 8px 0 var(--ink); }
+  .agent-row { display: flex; gap: 7px; margin-bottom: 24px; }
+  .agent-row span { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 50%; background: var(--soft); color: var(--muted); font-size: 10px; font-weight: 750; }
+  .agent-row span:first-child { border-color: var(--ink); background: var(--ink); color: white; }
+  .install-kicker { margin: 0 0 4px; color: var(--accent); font: 11px "SFMono-Regular", monospace; letter-spacing: .08em; text-transform: uppercase; }
+  .install-card h2 { margin: 0; font-size: 22px; line-height: 1.3; letter-spacing: -.025em; }
+  .install-copy { margin: 9px 0 18px; color: var(--muted); font-size: 13px; }
+  .install-prompt { padding: 15px; border: 1px solid var(--line); border-radius: 7px; background: var(--soft); }
+  .install-prompt p { margin: 0; color: #4b4e47; font-size: 12px; line-height: 1.65; word-break: break-word; }
+  .copy-prompt { width: 100%; min-height: 46px; margin-top: 13px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: white; font-weight: 700; }
+  .copy-prompt:hover { filter: brightness(.94); }
+  .copy-prompt.copied { border-color: var(--success); background: var(--success); }
+  .install-links { display: flex; justify-content: space-between; margin-top: 14px; }
+  .install-links a { color: var(--muted); font-size: 11px; }
+  .install-links a:hover { color: var(--accent); }
+  .metadata-panel { padding: 22px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+  .metadata-panel h2 { margin: 0 0 12px; font-size: 16px; }
+  .metadata-panel dl { margin: 0; }
+  .metadata-panel dl div { display: grid; grid-template-columns: 72px 1fr; padding: 11px 0; border-top: 1px solid var(--line); }
+  .metadata-panel dt { color: var(--muted); font-size: 11px; }
+  .metadata-panel dd { margin: 0; overflow-wrap: anywhere; font-size: 12px; text-align: right; }
+  .metadata-panel > p { margin: 18px 0 0; color: var(--muted); font-size: 11px; }
+  .active-dot { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #27a05c; }
+  @media (max-width: 900px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .detail-sidebar { position: static; order: -1; grid-template-columns: minmax(0, 1.15fr) minmax(260px, .85fr); }
+    .install-card { box-shadow: 5px 5px 0 var(--ink); }
+  }
+  @media (max-width: 640px) {
+    .detail-heading { grid-template-columns: 50px 1fr; gap: 15px; margin-top: 30px; }
+    .skill-symbol { width: 50px; height: 50px; border-radius: 11px; font-size: 24px; }
+    .detail-heading h1 { font-size: 36px; }
+    .detail-tabs { top: 60px; overflow-x: auto; }
+    .detail-tabs .shell { width: max-content; min-width: 100%; gap: 26px; }
+    .detail-sidebar { grid-template-columns: 1fr; }
+    .overview-stats { grid-template-columns: 1fr; }
+    .overview-stats div + div { padding-left: 0; border-left: 0; }
+    .source-row { align-items: flex-start; flex-direction: column; }
+  }
+</style>
