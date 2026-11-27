@@ -238,11 +238,9 @@ def stage_upload(read, total: int, *, name_hint: str = "",
         # ---- 收录钉死哈希（repo 上下文给了就比对 —— 严格链，对不上拒绝）
         pinned = False
         if repo and callable(registry_lookup):
-            reg = registry_lookup() or {}
-            entry = next((e for e in reg.get("plugins", [])
-                          if str(e.get("repo", "")).casefold() == str(repo).casefold()),
-                         None)
             from .hasher import normalize_sha256  # noqa: PLC0415
+            from .registry import find_entry      # noqa: PLC0415
+            entry = find_entry(registry_lookup() or {}, repo)
             want = normalize_sha256((entry or {}).get("packageHash"))
             got_ph = normalize_sha256(pkg_hash)
             if want:

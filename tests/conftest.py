@@ -19,6 +19,16 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))      # market_core 在仓库根
 
+# src 布局的包目录必须**显式**排在 sys.path 最前。此前这里只加了仓库根：
+# workbuddy_market 能被 import 全靠「某个测试文件先 import 了 market_core」
+# （由它把 src/ 插进来）。开发机 venv 里若 pip 装过一份旧版本，单独跑测试
+# 子集时 workbuddy_market 就会静默绑定到 site-packages 里那份旧代码 ——
+# 实锤：venv 里是 2.25.0，全量跑靠字母序侥幸测到源码，跑子集测的是旧包。
+_SRC = _REPO_ROOT / "src"
+while str(_SRC) in sys.path:
+    sys.path.remove(str(_SRC))
+sys.path.insert(0, str(_SRC))
+
 _ROOT = tempfile.mkdtemp(prefix="wbm-pytest-")
 os.environ["WBM_MARKET_ROOT"] = os.path.join(_ROOT, "market")
 os.environ["WBM_HOME"] = os.path.join(_ROOT, "wb")

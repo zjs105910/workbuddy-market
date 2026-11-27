@@ -263,27 +263,39 @@ def load_config() -> dict:
     return cfg
 
 
-def verify_mode() -> str:
-    """packaging.verify：auto（默认）/ fast / strict。"""
-    try:
-        cfg = load_config()
-    except ConfigError:
-        return "auto"
-    mode = (cfg.get("packaging") or {}).get("verify", "auto")
+def verify_mode(cfg: dict | None = None) -> str:
+    """packaging.verify：auto（默认）/ fast / strict。
+
+    cfg：调用方手里已经有**校验过**的配置时直接传入，省掉一次读盘 + 全量校验
+    （validate_config 对每个声明的 skill 要跑 ensure_child，本机 14 个 skill
+    实测一次约 12ms）。不传则自己读 —— 无参调用的旧行为不变。
+    传入的 cfg 只取值不再校验：形状不对（packaging 不是对象等）按 auto 处理，
+    与「配置不可用 → auto」是同一个保守方向。
+    """
+    if cfg is None:
+        try:
+            cfg = load_config()
+        except ConfigError:
+            return "auto"
+    pack = cfg.get("packaging") if isinstance(cfg, dict) else None
+    mode = pack.get("verify", "auto") if isinstance(pack, dict) else "auto"
     return mode if mode in ("auto", "fast", "strict") else "auto"
 
 
-def needs_exact(purpose: str) -> bool:
+def needs_exact(purpose: str, cfg: dict | None = None) -> bool:
     """这个用途要不要读到文件内容（完整 SHA-256）。
 
     · strict  —— 一律精确（连网页状态也精确，方便排查）
     · auto / fast —— 只有 install / uninstall 这种会**动用户磁盘**的用途才精确。
       网页状态用廉价指纹，误差只是显示；而 fast 不再能削弱破坏性判定，
       v2 那种「fast 导致 update 漏判 modified」的路子被彻底堵死。
+
+    cfg：透传给 verify_mode —— 批量分类时每次都重读配置，开销会按 skill 数
+    线性叠上去（build_state 实测 41 次/调用）；把已有的配置传进来即可。
     """
     if purpose not in CLASSIFY_PURPOSES:
         raise ValueError(f"未知用途 {purpose!r}")
-    if verify_mode() == "strict":
+    if verify_mode(cfg) == "strict":
         return True
     return purpose in EXACT_PURPOSES
 

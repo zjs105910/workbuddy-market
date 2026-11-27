@@ -23,6 +23,9 @@ export function confirmBox(title, html, yesLabel){
     $("#cfmTitle").textContent = title;
     $("#cfmBody").innerHTML = html;
     $("#cfmYes").textContent = yesLabel || "确定";
+    // 三个弹窗共用同一组按钮：errorBox 会把次要按钮改成「关闭」，这里必须
+    // 显式还原，否则上一个错误弹窗之后，确认框的取消按钮就一直叫「关闭」。
+    $("#cfmNo").textContent = "取消";
     $("#cfmNo").style.display = "";
     $("#cfm").classList.add("show");
     _dialogFocusIn();
@@ -118,6 +121,9 @@ export function errorBox(title, err, retry){
     const noBtn = $("#cfmNo");
     noBtn.style.display = "";
     noBtn.textContent = "关闭";
+    // 主按钮也必须自己设：上一个确认框可能把它改成了「卸载」「移除」之类，
+    // 不设的话这个「只是关闭」的按钮会顶着危险动作的名字（点下去只是关弹窗）。
+    $("#cfmYes").textContent = "关闭";
     const extra = document.createElement("span");
     extra.style.cssText = "flex:1;display:flex;gap:8px;flex-wrap:wrap";
     extra.innerHTML =

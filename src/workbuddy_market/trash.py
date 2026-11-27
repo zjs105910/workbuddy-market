@@ -419,12 +419,17 @@ def move_to_trash(path: Path, reason: str = "", index: "TrashIndex | None" = Non
     return dst
 
 
-def trash_config() -> dict:
-    """回收站清理策略，来自 market.config.json 的 trash 段。"""
-    try:
-        cfg = load_config()
-    except ConfigError:
-        cfg = {}
+def trash_config(cfg: dict | None = None) -> dict:
+    """回收站清理策略，来自 market.config.json 的 trash 段。
+
+    cfg：调用方手里已有**校验过**的配置时直接传入，省掉一次读盘 + 全量校验
+    （build_state 每次刷新都会走到这里）；不传则自己读，旧行为不变。
+    """
+    if cfg is None:
+        try:
+            cfg = load_config()
+        except ConfigError:
+            cfg = {}
     t = cfg.get("trash") or {}
     return {
         "max_age_days": float(t.get("maxAgeDays", 30) or 0),

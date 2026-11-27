@@ -4,6 +4,47 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.42.0 — 2026-11-27（全面检查与优化：状态构建提速 17 倍 + 断连/日志锁加固）
+
+### 性能
+
+- `build_state("ui")` 本机实测 **567ms → 32ms**：原来每分类一个 skill 就经
+  `needs_exact → verify_mode → load_config` 把整份配置读盘 + 全量校验一遍
+  （41 次/调用，单次约 11ms）。给 `verify_mode` / `needs_exact` / `trash_config`
+  加可选 `cfg`，让调用方传入已校验的配置；不传时旧行为不变。
+- `_walk_tree` 去掉逐文件 `Path(...).relative_to(...)`，改用等价字符串切片；
+  打包/校验/安装暂存/哈希的共同底座在 492 文件目录上 **13.9ms → 3.7ms**。
+- 新旧代码在同一组真实数据上的 `build_state` 等七项输出经 JSON 逐字节比对一致。
+
+### 修复
+
+- `market_server._send`：把写响应头的 `end_headers()` 纳入保护并覆盖
+  `ConnectionResetError`（Windows 10054）。此前客户端提前断开会让 GET 在事件流里
+  多记一条 error「未捕获异常」，POST 则把异常抛到标准库打印 traceback。
+- `FileLock` 可重入深度从「每线程一份、所有实例共享」改为「每线程每锁文件一份」：
+  此前持市场锁期间 `log()` 的日志锁获取次数为 **0**，安装/卸载/打包/恢复这些
+  最爱写日志的操作反而没有锁保护；现在正常获取。
+- 后台任务体漏出异常时，统一由 `_start_job` 记「失败」并归还并发令牌，
+  不再永远停在「运行中」。
+- 弹窗按钮文案不再串台：`errorBox` 与 `confirmBox` 各自设置自己负责的按钮文案，
+  「卸载」不会残留在错误弹窗的关闭按钮上、取消按钮不再叫「关闭」。
+
+### 变更
+
+- 去重：三个后台任务共用的「抢闸门 → 建任务 → finally 还令牌」收口为
+  `_start_job`；注册表按 repo 查找收口为 `find_entry`；
+  `state` 的卸载视图与 skillDetail 拼装收口为两个纯函数。
+- 测试基建：`tests/conftest.py` 显式把 `src/` 放到 `sys.path[0]` —— 此前开发机
+  venv 里装过 2.25.0 时，单独跑测试子集会静默测到 site-packages 的旧代码。
+
+### 验证
+
+- selftest 893 → 893 全绿；pytest **127 → 165**（新增 38 个回归钉子，
+  并在 HEAD 旧代码上做变异验证）；ui_smoke 49 全绿；
+  py_compile / ruff 0.17.0 六路径 / node --check / privacy-audit 全过。
+- 优化点、原因、风险、验证方式与「发现但未改」的缺陷见
+  `docs/optimization-2026-11-27.md`。
+
 ## 2.41.0 — 2026-11-18（任务弹窗可读性 + 精简清理 + 独立评审加固）
 
 ### 修复

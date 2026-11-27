@@ -113,6 +113,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import market_core as core  # noqa: E402
+from workbuddy_market.registry import find_entry  # noqa: E402
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8777
@@ -703,8 +704,7 @@ def _registry_drift(repo: str) -> dict | None:
     except Exception as exc:          # noqa: BLE001 —— 校验本身绝不挡死安装
         core.log("warn", "install", f"供应链校验跳过（注册表不可用：{exc}）：{repo}")
         return None
-    entry = next((e for e in (reg.get("plugins") or [])
-                  if str(e.get("repo", "")).casefold() == str(repo).casefold()), None)
+    entry = find_entry(reg, repo)
     if not entry:
         return None
     src = str(entry.get("sourceCommit") or "")
@@ -720,11 +720,53 @@ def _registry_drift(repo: str) -> dict | None:
                      "内容可能与收录审核时不同"}
 
 
+def _start_job(title: str, body, reject_detail: str):
+    """后台任务的统一派发：抢并发闸门 → 建任务 → 起 daemon 线程跑 ``body(jid)``。
+
+    **并发已满时返回 None**，由调用方回 429。闸门在创建任务之前就抢下，
+    抢不到就直接拒绝 —— 不能先建任务再排队，那样任务表会被塞满，用户
+    看到的是一串永远不动的「运行中」。
+
+    令牌归还只收口在这里的 finally：任务体成功、失败还是抛异常都必须还。
+    v2.41 及之前这段样板在 _remote_job / _registry_install_job /
+    _catalog_refresh_job 里各抄一份，哪一份漏写 finally 就是令牌泄漏
+    （表现为一个任务跑完后并发额度永久少一个）。
+
+    任务体漏出来的异常也在这里兜底（记「失败」并收尾）：任何一个任务都
+    不会因为没料到的异常而永远停在「运行中」。
+    """
+    if not _RUNNER.acquire():
+        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝 {reject_detail}")
+        return None
+    try:
+        jid = _new_job(title)
+    except BaseException:
+        _RUNNER.release()                 # 建任务都失败了，令牌必须还回去
+        raise
+
+    def runner():
+        try:
+            body(jid)
+        except Exception as exc:  # noqa: BLE001 —— 任务体漏出来的异常，在这里兜底
+            # v2.41 及之前 _remote_job 的任务体只有 finally、没有 except：
+            # 一个没料到的异常会一路冒到线程顶层，_job_finish 没跑，任务
+            # **永远停在「运行中」**（与 v2.5 那次 NameError 同一类）。
+            # 收口到这里：任何一个任务漏了异常，都以「失败」如实收尾。
+            try:
+                _job_push(jid, f"✗ 任务异常终止：{exc!r}")
+                _job_finish(jid, False, "失败")
+            except Exception:
+                pass
+            core.log("error", "job", f"后台任务异常终止（{title}）：{exc!r}")
+        finally:
+            _RUNNER.release()             # 无论成功、失败还是异常，都要还令牌
+
+    threading.Thread(target=runner, daemon=True).start()
+    return jid
+
+
 def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
     """起一个远端任务。**并发已满时返回 None**，由调用方回 429。
-
-    闸门在创建任务之前就抢下，抢不到就直接拒绝 —— 不能先建任务再排队，
-    那样任务表会被塞满，用户看到的是一串永远不动的"运行中"。
 
     allow_non_skill 仅对 add 生效：默认**不带** --allow-non-skill（供应链
     收紧，v2.12）—— 安装链路默认只接受符合 Skill 协议的仓库；只有前端
@@ -734,57 +776,46 @@ def _remote_job(repo: str, action: str, allow_non_skill: bool = False):
     所有权不在本市场（见 state.py 社区安装分组注释），市场自己的卸载通路
     不覆盖它们，移除必须经 ghpm（自带备份与事务回滚）。
     """
-    if not _RUNNER.acquire():
-        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝 {action} {repo}")
-        return None
-    try:
-        jid = _new_job(f"{_ACTION_TITLES.get(action, action)} {repo}")
-    except BaseException:
-        _RUNNER.release()                 # 建任务都失败了，令牌必须还回去
-        raise
 
-    if allow_non_skill and action == "add":
-        core.log("warn", "job",
-                 f"{repo} 以兼容模式安装（--allow-non-skill）：仓库未验证 Skill 协议，用户已显式确认")
+    def body(jid):
+        if allow_non_skill and action == "add":
+            core.log("warn", "job",
+                     f"{repo} 以兼容模式安装（--allow-non-skill）：仓库未验证 Skill 协议，用户已显式确认")
 
-    core.log("info", "job", f"{action} {repo} 开始")
+        core.log("info", "job", f"{action} {repo} 开始")
 
-    def work():
-        try:
-            args = [action, repo]
-            if action == "add" and allow_non_skill:
-                args.append("--allow-non-skill")
-            ok = _run_ghpm(args, jid)
-            # v2.36.1 用户实测：add 成功 ≠ 装进了 skill —— 兼容模式可以
-            # 0 skill（仅源码副本）。完成消息与日志必须带 skill 计数，
-            # 否则「装了个非技能仓库」在当刻看不出来，用户以为出了 bug。
-            note = ""
-            if action == "add" and ok:
+        args = [action, repo]
+        if action == "add" and allow_non_skill:
+            args.append("--allow-non-skill")
+        ok = _run_ghpm(args, jid)
+        # v2.36.1 用户实测：add 成功 ≠ 装进了 skill —— 兼容模式可以
+        # 0 skill（仅源码副本）。完成消息与日志必须带 skill 计数，
+        # 否则「装了个非技能仓库」在当刻看不出来，用户以为出了 bug。
+        note = ""
+        if action == "add" and ok:
+            try:
+                n = len((core.installed_repos().get(repo) or {})
+                        .get("skill_names") or [])
+                note = (f" · {n} 个 skill" if n
+                        else " · 未含 skill（仅源码副本，本机技能页可移除）")
+            except Exception:          # noqa: BLE001 —— 计数失败不影响任务结果
+                pass
+        _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}" + note)
+        if action == "update" and ok:
+            # v2.27：ghpm 实测的上游 sha 回写注册表缓存，消除
+            # 「更新完仍显示可更新」的快照滞后假阳性
+            with _jobs_lock:
+                job = _jobs.get(jid)
+            if job and job.get("lines"):
                 try:
-                    n = len((core.installed_repos().get(repo) or {})
-                            .get("skill_names") or [])
-                    note = (f" · {n} 个 skill" if n
-                            else " · 未含 skill（仅源码副本，本机技能页可移除）")
-                except Exception:      # noqa: BLE001 —— 计数失败不影响任务结果
-                    pass
-            _job_finish(jid, ok, ("完成" if ok else "失败") + f" · {repo}" + note)
-            if action == "update" and ok:
-                # v2.27：ghpm 实测的上游 sha 回写注册表缓存，消除
-                # 「更新完仍显示可更新」的快照滞后假阳性
-                with _jobs_lock:
-                    job = _jobs.get(jid)
-                if job and job.get("lines"):
-                    try:
-                        _sync_registry_sha_from_job(repo, job["lines"])
-                    except Exception as exc:      # noqa: BLE001 —— 回写失败不影响任务结果
-                        core.log("warn", "registry", f"latestSha 回写失败：{exc}")
-            core.log("info" if ok else "error", "job",
-                     f"{action} {repo} {'成功' if ok else '失败'}{note}")
-        finally:
-            _RUNNER.release()             # 无论成功、失败还是异常，都要还令牌
+                    _sync_registry_sha_from_job(repo, job["lines"])
+                except Exception as exc:          # noqa: BLE001 —— 回写失败不影响任务结果
+                    core.log("warn", "registry", f"latestSha 回写失败：{exc}")
+        core.log("info" if ok else "error", "job",
+                 f"{action} {repo} {'成功' if ok else '失败'}{note}")
 
-    threading.Thread(target=work, daemon=True).start()
-    return jid
+    return _start_job(f"{_ACTION_TITLES.get(action, action)} {repo}", body,
+                      f"{action} {repo}")
 
 
 _SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
@@ -836,7 +867,7 @@ def _registry_install_job(repo: str, mode: str = "missing", force: bool = False,
                           package_path: str | None = None):
     """社区注册表的**包安装**任务（v2.16）：不可变 artifact → verify → 事务安装。
 
-    与 _remote_job 同一套闸门与任务表（并发满员返回 None，由调用方回 429）。
+    与 _remote_job 同一套闸门与任务表（_start_job：并发满员返回 None，由调用方回 429）。
     与 ghpm 路线的本质区别：装的是注册表条目钉死的那一份字节（packageHash
     校验，对不上整包拒绝），不是仓库当前的 HEAD —— 上游漂移在这条链路里
     天然不存在，所以这里不需要 _registry_drift 的 409 闸门。
@@ -846,24 +877,13 @@ def _registry_install_job(repo: str, mode: str = "missing", force: bool = False,
     （/api/registry/install-offline）已先验过「绝对路径 + 存在 + .zip」；
     供应链校验在内核里一步不少 —— packageHash 对不上照样整包拒绝。
     """
-    if not _RUNNER.acquire():
-        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝包安装 {repo}")
-        return None
-    try:
-        jid = _new_job(f"{'离线安装' if package_path else '包安装'} {repo}")
-    except BaseException:
-        _RUNNER.release()
-        raise
 
-    core.log("info", "job",
-             f"registry-install {repo} 开始（{'离线本地包' if package_path else 'artifact'} 链路）")
-
-    def work():
+    def body(jid):
+        core.log("info", "job",
+                 f"registry-install {repo} 开始（{'离线本地包' if package_path else 'artifact'} 链路）")
         try:
             reg = core.get_registry()
-            entry = next((e for e in reg.get("plugins", [])
-                          if str(e.get("repo", "")).casefold() == str(repo).casefold()),
-                         None)
+            entry = find_entry(reg, repo)
             if not entry:
                 _job_push(jid, f"注册表里没有 {repo}")
                 _job_finish(jid, False, "失败 · 社区注册表")
@@ -884,11 +904,9 @@ def _registry_install_job(repo: str, mode: str = "missing", force: bool = False,
             _job_push(jid, f"✗ 包安装失败：{exc}")
             _job_finish(jid, False, "失败 · " + str(repo))
             core.log("error", "job", f"registry-install {repo} 失败：{exc}")
-        finally:
-            _RUNNER.release()             # 无论成功、失败还是异常，都要还令牌
 
-    threading.Thread(target=work, daemon=True).start()
-    return jid
+    return _start_job(f"{'离线安装' if package_path else '包安装'} {repo}", body,
+                      f"包安装 {repo}")
 
 
 # ---------------------------------------------------------------- GitHub 目录（v2.10）
@@ -935,17 +953,9 @@ def gh_search(query: str, limit: int = core.SEARCH_LIMIT_DEFAULT,
 
 
 def _catalog_refresh_job():
-    """手动刷新目录 + 社区注册表。与 _remote_job 同一套闸门与任务表，并发满员返回 None。"""
-    if not _RUNNER.acquire():
-        core.log("warn", "job", f"后台任务已达上限 {MAX_RUNNING_JOBS}，拒绝刷新目录")
-        return None
-    try:
-        jid = _new_job("刷新 GitHub 目录")
-    except BaseException:
-        _RUNNER.release()
-        raise
+    """手动刷新目录 + 社区注册表。与其他后台任务同一套闸门与任务表（_start_job）。"""
 
-    def work():
+    def body(jid):
         try:
             rep = core.refresh_catalog(force=True)
             _job_push(jid, f"已刷新 {rep['fetched']} 个 · 失败 {rep['failed']} 个"
@@ -971,11 +981,8 @@ def _catalog_refresh_job():
             _job_push(jid, f"✗ 刷新失败：{exc}")
             _job_finish(jid, False, "失败 · GitHub 目录")
             core.log("error", "catalog", f"手动刷新失败：{exc}")
-        finally:
-            _RUNNER.release()
 
-    threading.Thread(target=work, daemon=True).start()
-    return jid
+    return _start_job("刷新 GitHub 目录", body, "刷新目录")
 
 
 _catalog_stop = threading.Event()
@@ -1166,11 +1173,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", self._CSP)
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
+        # end_headers() 本身就会往 socket 写（响应头），必须和 body 一起包在
+        # try 里 —— 留在外面的话，对端一断开连 BrokenPipe 都会直接冒出去：
+        # GET 会多记一条「未捕获异常」的 error 事件，POST 更会把异常一路抛给
+        # 标准库（socketserver.handle_error 向 stderr 打印 traceback）。
+        # 对端断开的几种形态都是 OSError：BrokenPipeError（POSIX 对端关闭）、
+        # ConnectionAbortedError（Windows 10053）、ConnectionResetError
+        # （Windows 强制关闭 10054）、超时。响应发不出去，没有任何补救手段。
         try:
+            self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionAbortedError):
-            pass
+        except OSError:
+            # 连接已废：让 handle() 别再按 keep-alive 从它读下一个请求
+            self.close_connection = True
 
     def _json(self, data, code: int = 200):
         self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"),

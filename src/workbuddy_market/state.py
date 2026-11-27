@@ -41,6 +41,31 @@ from .trash import trash_stats, trash_config
 from .adapters.workbuddy import is_registered
 
 
+def _plan_view(plan: dict) -> dict:
+    """卸载分级计划 → 网页视图（字段全集）。
+
+    本机插件与社区 artifact 组用的是同一个 plugin_uninstall_plan，视图形状
+    必须一致 —— 此前这 7 个字段在两处各拼一遍，加一个字段就得记得改两处。
+    （ghpm 组的视图是按 ghpm 清单手工合成的，语义不同，不走这里。）
+    """
+    return {
+        "counts": plan.get("counts", {}),
+        "removable": plan.get("removable", []),
+        "modified": plan.get("modified", []),
+        "untouched": plan.get("untouched", []),
+        "absent": plan.get("absent", []),
+        "items": plan.get("items", []),
+        "safeToUninstall": bool(plan.get("removable")),
+    }
+
+
+def _skill_detail(want: list, items: list) -> list:
+    """每个 skill 一行 (kind, label)；不在计划里的 skill 如实显示「未安装」。"""
+    by = {i["skill"]: i for i in items}
+    return [{"skill": s, "kind": by.get(s, {}).get("kind", "absent"),
+             "label": by.get(s, {}).get("label", "")} for s in want]
+
+
 def installed_skill_names() -> set:
     """本机 skills 目录里的 skill 名。**排除暂存目录**（.x.installing-<pid>）。"""
     if not SKILLS_DIR.is_dir():
@@ -96,7 +121,6 @@ def build_state(purpose: str = "ui") -> dict:
         plan = core.plugin_uninstall_plan(spec["name"], cfg, purpose=purpose,
                                           scan_cache=scan_cache)
         items = plan.get("items", [])
-        by = {i["skill"]: i for i in items}
         have = [s for s in want if s in skills_here]
         plugins.append({
             "id": spec["name"],
@@ -115,19 +139,10 @@ def build_state(purpose: str = "ui") -> dict:
             "partial": 0 < len(have) < len(want),
             "packaged": (PLUGINS_DIR / spec["name"]).is_dir(),
             # 卸载安全分级
-            "uninstall": {
-                "counts": plan.get("counts", {}),
-                "removable": plan.get("removable", []),
-                "modified": plan.get("modified", []),
-                "untouched": plan.get("untouched", []),
-                "absent": plan.get("absent", []),
-                "items": items,
-                "safeToUninstall": bool(plan.get("removable")),
-            },
+            "uninstall": _plan_view(plan),
             "ownership": {s: own["skills"].get(s, {}).get("plugin", "") for s in want
                           if s in own["skills"]},
-            "skillDetail": [{"skill": s, "kind": by.get(s, {}).get("kind", "absent"),
-                             "label": by.get(s, {}).get("label", "")} for s in want],
+            "skillDetail": _skill_detail(want, items),
         })
 
     remotes = []
@@ -329,20 +344,9 @@ def build_state(purpose: str = "ui") -> dict:
             # 社区技能的扫描不走本地声明缓存（名字不在桶里），传 None 让
             # classify_skill 直接走 quick_fingerprint/tree_hash，语义不变。
             plan = core.plugin_uninstall_plan(plug, cfg, purpose="ui")
-            items = plan.get("items", [])
-            by = {i["skill"]: i for i in items}
             base.update({
-                "uninstall": {
-                    "counts": plan.get("counts", {}),
-                    "removable": plan.get("removable", []),
-                    "modified": plan.get("modified", []),
-                    "untouched": plan.get("untouched", []),
-                    "absent": plan.get("absent", []),
-                    "items": items,
-                    "safeToUninstall": bool(plan.get("removable")),
-                },
-                "skillDetail": [{"skill": s, "kind": by.get(s, {}).get("kind", "absent"),
-                                 "label": by.get(s, {}).get("label", "")} for s in want],
+                "uninstall": _plan_view(plan),
+                "skillDetail": _skill_detail(want, plan.get("items", [])),
             })
         community.append(base)
     for p in community:
@@ -378,7 +382,7 @@ def build_state(purpose: str = "ui") -> dict:
         "trash": {
             "count": ts["count"],
             "bytes": ts["bytes"],
-            "policy": trash_config(),
+            "policy": trash_config(cfg),
             # v2.40：网页要列得出条目、显示真实位置（v2.7 起回收站已不在
             # 仓库根的 .trash，而在 STATE_HOME/trash），才能逐项恢复。
             "dir": str(TRASH_DIR),
@@ -402,9 +406,11 @@ def build_state(purpose: str = "ui") -> dict:
             "lastSync": state.get("lastSync", ""),
             "marketVersion": MARKET_VERSION,
             "stateVersion": state.get("version", 0),
-            "verify": verify_mode(),
-            "verifyEffective": {"ui": needs_exact("ui"),
-                                "install": needs_exact("install"),
-                                "uninstall": needs_exact("uninstall")},
+            # verify / verifyEffective 复用上面已校验的 cfg：不传的话这 4 次调用
+            # 各自重读一遍配置（每次全量校验约 12ms，本机实测）。
+            "verify": verify_mode(cfg),
+            "verifyEffective": {"ui": needs_exact("ui", cfg),
+                                "install": needs_exact("install", cfg),
+                                "uninstall": needs_exact("uninstall", cfg)},
         },
     }

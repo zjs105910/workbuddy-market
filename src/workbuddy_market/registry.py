@@ -335,6 +335,21 @@ def parse_registry(data) -> dict:
 
 # ---------------------------------------------------------------- 缓存
 
+def find_entry(reg, repo) -> dict | None:
+    """按 repo 取注册表条目（大小写不敏感）；找不到返回 None。
+
+    「哪个条目对应这个仓库」的口径只留一处：服务端的漂移校验 / 包安装任务、
+    离线导入的钉死哈希比对都走它。GitHub 的 owner/repo 本身大小写不敏感，
+    所以用 casefold 比。reg 来自缓存 / 网络（不可信），形状不对按「没有」处理。
+    """
+    key = str(repo or "").casefold()
+    plugins = reg.get("plugins") if isinstance(reg, dict) else None
+    if not key or not isinstance(plugins, list):
+        return None
+    return next((e for e in plugins
+                 if isinstance(e, dict) and str(e.get("repo", "")).casefold() == key), None)
+
+
 def registry_path():
     return REGISTRY_PATH
 

@@ -47,6 +47,14 @@ def _walk_tree(root: Path, excluded, files: dict, links: list, errors: list) -> 
     if not root.is_dir():
         return
     stack = [str(root)]
+    # 相对路径 = e.path 去掉根前缀。e.path 恒为「扫描目录 + 分隔符 + 名字」
+    # （DirEntry.path 就是 os.path.join(目录, 名字)），所以字符串切片与原来的
+    # Path(e.path).relative_to(root) 逐键等价；而 pathlib 版每个文件要构造两个
+    # PurePath 再逐段比对，占整次扫描约 3/4 的时间（492 个文件实测 14.2 → 3.6ms）。
+    # 根自身以分隔符结尾时（盘符根 C:\、POSIX 根 /）join 不再补分隔符，起点差 1。
+    base = stack[0]
+    seps = (os.sep, os.altsep) if os.altsep else (os.sep,)
+    cut = len(base) if base.endswith(seps) else len(base) + 1
     while stack:
         cur = stack.pop()
         try:
@@ -70,7 +78,7 @@ def _walk_tree(root: Path, excluded, files: dict, links: list, errors: list) -> 
             except OSError as exc:
                 errors.append((e.path, str(exc)))   # stat 失败同样是"看不见"
                 continue
-            rel = str(Path(e.path).relative_to(root)).replace("\\", "/")
+            rel = e.path[cut:].replace("\\", "/")
             files[rel] = (st.st_size, st.st_mtime_ns)
 
 

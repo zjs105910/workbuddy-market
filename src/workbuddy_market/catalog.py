@@ -172,7 +172,11 @@ def _entry_fresh(entry: dict, now: float, max_age: float) -> bool:
 
 def is_stale(cat: dict | None = None, now: float | None = None,
              max_age: float | None = None) -> bool:
-    """整份目录是否过期（或根本没有）。自动刷新循环按它决定要不要动手。"""
+    """整份目录是否过期（或根本没有）。
+
+    /api/catalog 用它给前端标「数据可能过期」。自动刷新循环**不**拿它当闸门
+    —— 那条路按单条 TTL 决定拉谁（见 market_server.catalog_auto_loop 的注释）。
+    """
     cat = load_catalog() if cat is None else cat
     max_age = CATALOG_TTL if max_age is None else float(max_age)
     now = time.time() if now is None else float(now)

@@ -67,7 +67,7 @@ def classify_skill(plugin_id: str, sname: str, cfg: dict, own: dict | None = Non
     import market_core as _core          # noqa: PLC0415 —— 注入点晚绑定，见模块 docstring
     if purpose not in CLASSIFY_PURPOSES:
         raise ValueError(f"未知用途 {purpose!r}（可选：{', '.join(CLASSIFY_PURPOSES)}）")
-    exact = needs_exact(purpose)
+    exact = needs_exact(purpose, cfg)      # cfg 已在调用方校验过：不再逐 skill 重读配置
     if always_hash:                       # 兼容旧签名：只允许「更严」，不允许更松
         exact = True
 
