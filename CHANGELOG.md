@@ -4,6 +4,15 @@
 每轮代码评审为一个次版本；schema 版本（ownership / tx / state / config）独立演进。
 更详细的每轮变更说明见 `docs/versions.md`（v2 → v2.11 各一节，v2.12 起自 README 迁出）。
 
+## 2.42.1 — 2026-11-27（发版门禁修复：优化文档里的本机路径）
+
+- 上一 commit 的 `v2.42.0` 在 CI 六个矩阵 job 的「Privacy audit」步骤全部失败：
+  新增的 `docs/optimization-2026-11-27.md` 里验证命令硬编码了本机解释器路径，
+  命中 `USER-PATH-WIN` / `USER-PATH-POSIX`。本地提交前该文档尚未被跟踪，
+  所以 `git ls-files` 口径的本地审计没有覆盖到它。
+- 把验证命令里的路径换成 `<仓库目录>` + `PY=python`；版本号升到 2.42.1
+  （patch 不动 `SELFTEST_VERSION` 的前两段）。v2.42.0 的 tag 不移动、Release 未创建。
+
 ## 2.42.0 — 2026-11-27（全面检查与优化：状态构建提速 17 倍 + 断连/日志锁加固）
 
 ### 性能

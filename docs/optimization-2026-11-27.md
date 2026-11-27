@@ -1,7 +1,7 @@
 # WorkBuddy Market 优化说明（2026-11-27）
 
 > **适用版本**：基于 `v2.41.0`（commit `fbc3ca16`）的工作区改动。
-> **状态**：未提交、未发版，`version.py` 仍是 `2.41.0`。
+> **状态**：已提交并随 `v2.42.1` 发布；基线是 `v2.41.0`（commit `fbc3ca16`）。
 > **约束**：正常路径的功能与外部行为保持不变；仅在故障路径修复了 3 处缺陷，本文单独列出。
 > **方法**：先读代码形成候选 → 用只读探针在真实数据上复现/量化 → 修改 → 用同一探针复验 → 全量回归。所有性能数字均为本机（Windows、Python 3.13、25 个技能 / 134 个文件 / 110 条注册表）实测，非估算。
 
@@ -185,8 +185,8 @@ classify_skill → needs_exact(purpose) → verify_mode() → load_config()
 ## 4. 验证方式（可复现命令）
 
 ```bash
-cd D:/DeepSeek-Harnessgz/workbuddy-market
-PY="C:/Users/13624/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
+cd <仓库目录>
+PY=python                     # 用本项目要求的 Python 3.13（venv 或受管解释器均可）
 export PYTHONPATH=            # 必须清空：避开 WorkBuddy shim 劫持 os.unlink
 
 "$PY" -m py_compile market_core.py market_server.py launcher.py selftest.py \
