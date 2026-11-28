@@ -1,0 +1,399 @@
+{
+  "bootstrapSha": "4e48ccbf0f77da757d7cacc6937b1cc59c124845",
+  "repository": "zenstory-ai/drama-skills",
+  "schemaVersion": 1,
+  "skillRoots": [
+    "skills"
+  ],
+  "skills": [
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧创作路由",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "e6c824b05ee9e2937eabcfb121be4aaf9b543ee88fb5ee1b5016793abacdf833",
+      "path": "skills/short-drama",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9",
+        "skill:worldwonderer/short-drama-assets@1.0.27",
+        "skill:worldwonderer/short-drama-develop@1.0.27",
+        "skill:worldwonderer/short-drama-edit@1.0.8",
+        "skill:worldwonderer/short-drama-image-prompts@1.0.7",
+        "skill:worldwonderer/short-drama-novel-analyze@1.0.27",
+        "skill:worldwonderer/short-drama-produce@1.0.3",
+        "skill:worldwonderer/short-drama-review@1.0.5",
+        "skill:worldwonderer/short-drama-storyboard@1.0.10",
+        "skill:worldwonderer/short-drama-video-prompts@1.0.9",
+        "skill:worldwonderer/short-drama-write@1.0.10"
+      ],
+      "slug": "short-drama",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.27"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧资产拆解",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "a6460ad490c37dfa49e2e3d0185764330e009098196b331a6987d6f61694b310",
+      "path": "skills/short-drama-assets",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9",
+        "skill:worldwonderer/short-drama@1.0.27"
+      ],
+      "slug": "short-drama-assets",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.27"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧开发",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "3699baad9a56f952c3fcd0196e977e4c859ab606727846b2c0e509bfe1afcbc6",
+      "path": "skills/short-drama-develop",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9",
+        "skill:worldwonderer/short-drama@1.0.27"
+      ],
+      "slug": "short-drama-develop",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.27"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧剪辑与成片",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "14bca2ee79013140615618ea03b98e0690324f751f02196b918d094aa80d1808",
+      "path": "skills/short-drama-edit",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "short-drama-edit",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.8"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧资产图片提示词",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "ac7512bfbd415ed05d4596f81772abc5da040072cd3384d51ff108fcb537714a",
+      "path": "skills/short-drama-image-prompts",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-image-prompts",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.7"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "长篇原著分析",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "d467a8828db89ef5d0af08cf99c3d76c3d14a25174fd3291c6dd8aa3b721d417",
+      "path": "skills/short-drama-novel-analyze",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9",
+        "skill:worldwonderer/short-drama@1.0.27"
+      ],
+      "slug": "short-drama-novel-analyze",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.27"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "确认后生产",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "b516eadaa9333d33eac6459f69a753fbf8e53113fa77a10f9ba6bc67cca4627a",
+      "path": "skills/short-drama-produce",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-produce",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.3"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧审查",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "106a0f462623130c4f32948803e8a30876a40f899e0253eb51f02143e6959fc5",
+      "path": "skills/short-drama-review",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-review",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.5"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧分镜与冻结关键帧",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "1c5ce3f824c1bd766cb8c820211e118b705cbd288edba92a083fc604e658fa16",
+      "path": "skills/short-drama-storyboard",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-storyboard",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.10"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧视频、时间线与音乐提示词",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "b75d7b744c2d4b58f8f15435c2a0e9d0d66e3fed850088a45dea7c4c0bc7f6cb",
+      "path": "skills/short-drama-video-prompts",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-video-prompts",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.9"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation"
+      ],
+      "displayName": "短剧写作",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "d0e4a56a6c71539b3b555a3819406e92dbad581ab9fd4eb6c55cdb6a5a52dc6e",
+      "path": "skills/short-drama-write",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python>=3.9"
+      ],
+      "slug": "short-drama-write",
+      "supportedRuntimes": [],
+      "topics": [
+        "short-drama",
+        "screenwriting",
+        "storyboard",
+        "video-production"
+      ],
+      "version": "1.0.10"
+    }
+  ]
+}

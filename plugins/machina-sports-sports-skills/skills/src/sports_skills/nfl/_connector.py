@@ -1,0 +1,1010 @@
+"""NFL data connector — ESPN public API.
+
+Provides scores, standings, rosters, schedules, game summaries,
+statistical leaders, and news for the NFL.
+"""
+
+import json
+import logging
+
+from sports_skills._espn_base import (
+    _USER_AGENT,
+    ESPN_STATUS_MAP,
+    _as_dict,
+    _cache_get,
+    _cache_set,
+    _current_year,
+    _http_fetch,
+    _resolve_leaders,
+    default_standings_season,
+    epoch_seconds,
+    espn_core_request,
+    espn_request,
+    espn_summary,
+    espn_web_request,
+    event_season_type,
+    fetch_season,
+    fill_team_divisions,
+    normalize_boxscore,
+    normalize_core_stats,
+    normalize_depth_chart,
+    normalize_futures,
+    normalize_injuries,
+    normalize_odds,
+    normalize_score,
+    normalize_scoring_plays,
+    normalize_summary_odds,
+    normalize_transactions,
+    standings_fields,
+)
+
+logger = logging.getLogger("sports_skills.nfl")
+
+SPORT_PATH = "football/nfl"
+
+# ESPN uses separate seasontype (2=regular, 3=postseason) with its own week
+# numbering.  The SKILL.md exposes a unified scheme so agents don't need to
+# know the ESPN internals.
+#
+# ESPN postseason weeks:
+#   1 = Wild Card, 2 = Divisional, 3 = Conference, 4 = Pro Bowl, 5 = Super Bowl
+_POSTSEASON_THRESHOLD = 19
+_POSTSEASON_WEEK_MAP = {19: 1, 20: 2, 21: 3, 22: 4, 23: 5}
+
+
+def _resolve_week_params(week):
+    """Convert a unified week number to ESPN query params.
+
+    Regular season weeks (1-18) pass through as-is.
+    Postseason weeks (19-23) become ``seasontype=3`` + the ESPN-relative week.
+    """
+    if not week:
+        return {}
+    if week >= _POSTSEASON_THRESHOLD:
+        return {
+            "seasontype": 3,
+            "week": _POSTSEASON_WEEK_MAP.get(week, week - 18),
+        }
+    return {"week": week}
+
+
+def _bounded_int(value, low, high):
+    """``value`` as an int in [low, high], else None.
+
+    Only ints and digit strings count: booleans and floats are refused rather
+    than coerced, so ``True`` or ``5.5`` never becomes a week.
+    """
+    if isinstance(value, str) and value.strip().isdecimal():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if low <= value <= high else None
+
+
+def _coverage(raw_events, requested, completeness, reason, warnings=()):
+    """What a schedule response covers.
+
+    Never ``complete``: ESPN publishes no game total to check a response
+    against, so an HTTP 200 (or no game in a week) proves nothing. Seasons and
+    weeks are the ones the returned events carry; weeks use ESPN's numbering,
+    which restarts at 1 in the postseason.
+    """
+    return {
+        "requested": requested,
+        "completeness": completeness,
+        "reason": reason,
+        "warnings": list(warnings),
+        "returned_count": len(raw_events),
+        "seasons_returned": sorted({
+            y for y in (_as_dict(e.get("season")).get("year") for e in raw_events) if type(y) is int
+        }),
+        "weeks_returned": sorted({
+            w for w in (_as_dict(e.get("week")).get("number") for e in raw_events) if type(w) is int
+        }),
+    }
+
+
+# ============================================================
+# ESPN Response Normalizers
+# ============================================================
+
+
+def _normalize_event(espn_event):
+    """Normalize an ESPN scoreboard event to a standard format."""
+    comp = espn_event.get("competitions", [{}])[0]
+    status_obj = comp.get("status", espn_event.get("status", {}))
+    status_type = status_obj.get("type", {}).get("name", "")
+    status_detail = status_obj.get("type", {}).get("shortDetail", "")
+
+    competitors = []
+    for c in comp.get("competitors", []):
+        team = c.get("team", {})
+        linescores = c.get("linescores", [])
+        records = c.get("records", [])
+        competitors.append({
+            "team": {
+                "id": str(team.get("id", "")),
+                "name": team.get("displayName", ""),
+                "abbreviation": team.get("abbreviation", ""),
+                "logo": team.get("logo", ""),
+            },
+            "home_away": c.get("homeAway", ""),
+            "score": normalize_score(c.get("score", "0")),
+            "period_scores": [int(p.get("value", 0)) for p in linescores],
+            "record": records[0].get("summary", "") if records else "",
+            "winner": c.get("winner", False),
+        })
+
+    odds = normalize_odds(comp.get("odds", []))
+
+    broadcasts = []
+    for b in comp.get("broadcasts", []):
+        for name in b.get("names", []):
+            broadcasts.append(name)
+
+    week_info = espn_event.get("week", {})
+
+    return {
+        "id": str(espn_event.get("id", "")),
+        "name": espn_event.get("name", ""),
+        "short_name": espn_event.get("shortName", ""),
+        "status": ESPN_STATUS_MAP.get(status_type, status_type),
+        "status_detail": status_detail,
+        "start_time": comp.get("date", espn_event.get("date", "")),
+        "start_ts": epoch_seconds(comp.get("date", espn_event.get("date", ""))),
+        "season_type": event_season_type(espn_event),
+        "venue": {
+            "name": comp.get("venue", {}).get("fullName", ""),
+            "city": comp.get("venue", {}).get("address", {}).get("city", ""),
+            "state": comp.get("venue", {}).get("address", {}).get("state", ""),
+        },
+        "competitors": competitors,
+        "odds": odds,
+        "broadcasts": broadcasts,
+        "week": _as_dict(week_info).get("number"),
+    }
+
+
+def _normalize_standings_entries(standings_data):
+    """Parse entries from an ESPN standings block."""
+    entries = []
+    for entry in standings_data.get("entries", []):
+        team = entry.get("team", {})
+        stats = {s["name"]: s.get("displayValue", s.get("value", ""))
+                 for s in entry.get("stats", [])}
+        entries.append({
+            "team": {
+                "id": str(team.get("id", "")),
+                "name": team.get("displayName", ""),
+                "abbreviation": team.get("abbreviation", ""),
+                "logo": team.get("logos", [{}])[0].get("href", "") if team.get("logos") else "",
+            },
+            "wins": stats.get("wins", "0"),
+            "losses": stats.get("losses", "0"),
+            "ties": stats.get("ties", "0"),
+            "win_pct": stats.get("winPercent", "0"),
+            "points_for": stats.get("pointsFor", "0"),
+            "points_against": stats.get("pointsAgainst", "0"),
+            "streak": stats.get("streak", ""),
+            "division_record": stats.get("divisionRecord", ""),
+            "conference_record": stats.get("conferenceRecord", stats.get("vs. Conf.", "")),
+            "playoff_seed": stats.get("playoffSeed", ""),
+            "clinch": stats.get("clincher", ""),
+        })
+    return entries
+
+
+def _normalize_standings(espn_data):
+    """Normalize ESPN standings with conference/division groups.
+
+    Handles two ESPN structures:
+    - Conference -> Divisions -> Entries (some seasons)
+    - Conference -> Direct Entries (NFL default)
+    """
+    groups = []
+    for child in espn_data.get("children", []):
+        conference_name = child.get("name", child.get("abbreviation", ""))
+
+        # Check for division sub-groups first
+        if child.get("children"):
+            for division in child["children"]:
+                division_name = division.get("name", "")
+                standings = division.get("standings", {})
+                entries = _normalize_standings_entries(standings)
+                if entries:
+                    groups.append({
+                        "conference": conference_name,
+                        "division": division_name,
+                        "entries": entries,
+                    })
+        # Fall back to direct standings on the conference
+        elif child.get("standings"):
+            entries = _normalize_standings_entries(child["standings"])
+            if entries:
+                groups.append({
+                    "conference": conference_name,
+                    "division": "",
+                    "entries": entries,
+                })
+    return groups
+
+
+def _normalize_team(espn_team):
+    """Normalize an ESPN team object."""
+    team = espn_team.get("team", espn_team)
+    logos = team.get("logos", [])
+    return {
+        "id": str(team.get("id", "")),
+        "name": team.get("displayName", ""),
+        "abbreviation": team.get("abbreviation", ""),
+        "nickname": team.get("nickname", team.get("shortDisplayName", "")),
+        "location": team.get("location", ""),
+        "color": team.get("color", ""),
+        "logo": logos[0].get("href", "") if logos else "",
+        "is_active": team.get("isActive", True),
+    }
+
+
+def _normalize_roster(espn_data):
+    """Normalize ESPN roster response."""
+    athletes = []
+    for group in espn_data.get("athletes", []):
+        position_group = group.get("position", "")
+        for item in group.get("items", []):
+            athlete = item
+            athletes.append({
+                "id": str(athlete.get("id", "")),
+                "name": athlete.get("displayName", athlete.get("fullName", "")),
+                "jersey": athlete.get("jersey", ""),
+                "position": athlete.get("position", {}).get("abbreviation", position_group),
+                "age": athlete.get("age", ""),
+                "height": athlete.get("displayHeight", ""),
+                "weight": athlete.get("displayWeight", ""),
+                "experience": athlete.get("experience", {}).get("years", ""),
+                "college": athlete.get("college", {}).get("name", "") if isinstance(athlete.get("college"), dict) else athlete.get("college", ""),
+                "status": athlete.get("status", {}).get("type", ""),
+            })
+    return athletes
+
+
+def _normalize_game_summary(summary_data):
+    """Normalize ESPN game summary with box score and scoring plays."""
+    if not summary_data:
+        return {"error": True, "message": "No summary data available"}
+
+    header = summary_data.get("header", {})
+    competitions = header.get("competitions", [{}])
+    comp = competitions[0] if competitions else {}
+
+    # Basic game info. start_time is the game's identity for cross-venue
+    # matching: prediction markets date a game, and the same two teams meet
+    # more than once a season.
+    game_info = {
+        "id": header.get("id", ""),
+        "status": comp.get("status", {}).get("type", {}).get("name", ""),
+        "status_detail": comp.get("status", {}).get("type", {}).get("shortDetail", ""),
+        "start_time": comp.get("date", ""),
+        "venue": {
+            "name": summary_data.get("gameInfo", {}).get("venue", {}).get("fullName", ""),
+            "city": summary_data.get("gameInfo", {}).get("venue", {}).get("address", {}).get("city", ""),
+        },
+    }
+
+    # Competitors from header
+    competitors = []
+    for c in comp.get("competitors", []):
+        team = c.get("team", [{}])
+        if isinstance(team, list):
+            team = team[0] if team else {}
+        competitors.append({
+            "team": {
+                "id": str(team.get("id", "")),
+                "name": team.get("displayName", team.get("location", "")),
+                "abbreviation": team.get("abbreviation", ""),
+                "logo": team.get("logo", ""),
+            },
+            "home_away": c.get("homeAway", ""),
+            "score": c.get("score", "0"),
+            "winner": c.get("winner", False),
+            "record": c.get("record", ""),
+            "linescores": [ls.get("displayValue", "0") for ls in c.get("linescores", [])],
+        })
+
+    # Box score — player tables live under boxscore["players"], not ["teams"].
+    box_teams = normalize_boxscore(summary_data.get("boxscore", {}))
+
+    # Scoring plays — ESPN curates scoringPlays for NFL; the helper falls back to
+    # plays[] otherwise and backfills team identity from competitors.
+    scoring_plays = normalize_scoring_plays(summary_data, competitors)
+
+    # Leaders
+    leaders = []
+    for leader_group in summary_data.get("leaders", []):
+        team = leader_group.get("team", {})
+        categories = []
+        for cat in leader_group.get("leaders", []):
+            top = cat.get("leaders", [{}])
+            top_leader = top[0] if top else {}
+            athlete = top_leader.get("athlete", {})
+            categories.append({
+                "category": cat.get("displayName", cat.get("name", "")),
+                "leader": {
+                    "name": athlete.get("displayName", ""),
+                    "position": athlete.get("position", {}).get("abbreviation", ""),
+                    "value": top_leader.get("displayValue", ""),
+                },
+            })
+        leaders.append({
+            "team": {
+                "id": str(team.get("id", "")),
+                "name": team.get("displayName", ""),
+            },
+            "categories": categories,
+        })
+
+    return {
+        "game_info": game_info,
+        "competitors": competitors,
+        "boxscore": box_teams,
+        "scoring_plays": scoring_plays,
+        "leaders": leaders,
+        # Summary odds live in pickcenter, not competitions[].odds — the
+        # markets helpers read this key and previously found nothing here.
+        "odds": normalize_summary_odds(summary_data),
+    }
+
+
+def _normalize_leaders(espn_data):
+    """Normalize ESPN leaders response."""
+    categories = []
+    for cat in espn_data.get("categories", []):
+        leaders_list = []
+        for leader in cat.get("leaders", []):
+            athlete = leader.get("athlete", {})
+            team = athlete.get("team", {})
+            leaders_list.append({
+                "rank": leader.get("rank", ""),
+                "name": athlete.get("displayName", ""),
+                "position": athlete.get("position", {}).get("abbreviation", ""),
+                "team": {
+                    "id": str(team.get("id", "")),
+                    "name": team.get("displayName", team.get("name", "")),
+                    "abbreviation": team.get("abbreviation", ""),
+                },
+                "value": leader.get("displayValue", leader.get("value", "")),
+            })
+        categories.append({
+            "name": cat.get("displayName", cat.get("name", "")),
+            "leaders": leaders_list,
+        })
+    return categories
+
+
+# ESPN's league id for the NFL, as it appears in a news category's `sportId`
+# and in its `uid` ("s:20~l:28~t:14").
+_NFL_LEAGUE_ID = 28
+
+
+def _article_team_ids(article):
+    """ESPN team IDs explicitly tagged on a news article.
+
+    Team identity lives in ``categories[]`` entries of ``type == "team"``, as
+    ``teamId`` or ``team.id`` — NOT the category's own ``id``, which is a
+    content id that collides with team ids. A league-wide story legitimately
+    tags every team it covers, so these tags are the only safe filter; a
+    headline mentioning a team is not a tag.
+    """
+    ids = set()
+    for category in article.get("categories") or []:
+        if not isinstance(category, dict) or category.get("type") != "team":
+            continue
+        sport_id = category.get("sportId")
+        uid = str(category.get("uid") or "")
+        if sport_id is not None and sport_id != _NFL_LEAGUE_ID and f"l:{_NFL_LEAGUE_ID}~" not in uid:
+            continue
+        team = category.get("team") if isinstance(category.get("team"), dict) else {}
+        for value in (category.get("teamId"), team.get("id")):
+            if value not in (None, ""):
+                ids.add(str(value))
+    return ids
+
+
+def _normalize_news(espn_data):
+    """Normalize ESPN news response."""
+    articles = []
+    for article in espn_data.get("articles", []):
+        articles.append({
+            "headline": article.get("headline", ""),
+            "description": article.get("description", ""),
+            "published": article.get("published", ""),
+            "type": article.get("type", ""),
+            "premium": article.get("premium", False),
+            "link": "",
+            "images": [img.get("url", "") for img in article.get("images", [])[:1]],
+        })
+        # Extract link
+        links = article.get("links", {})
+        web = links.get("web", {})
+        if web.get("href"):
+            articles[-1]["link"] = web["href"]
+        elif links.get("api", {}).get("self", {}).get("href"):
+            articles[-1]["link"] = links["api"]["self"]["href"]
+    return articles
+
+
+# ============================================================
+# Command Functions
+# ============================================================
+
+
+def get_scoreboard(request_data):
+    """Get live/recent NFL scores."""
+    params = request_data.get("params", {})
+    date = params.get("date")
+    week = params.get("week")
+    season = params.get("season")
+
+    espn_params = {}
+    if date:
+        espn_params["dates"] = date.replace("-", "")
+    elif season:
+        # With a week, ESPN reads a year in ``dates`` as the season.
+        espn_params["dates"] = str(season)
+    espn_params.update(_resolve_week_params(week))
+
+    data = espn_request(SPORT_PATH, "scoreboard", espn_params or None)
+    if data.get("error"):
+        return data
+
+    events = [_normalize_event(e) for e in data.get("events", [])]
+    season_info = data.get("season", {})
+    week_info = data.get("week", {})
+
+    return {
+        "events": events,
+        "season": {
+            "year": season_info.get("year", ""),
+            "type": season_info.get("type", ""),
+        },
+        "week": {
+            "number": week_info.get("number", ""),
+            "text": week_info.get("text", ""),
+        },
+        "count": len(events),
+    }
+
+
+def get_standings(request_data):
+    """Get NFL standings by conference/division."""
+    params = request_data.get("params", {})
+    season = params.get("season")
+
+    espn_params = {}
+    if season:
+        espn_params["season"] = season
+
+    data = espn_web_request(SPORT_PATH, "standings", espn_params or None)
+    if data.get("error"):
+        return data
+    data, defaulted_from = default_standings_season(
+        data, season, lambda year: espn_web_request(SPORT_PATH, "standings", {**espn_params, "season": year})
+    )
+    if defaulted_from:
+        espn_params["season"] = defaulted_from - 1
+
+    groups = _normalize_standings(data)
+    # The conference tables above leave "division" empty; a level=3 request
+    # names each team's division. Groups and their order are unchanged.
+    division_data = espn_web_request(
+        SPORT_PATH, "standings", {**espn_params, "level": 3}, timeout=10, max_retries=0
+    )
+    fill_team_divisions(groups, division_data)
+    return {
+        "groups": groups,
+        # The tables' own season (ESPN's envelope reports the *current* one)
+        # or the requested one, with its type and status.
+        **standings_fields(data, season, defaulted_from),
+    }
+
+
+def get_teams(request_data=None):
+    """Get all NFL teams."""
+    data = espn_request(SPORT_PATH, "teams")
+    if data.get("error"):
+        return data
+
+    # ESPN's team list has no conference or division; its ``groups`` resource
+    # nests them (conference -> division -> teams). If that request fails, both
+    # are "" and the teams are still returned.
+    groups = espn_request(SPORT_PATH, "groups", max_retries=0)
+    placement = {}
+    for conference in groups.get("groups", []) if isinstance(groups, dict) else []:
+        for division in conference.get("children", []):
+            for team in division.get("teams", []):
+                placement[str(team.get("id", ""))] = (conference.get("abbreviation", ""), division.get("name", ""))
+
+    teams = []
+    for sport in data.get("sports", []):
+        for league in sport.get("leagues", []):
+            for team_wrapper in league.get("teams", []):
+                team = _normalize_team(team_wrapper)
+                team["conference"], team["division"] = placement.get(team["id"], ("", ""))
+                teams.append(team)
+
+    return {"teams": teams, "count": len(teams)}
+
+
+def get_team_roster(request_data):
+    """Get roster for an NFL team."""
+    params = request_data.get("params", {})
+    team_id = params.get("team_id")
+    if not team_id:
+        return {"error": True, "message": "team_id is required"}
+
+    data = espn_request(SPORT_PATH, f"teams/{team_id}/roster")
+    if data.get("error"):
+        return data
+
+    athletes = _normalize_roster(data)
+    team_info = data.get("team", {})
+
+    return {
+        "team": {
+            "id": str(team_info.get("id", team_id)),
+            "name": team_info.get("displayName", ""),
+            "abbreviation": team_info.get("abbreviation", ""),
+        },
+        "athletes": athletes,
+        "count": len(athletes),
+    }
+
+
+def _echo_season(requested, data):
+    """Report the season the events actually describe.
+
+    ESPN's response envelope carries the current season even when the request
+    filtered to an earlier one, so a requested season wins.
+    """
+    if requested not in (None, ""):
+        try:
+            return int(requested)
+        except (TypeError, ValueError):
+            return requested
+    return data.get("season", {}).get("year", "")
+
+
+def get_team_schedule(request_data):
+    """Get schedule for a specific NFL team (regular season + postseason)."""
+    params = request_data.get("params", {})
+    team_id = params.get("team_id")
+    season = params.get("season")
+    if not team_id:
+        return {"error": True, "message": "team_id is required"}
+
+    espn_params = {}
+    if season:
+        espn_params["season"] = season
+
+    resource = f"teams/{team_id}/schedule"
+    data = espn_request(SPORT_PATH, resource, espn_params or None)
+    if data.get("error"):
+        return data
+
+    raw_events = list(data.get("events", []))
+    events = [_normalize_event(e) for e in raw_events]
+
+    # ESPN defaults to regular season; fetch postseason separately and merge.
+    post_params = dict(espn_params)
+    post_params["seasontype"] = 3
+    post_data = espn_request(SPORT_PATH, resource, post_params, max_retries=0)
+    requested = {"season": _echo_season(season, {}) or None, "week": None, "team_id": str(team_id)}
+    if post_data.get("error"):
+        coverage = _coverage(
+            raw_events,
+            requested,
+            "partial",
+            "The postseason request failed; only regular-season games are returned.",
+            [f"postseason schedule unavailable: {post_data.get('message', 'unknown error')}"],
+        )
+    else:
+        seen_ids = {e["id"] for e in events}
+        for event in post_data.get("events", []):
+            norm = _normalize_event(event)
+            if norm["id"] not in seen_ids:
+                events.append(norm)
+                raw_events.append(event)
+        coverage = _coverage(raw_events, requested, "unknown", "ESPN team schedule, regular season plus postseason.")
+
+    team_info = data.get("team", {})
+    return {
+        "team": {
+            "id": str(team_info.get("id", team_id)),
+            "name": team_info.get("displayName", ""),
+            "abbreviation": team_info.get("abbreviation", ""),
+        },
+        "events": events,
+        # Prefer the requested season: ESPN's envelope reports the *current*
+        # season regardless of the season filter applied to the events.
+        "season": _echo_season(season, data),
+        "count": len(events),
+        "coverage": coverage,
+    }
+
+
+def get_game_summary(request_data):
+    """Get detailed game summary with box score."""
+    params = request_data.get("params", {})
+    event_id = params.get("event_id")
+    if not event_id:
+        return {"error": True, "message": "event_id is required"}
+
+    data = espn_summary(SPORT_PATH, event_id)
+    if not data:
+        return {"error": True, "message": f"No summary data found for event {event_id}"}
+
+    return _normalize_game_summary(data)
+
+
+def get_leaders(request_data):
+    """Get NFL statistical leaders via ESPN core API."""
+    params = request_data.get("params", {})
+    season = params.get("season")
+
+    if season:
+        url = f"https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/{season}/types/2/leaders"
+    else:
+        url = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/leaders"
+
+    cache_key = f"nfl_leaders:{season or 'current'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    headers = {"User-Agent": _USER_AGENT}
+    raw, err = _http_fetch(url, headers=headers)
+    if err:
+        return err
+    try:
+        data = json.loads(raw.decode())
+    except (json.JSONDecodeError, ValueError):
+        return {"error": True, "message": "ESPN core API returned invalid JSON"}
+
+    result = {
+        "categories": _resolve_leaders(data.get("categories", [])),
+        "season": data.get("season", {}).get("year", season or ""),
+    }
+    _cache_set(cache_key, result, ttl=300)
+    return result
+
+
+def get_news(request_data):
+    """Get NFL news articles, optionally restricted to one team.
+
+    ``teams/<id>/news`` is not a news endpoint for the NFL — it answers ``{}``,
+    which normalizes to a perfectly ordinary "0 articles" and reads as "no news
+    about this team". The league feed takes the team as a query filter
+    (``/news?team=14``) and tags each article with the teams it covers.
+    """
+    params = request_data.get("params", {})
+    team_id = params.get("team_id")
+    team_id = str(team_id) if team_id not in (None, "") else None
+
+    data = espn_request(SPORT_PATH, "news", params={"team": team_id} if team_id else None)
+    if not isinstance(data, dict):
+        return {"error": True, "message": "ESPN news returned an unexpected payload"}
+    if data.get("error"):
+        return data
+
+    raw_articles = data.get("articles")
+    if raw_articles is None:
+        return {
+            "error": True,
+            "message": (
+                "ESPN news response carried no 'articles' field — the endpoint did not serve "
+                "this request (an empty feed returns 'articles': [])."
+            ),
+        }
+    if not isinstance(raw_articles, list):
+        return {"error": True, "message": "ESPN news response had a non-list 'articles' field"}
+
+    matched = raw_articles
+    if team_id:
+        matched = [a for a in raw_articles if isinstance(a, dict) and team_id in _article_team_ids(a)]
+
+    articles = _normalize_news({"articles": matched})
+    result = {
+        "articles": articles,
+        "count": len(articles),
+        "total_articles": len(raw_articles),
+    }
+    if team_id:
+        result["team_id"] = team_id
+        result["filtered_by"] = "category team tags"
+    return result
+
+
+def get_schedule(request_data):
+    """Get one NFL week (season + week, or week of the current season) or the current window.
+
+    A season alone is refused: ESPN's scoreboard answers ``dates=<year>`` with
+    a capped mix of games from more than one season, not that season.
+    """
+    params = request_data.get("params", {})
+    season = params.get("season")
+    week = params.get("week")
+
+    if season not in (None, ""):
+        season = _bounded_int(season, 1920, 9999)
+        if season is None:
+            return {"error": True, "message": f"Invalid season {params['season']!r}: use a year such as 2026."}
+    else:
+        season = None
+    if week not in (None, ""):
+        week = _bounded_int(week, 1, 23)
+        if week is None:
+            return {
+                "error": True,
+                "message": f"Invalid week {params['week']!r}: use 1-18 (regular season) or 19-23 (postseason).",
+            }
+    else:
+        week = None
+    if season and not week:
+        return {
+            "error": True,
+            "message": (
+                "get_schedule cannot return a whole NFL season: pass a week with the season, "
+                "or use get_team_schedule for a team's full season."
+            ),
+        }
+
+    espn_params = {}
+    if season:
+        espn_params["dates"] = str(season)
+    if week:
+        # Explicit seasontype: without it ESPN may pick the current postseason.
+        espn_params.update({"seasontype": 2, **_resolve_week_params(week)})
+
+    data = espn_request(SPORT_PATH, "scoreboard", espn_params or None)
+    if data.get("error"):
+        return data
+
+    raw_events = data.get("events", [])
+    events = [_normalize_event(e) for e in raw_events]
+    season_info = data.get("season", {})
+    week_info = data.get("week", {})
+    if season:
+        reason = f"ESPN scoreboard for week {week} of the {season} season."
+    elif week:
+        reason = f"ESPN scoreboard for week {week} of the current season."
+    else:
+        reason = "ESPN's current scoreboard window, not a full season."
+
+    return {
+        "events": events,
+        "season": {
+            "year": season_info.get("year", ""),
+            "type": season_info.get("type", ""),
+        },
+        "week": {
+            "number": week_info.get("number", ""),
+            "text": week_info.get("text", ""),
+        },
+        "count": len(events),
+        "coverage": _coverage(
+            raw_events, {"season": season, "week": week, "team_id": None}, "unknown", reason
+        ),
+    }
+
+
+# ============================================================
+# Play-by-Play & Win Probability
+# ============================================================
+
+
+def _normalize_drives(summary_data):
+    """Normalize NFL drive-by-play data from ESPN summary."""
+    drives_raw = summary_data.get("drives", {})
+    previous = drives_raw.get("previous", [])
+
+    drives = []
+    for d in previous:
+        plays = []
+        for p in d.get("plays", []):
+            play_type = p.get("type", {})
+            plays.append({
+                "id": str(p.get("id", "")),
+                "text": p.get("text", ""),
+                "type": play_type.get("text", ""),
+                "period": p.get("period", {}).get("number", ""),
+                "clock": p.get("clock", {}).get("displayValue", ""),
+                "home_score": p.get("homeScore", ""),
+                "away_score": p.get("awayScore", ""),
+                "scoring_play": p.get("scoringPlay", False),
+                "yards": p.get("statYardage", 0),
+                "is_turnover": p.get("isTurnover", False),
+            })
+        team = d.get("team", {})
+        drives.append({
+            "id": str(d.get("id", "")),
+            "description": d.get("description", ""),
+            "team": {
+                "id": str(team.get("id", "")),
+                "name": team.get("displayName", team.get("name", "")),
+                "abbreviation": team.get("abbreviation", ""),
+            },
+            "result": d.get("displayResult", d.get("result", "")),
+            "is_score": d.get("isScore", False),
+            "yards": d.get("yards", 0),
+            "plays_count": d.get("offensivePlays", len(plays)),
+            "time_elapsed": d.get("timeElapsed", {}).get("displayValue", ""),
+            "start": {
+                "period": d.get("start", {}).get("period", {}).get("number", ""),
+                "clock": d.get("start", {}).get("clock", {}).get("displayValue", ""),
+                "yard_line": d.get("start", {}).get("yardLine", ""),
+                "text": d.get("start", {}).get("text", ""),
+            },
+            "end": {
+                "period": d.get("end", {}).get("period", {}).get("number", ""),
+                "clock": d.get("end", {}).get("clock", {}).get("displayValue", ""),
+                "yard_line": d.get("end", {}).get("yardLine", ""),
+            },
+            "plays": plays,
+        })
+
+    return {"drives": drives, "count": len(drives)}
+
+
+def _normalize_win_probability(summary_data):
+    """Normalize win probability timeline from ESPN summary."""
+    wp_raw = summary_data.get("winprobability", [])
+    if not wp_raw:
+        return {"error": True, "message": "No win probability data available for this game"}
+
+    timeline = []
+    for entry in wp_raw:
+        timeline.append({
+            "play_id": str(entry.get("playId", "")),
+            "home_win_pct": round(entry.get("homeWinPercentage", 0) * 100, 1),
+            "tie_pct": round(entry.get("tiePercentage", 0) * 100, 1),
+        })
+
+    return {"timeline": timeline, "count": len(timeline)}
+
+
+def get_play_by_play(request_data):
+    """Get drive-by-drive play-by-play data for an NFL game."""
+    params = request_data.get("params", {})
+    event_id = params.get("event_id")
+    if not event_id:
+        return {"error": True, "message": "event_id is required"}
+
+    data = espn_summary(SPORT_PATH, event_id)
+    if not data:
+        return {"error": True, "message": f"No data found for event {event_id}"}
+
+    return _normalize_drives(data)
+
+
+def get_win_probability(request_data):
+    """Get win probability timeline for an NFL game."""
+    params = request_data.get("params", {})
+    event_id = params.get("event_id")
+    if not event_id:
+        return {"error": True, "message": "event_id is required"}
+
+    data = espn_summary(SPORT_PATH, event_id)
+    if not data:
+        return {"error": True, "message": f"No data found for event {event_id}"}
+
+    return _normalize_win_probability(data)
+
+
+# ============================================================
+# Injuries, Transactions, Futures, Depth Charts, Stats
+# ============================================================
+
+
+def get_injuries(request_data=None):
+    """Get current NFL injury report."""
+    data = espn_request(SPORT_PATH, "injuries")
+    if data.get("error"):
+        return data
+    return normalize_injuries(data)
+
+
+def get_transactions(request_data=None):
+    """Get recent NFL transactions."""
+    params = (request_data or {}).get("params", {})
+    limit = params.get("limit", 50)
+    data = espn_request(SPORT_PATH, "transactions", {"limit": limit})
+    if data.get("error"):
+        return data
+    return normalize_transactions(data)
+
+
+def get_futures(request_data=None):
+    """Get NFL futures odds (e.g. Super Bowl winner, MVP)."""
+    params = (request_data or {}).get("params", {})
+    limit = params.get("limit", 10)
+    requested_season = params.get("season_year")
+    season_year = requested_season or _current_year()
+    data, season_year, season_note = fetch_season(
+        lambda yr: espn_core_request(SPORT_PATH, f"seasons/{yr}/futures"),
+        season_year,
+        requested_season is not None,
+    )
+    if data.get("error"):
+        return data
+    result = normalize_futures(data, limit=limit)
+    if season_note:
+        result["warnings"] = [season_note]
+    result["season_year"] = season_year
+    return result
+
+
+def get_depth_chart(request_data):
+    """Get NFL depth chart for a team."""
+    params = request_data.get("params", {})
+    team_id = params.get("team_id")
+    if not team_id:
+        return {"error": True, "message": "team_id is required"}
+    data = espn_request(SPORT_PATH, f"teams/{team_id}/depthcharts")
+    if data.get("error"):
+        return data
+    return normalize_depth_chart(data)
+
+
+def get_team_stats(request_data):
+    """Get NFL team season statistics."""
+    params = request_data.get("params", {})
+    team_id = params.get("team_id")
+    if not team_id:
+        return {"error": True, "message": "team_id is required"}
+    requested_season = params.get("season_year")
+    season_year = requested_season or _current_year()
+    season_type = params.get("season_type", 2)
+    data, season_year, season_note = fetch_season(
+        lambda yr: espn_core_request(
+            SPORT_PATH,
+            f"seasons/{yr}/types/{season_type}/teams/{team_id}/statistics",
+        ),
+        season_year,
+        requested_season is not None,
+    )
+    if data.get("error"):
+        return data
+    result = normalize_core_stats(data)
+    if season_note:
+        result["warnings"] = [season_note]
+    result["team_id"] = str(team_id)
+    result["season_year"] = season_year
+    result["season_type"] = season_type
+    return result
+
+
+def get_player_stats(request_data):
+    """Get NFL player season statistics."""
+    params = request_data.get("params", {})
+    player_id = params.get("player_id")
+    if not player_id:
+        return {"error": True, "message": "player_id is required"}
+    requested_season = params.get("season_year")
+    season_year = requested_season or _current_year()
+    season_type = params.get("season_type", 2)
+    data, season_year, season_note = fetch_season(
+        lambda yr: espn_core_request(
+            SPORT_PATH,
+            f"seasons/{yr}/types/{season_type}/athletes/{player_id}/statistics",
+        ),
+        season_year,
+        requested_season is not None,
+    )
+    if data.get("error"):
+        return data
+    result = normalize_core_stats(data)
+    if season_note:
+        result["warnings"] = [season_note]
+    result["player_id"] = str(player_id)
+    result["season_year"] = season_year
+    result["season_type"] = season_type
+    return result

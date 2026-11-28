@@ -1,0 +1,1044 @@
+#!/usr/bin/env node
+import { rmSync, rmdirSync, existsSync, cpSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, appendFileSync, readdirSync, renameSync } from 'node:fs';
+import { join, dirname, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { planInstall } from './install-plan.js';
+import { targetPaths, writeSkill, wireHook, unwireHook, baseDir, TARGET_IDS } from '../targets/index.js';
+import { shadowTarget } from '../targets/agents-md-shadow.js';
+import {
+  targetHasAgents, reconcileAgents, agentPath, agentNames, writeAgentsDetailed,
+  resolveAgentNames, withAgentCompanions, agentByName, allAgentNames, readDeveloperTier, writeDeveloperTier,
+} from '../targets/agents.js';
+import { projectOptOuts } from '../targets/opt-outs.js';
+import { readState, writeState } from './lib/state.js';
+import { withDefaultSkillFloor } from './lib/default-skill-floor.js';
+import { isRetired, replaceRetired } from './lib/retired-skills.js';
+import { readManifest, writeManifest } from './lib/manifest-file.js';
+import { createBackup } from './lib/backups.js';
+import { removeUnmodifiedSkeleton } from './lib/tools-skeleton.js';
+import {
+  targetHasCommands, resolveCommands, reconcileCommands, commandPath, allPotentialCommandNames,
+} from '../targets/commands.js';
+import {
+  wireMemory, unwireMemory, memoryManagedPaths, memoryModeFor, memoryEnabledForProject, memoryArtifactsPresent,
+} from '../targets/memory.js';
+import { wireUpdate, unwireUpdate, updateManagedPaths, updateArtifactsPresent } from '../targets/update-wiring.js';
+import { wireKnowledge, unwireKnowledge, knowledgeManagedPaths, knowledgeArtifactsPresent } from '../targets/knowledge-wiring.js';
+import { wireGitPermissions, unwireGitPermissions, gitPermissionsPath } from '../targets/git-permissions.js';
+import { wireDeepseekBridge } from '../targets/deepseek-bridge.js';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CLI_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
+
+// `.rsc/.version` records the CLI version the shared bases (.rsc/skills/) were
+// materialized at — the single, target-agnostic source of truth for "installed
+// skills version" (read by the SessionStart update check too).
+const versionFile = (cwd) => join(cwd, '.rsc', '.version');
+
+// Per-skill base version. A single global `.rsc/.version` cannot represent a
+// partially-refreshed base set, which broke multi-target sync: the first target's pass
+// bumped `.rsc/.version`, so later targets saw "current" and skipped refreshing their
+// exclusive skills' bases. Tracking the version each base was materialized at makes the
+// refresh decision per skill, independent of target ordering. (Absent file → every base
+// is treated as stale and refreshed once, which self-heals installs from before this.)
+const baseVersionsFile = (cwd) => join(cwd, '.rsc', '.base-versions.json');
+function readBaseVersions(cwd) {
+  try { return JSON.parse(readFileSync(baseVersionsFile(cwd), 'utf8')); } catch { return {}; }
+}
+function writeBaseVersions(cwd, versions) {
+  mkdirSync(dirname(baseVersionsFile(cwd)), { recursive: true });
+  writeFileSync(baseVersionsFile(cwd), JSON.stringify(versions, null, 2) + '\n');
+}
+
+// Materialize the real skill files into the project-local base. Copied once and reused;
+// when the recorded base version for THIS skill differs from the CLI version, the base is
+// re-copied so a reinstall/sync actually updates content. Tracked per skill (see
+// baseVersionsFile) so a multi-target sync refreshes every target's bases, not just the
+// first target's. Skills are read-only catalog (user customization lives in 02-DOCS), so
+// overwriting on a version change is safe. Mutates `baseVersions` with the new mark.
+function ensureBase(id, cwd, baseVersions) {
+  const dest = baseDir(id, cwd);
+  const stale = baseVersions[id] !== CLI_VERSION;
+  if (stale && existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+  if (!existsSync(dest)) {
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(join(ROOT, 'skills', id), dest, { recursive: true });
+  }
+  baseVersions[id] = CLI_VERSION;
+  return dest;
+}
+
+// Every file wireHook() materializes, so they are covered by the pre-write backup and
+// reported by a --dry-run. Keep in sync with targets/claude.js wireHook(): a file it
+// writes but this omits is silently absent from the snapshot, so `rsc restore` cannot
+// bring it back.
+export function generatedHookFiles({ target, cwd, policy }) {
+  if (target !== 'claude') return [];
+  const lifecycle = [
+    // Committed, not machine state — and therefore the one entry here that, if omitted, leaves an
+    // executable behind in a tree the user pushes.
+    join(cwd, '.claude', 'rsc-bootstrap.mjs'),
+    join(cwd, '.rsc', 'session-start.mjs'),
+    join(cwd, '.rsc', 'worklog-checkpoint.mjs'),
+    join(cwd, '.rsc', 'hook-once.mjs'),
+    join(cwd, '.rsc', 'shell-unwrap.mjs'),
+    join(cwd, '.rsc', 'worktree-reaper.mjs'),
+    join(cwd, '.rsc', 'auto-update.mjs'),
+    // team-safe-default: the 3.0 start-up duties and the trunk policy (also read by branch-guard).
+    join(cwd, '.rsc', 'team-safe-start.mjs'),
+    join(cwd, '.rsc', 'trunk-policy.mjs'),
+  ];
+  // The danger guard is declared on its own terms (#273): present unless the plan says otherwise,
+  // whether or not the code guards are.
+  const danger = policy?.dangerGuard === false ? [] : [join(cwd, '.rsc', 'danger-guard.mjs')];
+  const laneGate = policy?.laneGate ?? policy?.codeHooks !== false;
+  const lane = laneGate ? [join(cwd, '.rsc', 'userprompt-gate.mjs'), join(cwd, '.rsc', 'ftd-nudge.mjs')] : [];
+  if (policy?.codeHooks === false) return [...lifecycle, ...danger, ...(laneGate ? lane : [join(cwd, '.rsc', 'suggest-always-on.md')])];
+  return [...lifecycle, ...danger,
+    join(cwd, '.rsc', 'ship-guard.mjs'),
+    join(cwd, '.rsc', 'branch-guard.mjs'),
+    join(cwd, '.rsc', 'gitmoji-guard.mjs'), join(cwd, '.rsc', 'userprompt-gate.mjs'),
+    join(cwd, '.rsc', 'sello.mjs'), ...(laneGate ? [join(cwd, '.rsc', 'ftd-nudge.mjs')] : [])];
+}
+
+export function managedPathsForInstall({ skillIds, agentIds = [], target, home, cwd, policy }) {
+  const paths = targetPaths(target, home, cwd);
+  const plan = planInstall({ skillIds, target, home, cwd, hooks: policy?.alwaysOn !== false });
+  const out = [paths.stateFile, versionFile(cwd), baseVersionsFile(cwd)];
+  if (policy?.context7 === false) out.push(join(cwd, '.rsc', '.no-context7'));
+  if (policy?.memory !== false) out.push(...memoryManagedPaths(target, cwd));
+  out.push(...updateManagedPaths(target, cwd));
+  out.push(...knowledgeManagedPaths(target, cwd));
+  if (gitPermissionsPath(target, cwd)) out.push(gitPermissionsPath(target, cwd)); // backed up before it is merged into
+  if (targetHasAgents(target)) {
+    const state = readState(paths.stateFile);
+    const explicit = [...new Set([...(state.explicitAgents || readManifest(cwd)?.agents || []), ...agentIds])];
+    const desired = withAgentCompanions(policy?.agents || resolveAgentNames([...Object.keys(state.skills || {}), ...skillIds], explicit));
+    out.push(...desired.map((n) => agentPath(target, cwd, n)));
+  }
+  if (targetHasCommands(target)) {
+    const state = readState(paths.stateFile);
+    const explicit = [...new Set([...(state.explicitAgents || readManifest(cwd)?.agents || []), ...agentIds])];
+    const desiredAgents = withAgentCompanions(policy?.agents || resolveAgentNames([...Object.keys(state.skills || {}), ...skillIds], explicit));
+    const desiredCommands = resolveCommands({
+      target,
+      skills: policy ? skillIds : [...new Set([...Object.keys(state.skills || {}), ...skillIds])],
+      agents: desiredAgents,
+      memoryMode: memoryEnabledForProject(cwd) ? memoryModeFor(target) : 'disabled',
+    });
+    out.push(...desiredCommands.map((command) => commandPath(target, cwd, command.name)));
+  }
+  for (const step of plan) {
+    if (step.kind === 'skill') {
+      out.push(step.to, baseDir(step.id, cwd));
+    } else if (step.kind === 'hook') {
+      out.push(step.to, ...generatedHookFiles({ target, cwd, policy }));
+    }
+  }
+  // The shadow CLAUDE.md that keeps a natively-read AGENTS.md from doubling the always-on body.
+  // Written by whichever of the two adapters is wired second, so it is declared for both families,
+  // not just for claude. A claude install must assume its own wiring: settings.json does not name
+  // it yet at plan time.
+  const shadow = shadowTarget(cwd, { assumeClaudeWired: target === 'claude' });
+  if (shadow) out.push(shadow);
+  return [...new Set(out)];
+}
+
+// The opt-outs a team disarmed and the developer tier live as marker files under .rsc/,
+// which is machine-local and therefore lost on every clone: a team that disarmed the
+// gitmoji guard found it armed again on the next checkout, with nobody having decided
+// that. They are decisions, so they belong in the committed declaration.
+//
+// Two distinctions this function exists to keep, both of which used to be collapsed:
+//
+//   ABSENT is not EMPTY. In a clone `.rsc/` does not exist, and reading "no markers here" as
+//   "the team re-armed everything" would have sync quietly delete the decision it came to
+//   rebuild. Unreadable returns null — "I know nothing" — and the caller keeps what was
+//   declared. A readable directory with no markers returns [], which IS a statement: somebody
+//   deleted the last marker, and deleting it is how a gate gets re-armed.
+//
+//   Not every switch is the team's to make. `.no-harness` and friends are decisions of one
+//   machine (see targets/opt-outs.js), and committing them would impose one laptop's answer on
+//   every future clone. They stay local, and never reach the declaration.
+function localDecisions(cwd) {
+  const dir = join(cwd, '.rsc');
+  let optOuts = null;
+  try {
+    optOuts = projectOptOuts(readdirSync(dir).filter((f) => f.startsWith('.no-')).map((f) => f.slice(4)));
+  } catch { /* no .rsc yet → null, meaning "unknown", never "none" */ }
+  let tier = null;
+  try { tier = JSON.parse(readFileSync(join(dir, 'developer.json'), 'utf8')).tier ?? null; } catch { /* unset */ }
+  return { optOuts, tier };
+}
+
+// The other half of the same promise: what the declaration says is rebuilt as the real local
+// state a hook can see. Hooks are materialized standalone under `.rsc/` and decide with one
+// `existsSync` — they cannot read the manifest, and making them read it would let a `git pull`
+// change how somebody's session behaves in silence, which `project-manifest` ruled out on
+// purpose. So the manifest is applied HERE, inside the install the person chose to run.
+//
+// Only ever on a machine where `.rsc/` did not exist: there, "no marker" carries no information
+// and the declaration is all there is. Where `.rsc/` is already built, the local state is the
+// authority — otherwise the next sync would silently undo a re-arm, and the gate coming back
+// would look like a bug in the guard rather than a decision nobody made.
+export function hydrateLocalDecisions(cwd, manifest) {
+  const applied = { optOuts: [], tier: null };
+  if (!manifest) return applied;
+  const dir = join(cwd, '.rsc');
+  for (const name of projectOptOuts(manifest.optOuts)) {
+    const file = join(dir, `.no-${name}`);
+    if (existsSync(file)) continue;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, `Declared in .rsc.json by this project; rebuilt here by rsc ${CLI_VERSION}.\n`);
+    applied.optOuts.push(name);
+  }
+  if (manifest.tier && !existsSync(join(dir, 'developer.json'))) {
+    applied.tier = writeDeveloperTier(cwd, manifest.tier);
+  }
+  return applied;
+}
+
+// Record the decision, merging so a second assistant never erases the first: installing
+// into codex on a machine that already had claude is adding, not replacing. Union, sorted
+// where order carries no meaning, so the file stays diffable and a merge conflict stays
+// readable.
+export function recordInManifest({ cwd, target, skillIds, agentIds = [], catalogVersion = CLI_VERSION, dropTarget, onboarding, gitPermissions }) {
+  const prev = readManifest(cwd) || { targets: [], skills: [], agents: [], ownSkills: [], optOuts: [] };
+  const { optOuts, tier } = localDecisions(cwd);
+  const union = (a, b) => [...new Set([...(a || []), ...(b || [])])].sort();
+  return writeManifest(cwd, {
+    version: 1,
+    // Union by default: installing into a second assistant is adding, not replacing.
+    // `dropTarget` is the one exception — a MOVE, where leaving the old one declared would
+    // have every clone rebuild a harness that was deliberately abandoned.
+    targets: union(prev.targets, [target]).filter((t) => t !== dropTarget),
+    // Through the retirement map: the living list must stop naming a skill the catalog no longer
+    // ships, or every clone would go looking for it.
+    skills: replaceRetired(union(prev.skills, skillIds)).sort(),
+    agents: union(prev.agents, agentIds),
+    ownSkills: prev.ownSkills || [],
+    catalogVersion,
+    tier: tier ?? prev.tier ?? null,
+    optOuts: optOuts ?? projectOptOuts(prev.optOuts),
+    memory: prev.memory,
+    gitPermissions: gitPermissions ?? prev.gitPermissions,
+    agentModels: prev.agentModels,
+    onboarding: onboarding ?? prev.onboarding,
+  });
+}
+
+export async function applyInstall({ skillIds = [], agentIds = [], target, home, cwd = process.cwd(), operation = 'install', dryRun = false, policy, onboarding }) {
+  // Read BEFORE anything can create it — the backup writes under `.rsc/`, and one line later the
+  // answer would always be "yes, it exists". This single boolean is what separates a clone (the
+  // declaration is the only thing that knows what the team decided) from a built machine (the
+  // local markers are the authority, and a pull must not overwrite them).
+  const fromScratch = !existsSync(join(cwd, '.rsc'));
+  // Git permissions are on for a project adopted from scratch (no manifest yet); an older project
+  // keeps what it declared, and absent means "never decided": nothing is added or removed there.
+  const declaredGit = readManifest(cwd)?.gitPermissions;
+  const newProject = !existsSync(join(cwd, '.rsc.json'));
+  const gitPermissions = newProject ? true : declaredGit;
+  const paths = targetPaths(target, home, cwd);
+  const plan = planInstall({ skillIds, target, home, cwd, hooks: policy?.alwaysOn !== false });
+  // What this pass prunes, decided BEFORE the backup so the backup holds it: a skill link this
+  // target's state proves is ours and that is no longer wanted (always for a retired skill, and for
+  // any skill when a plan governs), and the shared base of a retired skill once no other assistant
+  // in this project still records it. Taking a base another assistant links to would leave that
+  // assistant dangling until its own sync.
+  const priorState = readState(paths.stateFile);
+  const prunedSkills = Object.keys(priorState.skills || {})
+    .filter((id) => !skillIds.includes(id) && (policy || isRetired(id)));
+  const stillRecordedElsewhere = (id) => TARGET_IDS.some((other) => other !== target
+    && Object.hasOwn(readState(targetPaths(other, home, cwd).stateFile).skills || {}, id));
+  const prunedBases = Object.keys(readBaseVersions(cwd))
+    .filter((id) => isRetired(id) && !skillIds.includes(id) && !stillRecordedElsewhere(id));
+  const managedPaths = [...new Set([
+    ...managedPathsForInstall({ skillIds, agentIds, target, home, cwd, policy }),
+    ...prunedSkills.map((id) => paths.skillDir(id)),
+    ...prunedBases.map((id) => baseDir(id, cwd)),
+  ])];
+  if (dryRun) return { dryRun: true, skills: skillIds, agents: agentIds, paths: managedPaths };
+  // Rebuild the declared decisions first, so everything below (the agent tier especially) reads
+  // the state the team declared rather than the default it would otherwise assume.
+  if (fromScratch) hydrateLocalDecisions(cwd, readManifest(cwd));
+  const state = readState(paths.stateFile);
+  const backup = createBackup({ cwd, operation, target, paths: managedPaths, cliVersion: CLI_VERSION });
+  // Decide base refresh per skill (see baseVersionsFile): a base is re-materialized when
+  // its recorded version differs from the CLI version. Robust to multi-target installs/
+  // syncs — a single global marker would be bumped by the first target and make later
+  // targets skip refreshing their exclusive skills' bases.
+  const baseVersions = readBaseVersions(cwd);
+  // A retired skill is pruned even without a governing plan: nothing can install it any more, so
+  // keeping it would only leave a dead copy behind. Ownership is proven by the state file — a
+  // same-named directory rsc never recorded is somebody's own work and is not touched.
+  for (const id of prunedSkills) {
+    rmSync(paths.skillDir(id), { recursive: true, force: true });
+    delete state.skills[id];
+  }
+  // Its shared base too, proven ours by the base-version ledger rather than by its name.
+  for (const id of prunedBases) {
+    rmSync(baseDir(id, cwd), { recursive: true, force: true });
+    delete baseVersions[id];
+  }
+  for (const step of plan) {
+    if (step.kind === 'skill') {
+      const base = ensureBase(step.id, cwd, baseVersions);
+      const files = await writeSkill(target, step.id, base, step.to);
+      state.skills[step.id] = { files, base };
+    } else if (step.kind === 'hook') {
+      await wireHook(target, paths, join(ensureBase('suggest', cwd, baseVersions), 'SKILL.md'), policy);
+    }
+  }
+  writeBaseVersions(cwd, baseVersions);
+  // Install the catalog's subagents for targets that support file-based agents (Claude
+  // Code, Cursor, OpenCode, Gemini, Copilot, Junie, Kiro, Codex): `developer` plus the three
+  // adversarial refuter lenses `review` dispatches at tier 2. They run at the balanced tier
+  // by default (never light/Haiku); the tier lives in .rsc/developer.json, set by `init` at
+  // onboarding and honored on every (re)install/sync.
+  //
+  // The recorded names come from what was WRITTEN, not from a hardcoded list: a state entry
+  // naming an agent whose file never landed answers "you have it" for something absent.
+  const inheritedExplicit = policy ? (state.explicitAgents || []) : (state.explicitAgents || readManifest(cwd)?.agents || []);
+  const explicit = [...new Set([...inheritedExplicit, ...agentIds])].sort();
+  const desiredAgents = withAgentCompanions(policy?.agents
+    ? [...new Set([...policy.agents, ...explicit])].sort()
+    : policy?.baseAgents === false
+      ? explicit
+      : resolveAgentNames(Object.keys(state.skills || {}), explicit));
+  const previousAgents = state.agents || [];
+  let keptAgents = [];
+  if (targetHasAgents(target)) {
+    const agentResult = reconcileAgents(target, cwd, readDeveloperTier(cwd), previousAgents, desiredAgents);
+    state.agents = agentResult.names;
+    state.agentCollisions = agentResult.collisions;
+    // #298 — agents the user edited and rsc left alone. Recorded so `doctor` can say it on any run,
+    // and returned so the command that just ran says it now.
+    keptAgents = agentResult.kept;
+    state.agentsKept = keptAgents.map(({ name, path }) => ({ name, path }));
+  } else {
+    state.agents = [];
+    state.agentCollisions = [];
+    state.agentsKept = [];
+  }
+  state.explicitAgents = explicit;
+  const memoryResult = policy?.memory === false
+    ? { mode: 'disabled', reason: 'onboarding-policy', paths: unwireMemory(target, cwd) }
+    : wireMemory(target, cwd);
+  state.memory = { mode: memoryResult.mode, reason: memoryResult.reason, paths: memoryResult.paths };
+  const updateResult = wireUpdate(target, cwd);
+  state.update = { mode: updateResult.mode, ...(updateResult.reason ? { reason: updateResult.reason } : {}) };
+  // Knowledge sync is its own decision (`.no-knowledge-sync`, checked at runtime) and never part of
+  // the memory, so the memory's policy does not decide it: wired wherever the assistant can run it.
+  const knowledgeResult = wireKnowledge(target, cwd);
+  state.knowledge = { mode: knowledgeResult.mode, reason: knowledgeResult.reason || null, paths: knowledgeResult.paths };
+  // DeepSeek Harness only reads hooks through a machine-level bridge (targets/deepseek-bridge.js).
+  if (target === 'deepseek') state.deepseekBridge = wireDeepseekBridge();
+  if (gitPermissions === true) state.gitPermissions = wireGitPermissions(target, cwd);
+  else if (gitPermissions === false) { unwireGitPermissions(target, cwd); state.gitPermissions = { mode: 'off' }; }
+  const context7OptOut = join(cwd, '.rsc', '.no-context7');
+  if (policy?.context7 === false) {
+    mkdirSync(dirname(context7OptOut), { recursive: true });
+    writeFileSync(context7OptOut, 'Managed by the accepted onboarding plan: external MCP connections require separate consent.\n');
+  }
+  state.policy = policy ? {
+    baseAgents: policy.baseAgents !== false,
+    alwaysOn: policy.alwaysOn !== false,
+    codeHooks: policy.codeHooks !== false,
+    dangerGuard: policy.dangerGuard !== false,
+    laneGate: policy.laneGate ?? policy.codeHooks !== false,
+    gitmojiGuard: policy.gitmojiGuard !== false,
+    memory: policy.memory !== false,
+    context7: policy.context7 === true,
+  } : state.policy;
+  const desiredCommands = resolveCommands({
+    target,
+    skills: Object.keys(state.skills || {}),
+    agents: state.agents,
+    memoryMode: state.memory?.mode || 'unsupported',
+  });
+  const commandResult = reconcileCommands(target, cwd, state.commands || [], desiredCommands);
+  state.commands = commandResult.names;
+  state.commandCollisions = commandResult.collisions;
+  state.version = CLI_VERSION;
+  writeState(paths.stateFile, state);
+  mkdirSync(dirname(versionFile(cwd)), { recursive: true });
+  writeFileSync(versionFile(cwd), CLI_VERSION + '\n');
+  recordInManifest({ cwd, target, skillIds, agentIds, onboarding, gitPermissions });
+  // The worktree cleanup's trigger. It lives in `.git/hooks/`, which is NOT cloned, so it has to be
+  // (re)written by every operation that touches a user's repo — install, sync and repair all land
+  // here. Target-agnostic on purpose: it is a git hook, not an assistant hook, and a cleanup that
+  // only worked for one of the sixteen assistants would be a cleanup nobody could rely on. The
+  // reaper travels with it for the same reason; until now only the Claude adapter materialized it,
+  // although `managedPathsForInstall` has always declared it for every target.
+  // Only where the accepted plan governs code hooks. An operations harness — company, research,
+  // content — declares a narrower set of paths, and writing a git hook it never agreed to would be
+  // acting outside the plan the user accepted (P4). Caught by the onboarding route-inventory gate,
+  // which is exactly the kind of catch that justifies its existence.
+  // The answer used to be discarded, so a hook that could not arm looked exactly like one that
+  // did — and the only place that could have noticed, `doctor`, was reading the same wrong path.
+  // Reported 2026-09-18. Carried out, never thrown: the harness installing is the point, and the
+  // merge hook is a convenience layered on top of it.
+  let mergeHook = { installed: false, state: 'skipped' };
+  try {
+    if (policy?.codeHooks === false) throw new Error('code hooks not governed by the accepted plan');
+    mkdirSync(join(cwd, '.rsc'), { recursive: true });
+    cpSync(join(ROOT, 'targets', 'worktree-reaper.mjs'), join(cwd, '.rsc', 'worktree-reaper.mjs'));
+    const { installMergeHook } = await import('../targets/worktree-reaper.mjs');
+    if (existsSync(join(cwd, '.git'))) mergeHook = installMergeHook(cwd);
+  } catch (err) { mergeHook = { installed: false, state: 'skipped', reason: err.message }; }
+  ignoreLocalState(cwd, target);
+  return { ...state, backup, mergeHook, keptAgents };
+}
+
+// `.rsc/` holds local machine state — hook scripts, install markers, the sello's
+// seals, the automation-gap log. None of it belongs in a user's repository, and the
+// gap log in particular is prose about what happened in their project: a routine
+// `git add -A` would publish it. Nothing used to keep that out, so add the entry.
+//
+// Additive and idempotent by construction: append one line to an existing
+// .gitignore, never rewrite or reorder it, and never create the file in a directory
+// that is not a git repository.
+export function ignoreLocalState(cwd = process.cwd(), target) {
+  if (!existsSync(join(cwd, '.git'))) return null;
+  const gi = join(cwd, '.gitignore');
+  let text = '';
+  try { text = existsSync(gi) ? readFileSync(gi, 'utf8') : ''; } catch { return null; }
+
+  // `.rsc/` is machine state. The per-target skill entries are derived: symlinks here,
+  // real copies on Windows, so committing either shape puts two incompatible forms of the
+  // same thing into one repo.
+  //
+  // But `claude` writes into `.claude/skills/` and `cursor` into `.cursor/rules/`, which
+  // are SHARED with the user — their own skills and rules live there too. Excluding the
+  // whole directory would quietly stop versioning their work, which is the same sin this
+  // release exists to fix: treating what is theirs as if it were ours. So shared
+  // directories are excluded entry by entry, and only the entries rsc manages.
+  // `.worktrees/` is where the isolation rule sends every concurrent session (`git worktree add
+  // .worktrees/<branch>`). Nothing ignored it, so in a teammate's clone it surfaced as `?? .worktrees/`
+  // — one `git add -A` from committing a whole checkout (team simulation D9). It goes in THIS block,
+  // the committed one, so every clone inherits it with its first pull; `.git/info/exclude` would
+  // only ever cover the machine that ran the installer.
+  const wanted = ['.rsc/', '.worktrees/'];
+  if (target) {
+    const paths = targetPaths(target, undefined, cwd);
+    const rel = (abs) => relative(cwd, abs).split(sep).join('/');
+    for (const id of Object.keys(readState(paths.stateFile).skills || {})) wanted.push(rel(paths.skillDir(id)));
+    // The per-file ledger is derived AND platform-shaped (symlink here, real copy on
+    // Windows), so committing it puts two incompatible inventories of one thing in one
+    // repo. The declaration that does travel is .rsc.json, in the root.
+    wanted.push(rel(paths.stateFile));
+    // Subagents are catalog content, re-materialised by every install and sync.
+    for (const name of readState(paths.stateFile).agents || []) {
+      const file = agentPath(target, cwd, name);
+      if (file) wanted.push(rel(file));
+    }
+    for (const name of readState(paths.stateFile).commands || []) {
+      const file = commandPath(target, cwd, name);
+      if (file) wanted.push(rel(file));
+    }
+  }
+  // `.rsc`, `/.rsc` and `.rsc/` are the same rule to git. Normalising both ends is what
+  // keeps this idempotent against a .gitignore a human wrote in their own spelling.
+  const norm = (l) => l.trim().replace(/^\//, '').replace(/\/$/, '');
+  const present = new Set(text.split('\n').map(norm));
+  // `.rsc/` is machine state and stays ignored. The two files below are the opposite: they are the
+  // whole reason a clone can help itself, and a project that excluded the assistant's directory
+  // wholesale (rsc's own repo does exactly that, so copying the example is likely) swallows both with
+  // no symptom at all.
+  //
+  // Asked of GIT, not of the pattern. The first attempt at this reasoned about spellings and shipped
+  // a negation that was INERT in every case it fired: git does not descend into an excluded
+  // directory, so `!.claude/rsc-bootstrap.mjs` under `.claude/` rescues nothing. Measured, not
+  // argued — and the lesson is the one this repo keeps relearning, that a rule believed and untrue is
+  // worse than no rule.
+  const RESCUE = ['.claude/rsc-bootstrap.mjs', '.claude/settings.json'];
+  const swallowed = RESCUE.filter((f) => {
+    try {
+      return spawnSync('git', ['check-ignore', '-q', '--', f], { cwd }).status === 0;
+    } catch {
+      return false;
+    }
+  });
+  if (swallowed.length) {
+    // Append-only, and this exact order is what makes it work at all: re-include the directory so git
+    // will descend into it, exclude everything inside it again, then rescue by name. Verified against
+    // git itself — `settings.local.json` and the skill entries stay ignored.
+    const dir = swallowed[0].split('/')[0];
+    for (const line of [`!${dir}/`, `${dir}/*`, ...swallowed.map((f) => `!${f}`)]) wanted.push(line);
+  }
+
+  const add = wanted.filter((w) => !present.has(norm(w)));
+  // Every append used to open a new block with its own header, so a project synced across a dozen
+  // versions carried a dozen copies of it. Adjacent rsc blocks are one block: fold them (only our
+  // header lines and the blank seams between our blocks go; every entry stays, in order).
+  const folded = foldIgnoreBlocks(text);
+  if (!add.length) {
+    if (folded === text) return null;
+    try { writeFileSync(gi, folded); return gi; } catch { return null; }
+  }
+
+  // Never reorder, never touch a line of theirs. When the file already ends with our block, the new
+  // entries join it; otherwise they open one.
+  const base = folded === '' || folded.endsWith('\n') ? folded : `${folded}\n`;
+  const next = endsWithIgnoreBlock(base)
+    ? `${base}${add.join('\n')}\n`
+    : `${base}${base === '' ? '' : '\n'}${RSC_IGNORE_HEADER}\n${add.join('\n')}\n`;
+  try {
+    if (folded === text && next.startsWith(text)) appendFileSync(gi, next.slice(text.length));
+    else writeFileSync(gi, next);
+    if (target) {
+      const statePath = targetPaths(target, undefined, cwd).stateFile;
+      const state = readState(statePath);
+      state.ignoreEntriesAdded = [...new Set([...(state.ignoreEntriesAdded || []), ...add.map(norm)])].sort();
+      writeState(statePath, state);
+    }
+    return gi;
+  } catch { return null; }
+}
+
+export function collisions({ cwd = process.cwd(), target, home, skillIds = [] }) {
+  const paths = targetPaths(target, home, cwd);
+  const managed = new Set(Object.keys(readState(paths.stateFile).skills || {}));
+  return skillIds.filter((id) => !managed.has(id) && existsSync(paths.skillDir(id)));
+}
+
+// The same test as `collisions`, across every target of a plan, as the paths the user would recognise.
+// `onboard` puts these in the plan itself, so the id the user accepts is an id that names them.
+export function ownSkillPaths({ cwd = process.cwd(), targets = [], skillIds = [], home }) {
+  const found = targets.flatMap((target) => collisions({ cwd, target, home, skillIds })
+    .map((id) => relative(cwd, targetPaths(target, home, cwd).skillDir(id)).split(sep).join('/')));
+  return [...new Set(found)].sort();
+}
+
+export function listInstalled({ target, home, cwd = process.cwd() }) {
+  const paths = targetPaths(target, home, cwd);
+  return Object.keys(readState(paths.stateFile).skills);
+}
+
+export function listInstalledAgents({ target, home, cwd = process.cwd() }) {
+  const state = readState(targetPaths(target, home, cwd).stateFile);
+  const explicit = new Set(state.explicitAgents || []);
+  return (state.agents || []).map((id) => {
+    const agent = agentByName(id);
+    return {
+      id,
+      source: agentNames().includes(id) ? 'base' : explicit.has(id) ? 'explicit' : 'skill',
+      skills: agent?.skills || [],
+    };
+  });
+}
+
+export function listInstalledCommands({ target, home, cwd = process.cwd() }) {
+  const state = readState(targetPaths(target, home, cwd).stateFile);
+  return (state.commands || []).map((id) => ({ id, path: commandPath(target, cwd, id) }))
+    .filter((entry) => entry.path && existsSync(entry.path));
+}
+
+export async function uninstall({ skillIds = [], agentIds = [], target, home, cwd = process.cwd(), dryRun }) {
+  const paths = targetPaths(target, home, cwd);
+  const state = readState(paths.stateFile);
+  const removed = [];
+  const managedPaths = [paths.stateFile];
+  for (const id of skillIds) {
+    const entry = state.skills[id];
+    if (!entry) continue;
+    for (const f of entry.files) {
+      managedPaths.push(f);
+      removed.push(f);
+    }
+  }
+  const previousExplicit = state.explicitAgents || readManifest(cwd)?.agents || [];
+  const nextExplicit = previousExplicit.filter((id) => !agentIds.includes(id));
+  const remainingSkillIds = Object.keys(state.skills || {}).filter((id) => !skillIds.includes(id));
+  const desiredAgents = resolveAgentNames(remainingSkillIds, nextExplicit);
+  const staleAgents = (state.agents || []).filter((id) => !desiredAgents.includes(id));
+  for (const id of staleAgents) {
+    const file = agentPath(target, cwd, id);
+    if (file) { managedPaths.push(file); removed.push(file); }
+  }
+  const explicitChanged = nextExplicit.length !== previousExplicit.length;
+  if (!removed.length && !explicitChanged) return removed;
+  if (dryRun) return [...new Set(removed)];
+  createBackup({ cwd, operation: 'uninstall', target, paths: [...new Set(managedPaths)], cliVersion: CLI_VERSION });
+  for (const id of skillIds) {
+    const entry = state.skills[id];
+    if (!entry) continue;
+    for (const f of entry.files) {
+      if (existsSync(f)) rmSync(f, { recursive: true, force: true });
+    }
+    delete state.skills[id];
+  }
+  const agentResult = reconcileAgents(target, cwd, readDeveloperTier(cwd), state.agents || [], desiredAgents);
+  // An edited agent no longer wanted stays on disk (#298) and stays recorded as rsc-managed, so a
+  // later reset or uninstall can still find it.
+  state.agents = [...new Set([...agentResult.names, ...agentResult.kept.map((k) => k.name)])];
+  state.agentCollisions = agentResult.collisions;
+  state.agentsKept = agentResult.kept.map(({ name, path }) => ({ name, path }));
+  state.explicitAgents = nextExplicit;
+  for (const k of agentResult.kept) {
+    const i = removed.indexOf(k.path);
+    if (i >= 0) removed.splice(i, 1);
+  }
+  const desiredCommands = resolveCommands({
+    target,
+    skills: remainingSkillIds,
+    agents: state.agents,
+    memoryMode: state.memory?.mode || 'unsupported',
+  });
+  const commandResult = reconcileCommands(target, cwd, state.commands || [], desiredCommands);
+  removed.push(...commandResult.removed);
+  state.commands = commandResult.names;
+  state.commandCollisions = commandResult.collisions;
+  writeState(paths.stateFile, state);
+  const manifest = readManifest(cwd);
+  if (manifest) writeManifest(cwd, {
+    ...manifest,
+    skills: manifest.skills.filter((id) => !skillIds.includes(id)),
+    agents: manifest.agents.filter((id) => !agentIds.includes(id)),
+  });
+  return [...new Set(removed)];
+}
+
+// Reconcile an accepted onboarding plan as a replacement, not an additive install.
+// Ownership comes only from the target state file; unrelated files in the assistant
+// directory are left untouched.
+export function removeTargetInstall({ target, home, cwd = process.cwd() }) {
+  const paths = targetPaths(target, home, cwd);
+  const state = readState(paths.stateFile);
+  const ignored = [paths.stateFile];
+  const ownedIgnoreEntries = new Set(state.ignoreEntriesAdded || []);
+  const owned = [
+    ...Object.values(state.skills || {}).flatMap((entry) => entry.files || []),
+    ...(state.agents || []).map((name) => agentPath(target, cwd, name)).filter(Boolean),
+    ...(state.commands || []).map((name) => commandPath(target, cwd, name)).filter(Boolean),
+    paths.stateFile,
+  ];
+  const declaredLocationsAreExact = Object.entries(state.skills || {}).every(([id, entry]) =>
+    /^[a-z0-9][a-z0-9._-]*$/i.test(id)
+    // A retired id no longer has a catalog directory, but `paths.skillDir` below still proves where
+    // it lives — refusing it made every re-onboard that drops an old assistant loop on recovery.
+    && (existsSync(join(ROOT, 'skills', id)) || isRetired(id))
+    && (entry.files || []).every((file) => resolve(file) === resolve(paths.skillDir(id))))
+    && (state.agents || []).every((name) => {
+      if (!allAgentNames().includes(name)) return false;
+      const file = agentPath(target, cwd, name);
+      return file && owned.some((candidate) => resolve(candidate) === resolve(file));
+    })
+    && (state.commands || []).every((name) => {
+      if (!allPotentialCommandNames().includes(name)) return false;
+      const file = commandPath(target, cwd, name);
+      return file && owned.some((candidate) => resolve(candidate) === resolve(file));
+    });
+  const root = resolve(cwd);
+  const safe = (file) => {
+    const absolute = resolve(file);
+    if (absolute === root || !absolute.startsWith(`${root}${sep}`)) return false;
+    const parts = relative(root, dirname(absolute)).split(sep).filter(Boolean);
+    let cursor = root;
+    for (const part of parts) {
+      cursor = join(cursor, part);
+      if (!existsSync(cursor)) break;
+      if (lstatSync(cursor).isSymbolicLink()) {
+        const destination = realpathSync(cursor);
+        if (destination !== root && !destination.startsWith(`${root}${sep}`)) return false;
+      }
+    }
+    return true;
+  };
+  if (!declaredLocationsAreExact || owned.some((file) => !safe(file))) throw new Error(`RSC_PREVIOUS_INSTALL_INCOMPATIBLE: ${target} state contains a path outside its managed locations`);
+  for (const entry of Object.values(state.skills || {})) {
+    for (const file of entry.files || []) { ignored.push(file); rmSync(file, { recursive: true, force: true }); }
+  }
+  for (const name of state.agents || []) {
+    const file = agentPath(target, cwd, name);
+    if (file) { ignored.push(file); rmSync(file, { recursive: true, force: true }); }
+  }
+  for (const name of state.commands || []) {
+    const file = commandPath(target, cwd, name);
+    if (file) { ignored.push(file); rmSync(file, { recursive: true, force: true }); }
+  }
+  unwireHook(target, paths);
+  unwireMemory(target, cwd);
+  unwireUpdate(target, cwd);
+  unwireKnowledge(target, cwd);
+  unwireGitPermissions(target, cwd);
+  rmSync(paths.stateFile, { force: true });
+  const gitignore = join(cwd, '.gitignore');
+  if (existsSync(gitignore)) {
+    const stale = new Set(ignored.map((path) => relative(cwd, path).split(sep).join('/').replace(/^\//, '').replace(/\/$/, ''))
+      .filter((entry) => ownedIgnoreEntries.has(entry)));
+    const lines = readFileSync(gitignore, 'utf8').split('\n');
+    const kept = lines.filter((line) => !stale.has(line.trim().replace(/^\//, '').replace(/\/$/, '')));
+    writeFileSync(gitignore, kept.join('\n'));
+  }
+}
+
+export function pruneSharedBases({ cwd = process.cwd(), skillIds = [] }) {
+  const versions = readBaseVersions(cwd);
+  const wanted = new Set(skillIds);
+  for (const id of Object.keys(versions)) {
+    if (wanted.has(id)) continue;
+    rmSync(baseDir(id, cwd), { recursive: true, force: true });
+    delete versions[id];
+  }
+  writeBaseVersions(cwd, versions);
+}
+
+export async function syncInstalled({ target, home, cwd = process.cwd(), dryRun = false }) {
+  const paths = targetPaths(target, home, cwd);
+  const state = readState(paths.stateFile);
+  // The per-target state is machine wiring and does not travel, so a fresh clone has
+  // none of it: sync found zero skills and did nothing, leaving someone with a repo that
+  // declares a harness and has none. The committed manifest is exactly the declaration
+  // to rebuild from, and it is sitting right there.
+  const ids = Object.keys(state.skills || {});
+  const manifest = readManifest(cwd);
+  const governedSkills = manifest?.onboarding?.plan?.policy?.skills;
+  // The accepted plan is a FLOOR, not a ceiling. Reading it as the whole declaration is what deleted
+  // users' skills: `add` recorded the new skill in `manifest.skills` — the living list — and sync
+  // then rebuilt from a governed list that predated it and pruned the difference, recursively.
+  // Reported by a user and reproduced 2026-09-17. The receipt stays untouched, because it is
+  // hash-checked against what the user accepted and is not a log of what happened since.
+  //
+  // Read through the retirement map: a declaration older than the retirement of eli5, show-me and
+  // bro names skills the catalog no longer ships, and the receipt that names them is never rewritten.
+  const declaredRaw = replaceRetired(governedSkills
+    ? [...new Set([...governedSkills, ...(manifest?.skills || [])])].sort()
+    : (ids.length ? ids : (manifest?.skills || []))).sort();
+  // A declaration is frozen at the moment it was written, so a skill the catalog later makes
+  // mandatory never reaches an existing harness: `add` and `install` apply the floor, sync did
+  // not, and sync is the only one an upgrade runs. 2.0.0 shipped the three-lane decisor inside
+  // `suggest` — already declared, so already upgraded — routing ordinary work to an `ftd` that
+  // sync had no reason to fetch. Applied only to a harness that already declares something: a
+  // directory declaring nothing is not a harness missing its floor.
+  const declared = declaredRaw.length ? withDefaultSkillFloor(declaredRaw) : declaredRaw;
+  const declaredAgents = state.explicitAgents?.length ? state.explicitAgents : (manifest?.agents || []);
+  if (!declared.length && !declaredAgents.length) return dryRun ? { dryRun: true, synced: [], syncedAgents: [], paths: [] } : { synced: [], syncedAgents: [], backup: null };
+  if (dryRun) {
+    return {
+      dryRun: true,
+      synced: declared,
+      syncedAgents: declaredAgents,
+      paths: managedPathsForInstall({ skillIds: declared, agentIds: declaredAgents, target, home, cwd, policy: manifest?.onboarding?.plan?.policy }),
+    };
+  }
+  const nextState = await applyInstall({
+    skillIds: declared,
+    agentIds: declaredAgents,
+    target,
+    home,
+    cwd,
+    operation: 'sync',
+    policy: manifest?.onboarding?.plan?.policy,
+    onboarding: manifest?.onboarding,
+  });
+  // A teammate never runs onboarding — the harness arrives in the clone — so the exclude onboarding
+  // writes for the personal profile never reached them, and their first answer to the one onboarding
+  // question sat untracked, one `git add -A` from the team repo (team simulation D13). Sync is what a
+  // clone runs, so it writes the same exclude. Lazy import: onboarding-apply imports this module.
+  try { (await import('./lib/onboarding-apply.js')).excludePersonalProfile(cwd); } catch { /* not a repo → nothing */ }
+  return { synced: declared, syncedAgents: declaredAgents, backup: nextState.backup, keptAgents: nextState.keptAgents || [] };
+}
+
+/**
+ * #298 — `rsc agents reset <name|--all>`: take rsc's version of agents the user edited. The user's
+ * file is snapshotted first (a backup under .rsc/backups/), and the answer says where, so taking rsc's
+ * version is never the loss the protection exists to prevent.
+ */
+export function resetAgents({ target, home, cwd = process.cwd(), names = [], all = false }) {
+  if (!targetHasAgents(target)) return { reset: [], backup: null, kept: [] };
+  const paths = targetPaths(target, home, cwd);
+  const state = readState(paths.stateFile);
+  const installed = state.agents || [];
+  const chosen = all ? installed : names;
+  const unknown = chosen.filter((name) => !installed.includes(name));
+  if (unknown.length) throw new Error(`${unknown.join(', ')}: not an agent rsc installed for ${target} (installed: ${installed.join(', ') || 'none'})`);
+  if (!chosen.length) return { reset: [], backup: null, kept: [] };
+  const files = chosen.map((name) => agentPath(target, cwd, name));
+  const backup = createBackup({ cwd, operation: 'agents-reset', target, paths: files.filter((f) => existsSync(f)), cliVersion: CLI_VERSION });
+  const { written } = writeAgentsDetailed(target, cwd, readDeveloperTier(cwd), chosen, { force: true });
+  state.agentsKept = (state.agentsKept || []).filter((k) => !chosen.includes(k.name));
+  writeState(paths.stateFile, state);
+  const rel = (p) => relative(cwd, p).split(sep).join('/');
+  return { reset: chosen, written, backup: backup ? rel(join(cwd, '.rsc', 'backups', backup.id)) : null };
+}
+
+// Remove EVERYTHING rsc put in this project: installed skills across all targets,
+// the wired hooks (settings.json entries / AGENTS-blocks / cursor rules), and the
+// shared `.rsc/` (base + hook scripts + version marker). `02-DOCS/` is the user's
+// own knowledge — kept unless `withDocs` is set. Returns the paths touched.
+// Note: backups live under `.rsc/backups/`, which this removes — so purge does not
+// snapshot (a pre-purge backup would delete itself). It is the deliberate escape hatch.
+export async function purge(options = {}) {
+  const report = await purgeReport(options);
+  return [...report.removed, ...report.cleaned];
+}
+
+// A config file whose only content was rsc's is not "cleaned" when the rsc entries leave it as `{}`:
+// it is a stub nobody asked for, and calling it removed while it sits on disk is the lie the E2E
+// caught. `$schema` and `version` are format boilerplate rsc itself adds, not user content.
+function emptyConfig(file) {
+  let value;
+  try { value = JSON.parse(readFileSync(file, 'utf8')); } catch { return false; }
+  const empty = (v) => (Array.isArray(v) ? v.every(empty)
+    : v && typeof v === 'object' ? Object.values(v).every(empty) : false);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const rest = Object.fromEntries(Object.entries(value).filter(([k]) => k !== '$schema' && k !== 'version'));
+  return empty(rest);
+}
+
+const RSC_IGNORE_HEADER = '# rsc local state (hooks, seals, logs) and managed skill links — machine-local';
+
+// Merge consecutive rsc blocks into the first: drop a repeated header and the blank seam before it
+// when the block above was ours too. A block of the user's in between ends ours, so nothing of
+// theirs is ever moved or absorbed.
+export function foldIgnoreBlocks(text) {
+  const out = [];
+  let ours = false;
+  let afterBlank = false;
+  for (const line of text.split('\n')) {
+    if (line === RSC_IGNORE_HEADER) {
+      if (ours && afterBlank) {
+        while (out.length && out[out.length - 1].trim() === '') out.pop();
+        afterBlank = false;
+        continue;
+      }
+      ours = true;
+    } else if (line.trim() === '') {
+      afterBlank = true;
+      out.push(line);
+      continue;
+    } else if (afterBlank) {
+      ours = false;
+    }
+    afterBlank = false;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+function endsWithIgnoreBlock(text) {
+  const lines = text.replace(/\n+$/, '').split('\n');
+  let i = lines.length - 1;
+  while (i > 0 && lines[i - 1].trim() !== '') i -= 1;
+  return lines[i] === RSC_IGNORE_HEADER;
+}
+
+// Remove the blocks `ignoreLocalState` appended: the header line, the entries under it up to the
+// next blank line, and the blank seam before it. Lines the user wrote are never part of a block.
+function stripIgnoreBlocks(text) {
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] !== RSC_IGNORE_HEADER) { out.push(lines[i]); continue; }
+    if (out.length && out[out.length - 1] === '') out.pop();
+    while (i + 1 < lines.length && lines[i + 1].trim() !== '') i++;
+  }
+  return out.join('\n');
+}
+
+/**
+ * Remove EVERYTHING rsc put in this project and say exactly what happened to each thing:
+ *   removed — gone from disk;
+ *   cleaned — rsc's entries taken out, the file kept because something of the user's remains;
+ *   kept    — left on purpose, with the reason (and the command, when it is the user's call).
+ * `02-DOCS/` is the user's own knowledge — kept unless `withDocs` is set. Remote branches are never
+ * deleted from here. Backups live under `.rsc/backups/`, which this removes — so purge does not
+ * snapshot (a pre-purge backup would delete itself). It is the deliberate escape hatch.
+ */
+export async function purgeReport({ home, cwd = process.cwd(), withDocs = false, dryRun = false } = {}) {
+  const removed = new Set();
+  const cleaned = new Set();
+  const kept = [];
+  const drop = (p, recursive = false) => {
+    if (!existsSync(p) && !isLink(p)) return;
+    removed.add(p);
+    if (!dryRun) rmSync(p, { recursive, force: true });
+  };
+  const touchedConfigs = new Set();
+  for (const target of TARGET_IDS) {
+    const paths = targetPaths(target, home, cwd);
+    if (existsSync(paths.stateFile)) {
+      const state = readState(paths.stateFile);
+      for (const id of Object.keys(state.skills || {})) {
+        for (const f of state.skills[id].files || []) drop(f, true);
+      }
+      for (const name of state.commands || []) {
+        const file = commandPath(target, cwd, name);
+        if (file) drop(file);
+      }
+      for (const name of state.agents || []) {
+        const file = agentPath(target, cwd, name);
+        if (file) drop(file);
+      }
+      drop(paths.stateFile);
+    }
+    const bootstrap = join(paths.projectRoot || cwd, '.claude', 'rsc-bootstrap.mjs');
+    const hadBootstrap = target === 'claude' && existsSync(bootstrap);
+    // Unwiring mutates shared config files, so only run it for real (dry runs report
+    // those files without touching them).
+    if (!dryRun) {
+      for (const p of [
+        ...unwireHook(target, paths),
+        ...unwireMemory(target, cwd),
+        ...unwireUpdate(target, cwd),
+        ...unwireKnowledge(target, cwd),
+        ...unwireGitPermissions(target, cwd),
+      ]) touchedConfigs.add(p);
+      if (hadBootstrap && !existsSync(bootstrap)) removed.add(bootstrap);
+    } else {
+      for (const p of [
+        ...memoryArtifactsPresent(target, cwd),
+        ...updateArtifactsPresent(target, cwd),
+        ...knowledgeArtifactsPresent(target, cwd),
+      ]) touchedConfigs.add(p);
+      if (paths.hookTarget && existsSync(paths.hookTarget)
+        && /\.rsc\/|rsc-suggest:start|skills\/rsc\/suggest/.test(readFileSync(paths.hookTarget, 'utf8').replaceAll('\\\\', '/'))) {
+        touchedConfigs.add(paths.hookTarget);
+      }
+      if (hadBootstrap) removed.add(bootstrap);
+    }
+    // A lost state file also loses proof of ownership. Leave same-named user files
+    // behind rather than guessing from a catalog id and deleting their work.
+  }
+  const rscDir = join(cwd, '.rsc');
+  for (const p of touchedConfigs) {
+    if (p === rscDir || p.startsWith(`${rscDir}${sep}`)) { removed.add(p); continue; }
+    if (dryRun) { if (existsSync(p)) cleaned.add(p); continue; }
+    if (!existsSync(p)) { removed.add(p); continue; }
+    let body = '';
+    try { body = readFileSync(p, 'utf8'); } catch { /* unreadable: leave it, call it cleaned */ }
+    if (/\.json$/i.test(p) ? emptyConfig(p) : body.trim() === '') {
+      rmSync(p, { force: true });
+      removed.add(p);
+    } else cleaned.add(p);
+  }
+
+  // The `.gitignore` block rsc appended. The file goes only if nothing of the user's is left in it.
+  const gitignore = join(cwd, '.gitignore');
+  if (existsSync(gitignore)) {
+    const text = readFileSync(gitignore, 'utf8');
+    if (text.includes(RSC_IGNORE_HEADER)) {
+      const rest = stripIgnoreBlocks(text);
+      if (rest.trim() === '') { removed.add(gitignore); if (!dryRun) rmSync(gitignore, { force: true }); }
+      else { cleaned.add(gitignore); if (!dryRun) writeFileSync(gitignore, rest.endsWith('\n') ? rest : `${rest}\n`); }
+    }
+  }
+
+  // The committed declaration of the harness that no longer exists.
+  drop(join(cwd, '.rsc.json'));
+
+  // The `01-TOOLS/` scaffolding onboarding wrote, only where nobody has touched it.
+  const skeleton = removeUnmodifiedSkeleton(cwd, { dryRun });
+  for (const rel of skeleton.removed) removed.add(join(cwd, rel));
+  for (const k of skeleton.kept) kept.push(k);
+
+  drop(rscDir, true);
+  if (withDocs) drop(join(cwd, '02-DOCS'), true);
+  else if (existsSync(join(cwd, '02-DOCS'))) kept.push({ path: '02-DOCS/', reason: 'your knowledge base. Add --with-docs to remove it too.' });
+
+  // Lines rsc added to `.git/info/exclude` for files that are now gone.
+  const exclude = gitExcludeFile(cwd);
+  if (exclude && existsSync(exclude)) {
+    const gone = new Set([...removed].map((p) => `/${relative(cwd, p).split(sep).join('/')}`));
+    const lines = readFileSync(exclude, 'utf8').split('\n');
+    const keptLines = lines.filter((l) => !(gone.has(l.trim()) || l.trim().startsWith('/.rsc/')));
+    if (keptLines.length !== lines.length) {
+      cleaned.add(exclude);
+      if (!dryRun) writeFileSync(exclude, keptLines.join('\n'));
+    }
+  }
+
+  // Directories that only held what was just removed. Deepest first; never `cwd` itself.
+  const parents = new Set();
+  for (const p of removed) {
+    for (let d = dirname(p); d !== cwd && d.startsWith(`${cwd}${sep}`); d = dirname(d)) parents.add(d);
+  }
+  const ordered = [...parents].sort((a, b) => b.split(sep).length - a.split(sep).length);
+  const willBeEmpty = (dir) => {
+    try {
+      return readdirSync(dir).every((name) => {
+        const child = join(dir, name);
+        return removed.has(child);
+      });
+    } catch { return false; }
+  };
+  for (const dir of ordered) {
+    if (!existsSync(dir) || isLink(dir)) continue;
+    if (dryRun ? willBeEmpty(dir) : readdirSync(dir).length === 0) {
+      if (!dryRun) rmdirSync(dir);
+      removed.add(dir);
+    }
+  }
+
+  // The knowledge exchange branch lives on the remote, which is shared: deleting it is the user's
+  // call, so say it exists and hand them the command.
+  for (const ref of gitLines(cwd, ['for-each-ref', '--format=%(refname)', 'refs/remotes/*/rsc/knowledge', 'refs/heads/rsc/knowledge'])) {
+    const remote = /^refs\/remotes\/([^/]+)\/rsc\/knowledge$/.exec(ref)?.[1];
+    if (remote) kept.push({ path: `${remote}/rsc/knowledge`, reason: `remote branch; rsc never deletes remote branches. To delete it: git push ${remote} --delete rsc/knowledge` });
+    else kept.push({ path: 'rsc/knowledge', reason: 'local branch. To delete it: git branch -D rsc/knowledge' });
+  }
+
+  // The post-merge hook rsc installs (worktree-reaper.mjs). It lives in git's private hooks dir, so it
+  // is per clone, never committed — and left behind it kept calling a reaper that no longer exists.
+  // Only a hook carrying rsc's marker is touched; one rsc had chained aside is put back in place.
+  const [hooks] = gitLines(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'hooks']);
+  const hook = hooks ? join(hooks, 'post-merge') : null;
+  if (hook && existsSync(hook)) {
+    let body = '';
+    try { body = readFileSync(hook, 'utf8'); } catch { /* unreadable → not provably ours */ }
+    if (body.includes('# rsc-managed worktree cleanup (post-merge)')) {
+      const chained = join(hooks, 'post-merge.rsc-local');
+      if (existsSync(chained)) {
+        cleaned.add(hook);
+        if (!dryRun) { rmSync(hook, { force: true }); renameSync(chained, hook); }
+      } else drop(hook);
+    }
+  }
+
+  // The project's instruction files are never purge's to delete. Say so, so the report accounts for them.
+  for (const name of ['CLAUDE.md', 'AGENTS.md']) {
+    const file = join(cwd, name);
+    if (existsSync(file) && !removed.has(file) && !cleaned.has(file)) {
+      kept.push({ path: name, reason: 'your project instructions; purge never deletes them. If they still mention rsc or 02-DOCS, edit those lines by hand.' });
+    }
+  }
+
+  // A path that is both removed and cleaned was cleaned, then emptied, then removed.
+  for (const p of removed) cleaned.delete(p);
+  // `.rsc/` is rsc's own directory and goes whole: listing its files one by one adds noise, not truth.
+  if (removed.has(rscDir)) for (const p of [...removed]) if (p.startsWith(`${rscDir}${sep}`)) removed.delete(p);
+
+  // What of the removed or cleaned is COMMITTED. On a teammate's clone that is most of it (.rsc.json,
+  // .claude/settings.json, the bootstrap…): changing it here is local, committing the changes
+  // uninstalls rsc for everyone who pulls (team simulation D15). The index still has them after the
+  // delete, so this reads the same in a dry run and a real one.
+  const gone = new Set([...removed, ...cleaned].map((p) => relative(cwd, p).split(sep).join('/')));
+  const under = (file) => { for (let d = file; d && d !== '.'; d = d.includes('/') ? d.slice(0, d.lastIndexOf('/')) : '') if (gone.has(d)) return true; return false; };
+  const listed = spawnSync('git', ['ls-files', '-z'], { cwd, encoding: 'utf8' });
+  const tracked = listed.status === 0
+    ? listed.stdout.split('\0').filter(Boolean).filter(under) : [];
+  return { removed: [...removed], cleaned: [...cleaned], kept, tracked };
+}
+
+function isLink(p) {
+  try { return lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+function gitLines(cwd, args) {
+  try {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    return r.status === 0 ? r.stdout.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+function gitExcludeFile(cwd) {
+  const [value] = gitLines(cwd, ['rev-parse', '--git-path', 'info/exclude']);
+  return value ? resolve(cwd, value) : null;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const ids = process.argv.slice(2);
+  applyInstall({ skillIds: ids, target: 'claude' }).then(() => console.log('installed', ids.join(', ')));
+}

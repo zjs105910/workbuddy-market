@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+import { t, resolveLocale } from '@shared/i18n';
+import * as vscode from 'vscode';
+import { spawn } from 'child_process';
+import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '@shared/types';
+import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
+import { getShellEnv, resolveBin } from './shellEnv';
+
+export class CliService {
+  private current: ReturnType<typeof spawn> | null = null;
+  private envCache: { env: EnvCheckResult; at: number } | null = null;
+  private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
+
+  constructor(private cliPath: string = 'ocr') {}
+
+  invalidateEnvironmentCache(): void {
+    this.envCache = null;
+  }
+
+  getCachedEnvironment(): EnvCheckResult | null {
+    if (!this.envCache) return null;
+    if (Date.now() - this.envCache.at > CliService.ENV_CACHE_TTL_MS) {
+      this.envCache = null;
+      return null;
+    }
+    return this.envCache.env;
+  }
+
+  async isAvailable(): Promise<boolean> {
+    const env = await this.checkEnvironment();
+    return env.ocr.ok;
+  }
+
+  private probeCommand(bin: string): Promise<{ ok: boolean; version?: string }> {
+    return new Promise((resolve) => {
+      // shell: true is safe here because args are hardcoded ['--version'] — no user input.
+      const proc = spawn(resolveBin(bin), ['--version'], { env: getShellEnv(), shell: process.platform === 'win32' });
+      let stdout = '';
+      let errored = false;
+      proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+      proc.on('error', () => { errored = true; resolve({ ok: false }); });
+      proc.on('close', (code) => {
+        if (errored || code !== 0) {
+          resolve({ ok: false });
+          return;
+        }
+        const version = stdout.trim().split('\n')[0]?.trim();
+        resolve({ ok: true, version: version || undefined });
+      });
+    });
+  }
+
+  async checkEnvironment(force = false): Promise<EnvCheckResult> {
+    if (!force) {
+      const cached = this.getCachedEnvironment();
+      if (cached) return cached;
+    }
+    const node = await this.probeCommand('node');
+    const npm = node.ok ? await this.probeCommand('npm') : { ok: false };
+    const ocr = node.ok && npm.ok
+      ? await this.probeCommand(this.cliPath)
+      : { ok: false };
+    const env = { node, npm, ocr };
+    this.envCache = { env, at: Date.now() };
+    return env;
+  }
+
+  /** Install the ocr CLI globally, stream npm logs, and report success based on the exit code. */
+  install(onLog: (l: LogLine) => void): Promise<boolean> {
+    return new Promise((resolve) => {
+      const args = [
+        'install', '-g', '@alibaba-group/open-code-review',
+        '--loglevel', 'http', '--no-progress',
+      ];
+      onLog({ text: `$ npm ${args.join(' ')}`, level: 'info' });
+      const proc = spawn(resolveBin('npm'), args, {
+        // Explicitly disable the npm progress bar and use line-based output for non-TTY execution.
+        env: { ...getShellEnv(), npm_config_progress: 'false', npm_config_color: 'false' },
+        shell: process.platform === 'win32',
+      });
+      // Normalize npm line endings and emit complete lines, buffering partial lines across chunks.
+      const emitLines = (() => {
+        let buf = '';
+        return (chunk: string, level: LogLine['level'], flush = false) => {
+          buf += chunk.replace(/\r/g, '\n');
+          const parts = buf.split('\n');
+          buf = flush ? '' : (parts.pop() ?? '');
+          for (const line of parts) if (line.trim()) onLog({ text: line, level });
+          if (flush && chunk.trim() && parts.length === 0) onLog({ text: chunk, level });
+        };
+      })();
+      proc.stdout?.on('data', (d) => emitLines(d.toString(), 'info'));
+      proc.stderr?.on('data', (d) => emitLines(d.toString(), 'info'));
+      proc.on('error', (err) => { onLog({ text: String(err), level: 'error' }); resolve(false); });
+      proc.on('close', (code) => {
+        emitLines('', 'info', true);
+        const locale = resolveLocale(vscode.env.language);
+        onLog({ text: code === 0 ? t(locale, 'ext.cli.installOk') : `${t(locale, 'ext.cli.installFail')}${code})`, level: code === 0 ? 'info' : 'error' });
+        if (code === 0) this.invalidateEnvironmentCache();
+        resolve(code === 0);
+      });
+    });
+  }
+
+  /** Run arbitrary arguments, stream logs via a callback, and return stdout on completion. Reject nonzero exits with the CLI error text. */
+  runRaw(
+    args: string[],
+    cwd: string,
+    onLog: (l: LogLine) => void,
+    envExtra?: Record<string, string>,
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(resolveBin(this.cliPath), args, {
+        cwd,
+        env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        // A dedicated POSIX process group lets cancellation escalate without
+        // leaving the native CLI or any of its subprocesses behind.
+        detached: process.platform !== 'win32',
+      });
+      this.current = proc;
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr.on('data', (d) => {
+        const text = d.toString();
+        stderr += text;
+        for (const line of text.split('\n')) {
+          const parsed = parseLogLine(line);
+          if (parsed) onLog(parsed);
+        }
+      });
+      proc.on('error', (err) => { this.current = null; reject(err); });
+      proc.on('close', (code) => {
+        this.current = null;
+        if (code === 0) { resolve(stdout); return; }
+        reject(new Error(extractCliError(stderr) || `CLI exited with code ${code}`));
+      });
+    });
+  }
+
+  async review(opts: CliRunOptions, cwd: string, onLog: (l: LogLine) => void): Promise<CliResult> {
+    const stdout = await this.runRaw(buildReviewArgs(opts), cwd, onLog);
+    return parseCliResult(stdout);
+  }
+
+  async testConnection(options?: { home?: string }): Promise<{ ok: boolean; message?: string }> {
+    const envExtra: Record<string, string> = {};
+    if (options?.home) {
+      envExtra.HOME = options.home;
+      if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
+    }
+    const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;
+    try {
+      await this.runRaw(['llm', 'test'], process.cwd(), () => {}, env);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  cancel(): void {
+    if (this.current && this.current.pid) {
+      const proc = this.current;
+
+      // Windows does not deliver POSIX signals to the launcher. Node maps
+      // kill('SIGTERM') to TerminateProcess, which kills only the launcher and
+      // can orphan its native child. taskkill /T terminates the complete tree.
+      if (process.platform === 'win32') {
+        const treeKill = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        const fallback = () => {
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+        };
+        treeKill.once('error', fallback);
+        treeKill.once('close', (code) => {
+          if (code !== 0) fallback();
+        });
+        return;
+      }
+
+      proc.kill('SIGTERM');
+      const forceKillTimer = setTimeout(() => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return;
+        try {
+          process.kill(-proc.pid!, 'SIGKILL');
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ESRCH') proc.kill('SIGKILL');
+        }
+      }, 3000);
+      proc.once('close', () => clearTimeout(forceKillTimer));
+    }
+  }
+}

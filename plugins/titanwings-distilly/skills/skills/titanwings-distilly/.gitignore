@@ -1,0 +1,36 @@
+# Generated Distilly outputs (user data, not committed)
+skills/*
+!skills/colleague/
+skills/colleague/*
+!skills/colleague/example_zhangsan/
+!skills/colleague/example_zhangsan/**
+!skills/colleague/example_tianyi/
+!skills/colleague/example_tianyi/**
+!skills/colleague/example_jiaxiu/
+!skills/colleague/example_jiaxiu/**
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Config with credentials
+.distilly/
+# Legacy local credential path
+.colleague-skill/
+
+# Playwright browser data
+playwright-data/
+
+# Temp files
+/tmp/feishu_*.txt
+/tmp/email_*.txt
+/tmp/dingtalk_*.txt
+knowledge/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,46 @@
+{
+  "protocol": "preference-respect-v3",
+  "fingerprint": "ff4b4249909afd1ecc1c588d53cb5902b91248c981950e27a094cca69aa48e89",
+  "cases": [
+    {
+      "id": "comments-heldout",
+      "family": "comments",
+      "fingerprint": "90dc64c3ff449af3a535844699a14af0bd754c18d1a96cda310854e5d7f4fbb8"
+    },
+    {
+      "id": "types-heldout",
+      "family": "types",
+      "fingerprint": "ef04d74dfa9256fbd8463c96f96bd4deb8675a1dfdc484192f8f02ff1397bc77"
+    },
+    {
+      "id": "api-heldout",
+      "family": "api",
+      "fingerprint": "cb707bc7b2eb180cbcddc849157f63ad6295080f61216b25db85ea15fc948270"
+    },
+    {
+      "id": "git-heldout",
+      "family": "git",
+      "fingerprint": "f7c5ae4a46fd140ff76b7f5fab1a8ba025cd2e161283f9be086438924bd5b7b1"
+    },
+    {
+      "id": "length-heldout",
+      "family": "length",
+      "fingerprint": "12f2d2382944afcb6d9f7309752d6879b0a7264bab425891ba09cd87375351ba"
+    },
+    {
+      "id": "test-first-heldout",
+      "family": "test-first",
+      "fingerprint": "99b053ce35ad1dadcfc97a3e44d9e9085eeab86b6ecc5931de0bd8793c96fe83"
+    },
+    {
+      "id": "pr-heldout",
+      "family": "pr",
+      "fingerprint": "3087fac560e915a76112b3f408dbee9486b77f2f89436527fced2404697e6469"
+    },
+    {
+      "id": "scope-heldout",
+      "family": "scope",
+      "fingerprint": "553aa5306bbf44b798931aa07264043a2757a74886c2bbc2621d42085d1a9067"
+    }
+  ]
+}

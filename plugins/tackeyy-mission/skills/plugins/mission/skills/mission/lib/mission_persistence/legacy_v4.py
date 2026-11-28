@@ -1,0 +1,1538 @@
+"""Behavior-compatible repository for missing/v1-v4 session documents."""
+
+from __future__ import annotations
+
+import copy
+import contextlib
+import json
+import secrets
+from mission_kernel.budget import decode_ledger
+from mission_kernel.repair_lineage import decode_projection as decode_repair_projection
+from mission_kernel.fresh_review import decode_projection
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
+from typing import Callable, ContextManager, Iterable
+
+from mission_application.artifact import EvidenceFailure
+from mission_application.evidence_publication import (
+    EvidencePublicationError,
+    assert_replay_materializes,
+    binding_records,
+    generated_blobs_digest,
+)
+from mission_persistence.evidence_order import (
+    BASE_MOVED_DETAIL,
+    EvidenceOrderError,
+    base_agrees,
+    blob_set_from_effects,
+)
+from mission_application.artifact import (
+    EvidenceDecision,
+    EvidenceEffect,
+    PreparedArtifactOperation,
+    validate_evidence_effect,
+)
+from mission_application.evidence import PreparedEvidenceOperation
+from mission_application.ports import (
+    AggregateIndexError,
+    AuditMetadata,
+    LegacyCommandExecutionResult,
+    OperationReplay,
+    PreparedTransitionOperation,
+)
+from mission_kernel.commands import (
+    AdvancePhase,
+    CompatibilityPayload,
+    MarkPass,
+    Reactivate,
+    ResumeStale,
+    kernel_command_type,
+)
+from mission_kernel.json_codec import decode_json_object
+from mission_kernel import MissionState, decode_mission_state
+
+from mission_kernel.model import BoundScore, FrozenJsonObject, HaltCategory, Phase
+from mission_kernel.json_codec import freeze_json_value
+from mission_kernel.transitions import (
+    Decision,
+    bind_transition_effects,
+    decide,
+)
+
+from .fenced_commit import (
+    AdmittedSnapshot,
+    CommitResult,
+    ExecutionRequest,
+    FencedCommitError,
+    LocalFencedRepository,
+    PendingLease,
+    RepositoryExecutionResult,
+    admit_lease,
+    project_legacy_document,
+    encode_legacy_document,
+    compute_intent_digest,
+    validate_execution_request,
+)
+from .local_uow import VerifiedBlobSet
+
+
+def _legacy_command_state(document: dict, command: object) -> MissionState:
+    """Build the narrow decision view bound to the exact loaded document."""
+    compatible = copy.deepcopy(document)
+    normalize_reactivation_category = False
+    plan = compatible.get("canonical_plan")
+    if isinstance(plan, dict):
+        plan.setdefault("schema", "mission-plan/1")
+        plan.setdefault("source_digest", plan.get("digest"))
+        plan.setdefault(
+            "validated_at",
+            compatible.get("updated_at") or compatible.get("started_at"),
+        )
+    if isinstance(command, Reactivate):
+        raw_category = compatible.get("halt_category")
+        if not isinstance(raw_category, str) or raw_category not in {
+            item.value for item in HaltCategory
+        }:
+            if command.expected_category is not HaltCategory.OTHER:
+                raise FencedCommitError(
+                    "decision-input-invalid", "legacy halt category does not match command"
+                )
+            normalize_reactivation_category = True
+            compatible.pop("halt_category", None)
+    if isinstance(command, ResumeStale):
+        reason = compatible.get("halt_reason")
+        category = compatible.get("halt_category")
+        legacy_stale = (
+            category in (None, "", "unknown")
+            and isinstance(reason, str)
+            and reason.startswith(("orphan:", "stale:"))
+        )
+        if category != "stale" and not legacy_stale:
+            raise FencedCommitError(
+                "decision-input-invalid", "legacy state is not stale"
+            )
+        compatible["phase"] = "halted"
+        compatible["loop_active"] = False
+        compatible["halt_category"] = "stale"
+        compatible["terminal_outcome"] = "stale_superseded"
+    try:
+        source = json.dumps(
+            compatible,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        state = decode_mission_state(source)
+        passthrough = freeze_json_value(document)
+        assert isinstance(passthrough, FrozenJsonObject)
+        if normalize_reactivation_category:
+            state = replace(
+                state,
+                control=replace(
+                    state.control, halt_category=HaltCategory.OTHER
+                ),
+                legacy_passthrough=passthrough,
+            )
+        else:
+            state = replace(state, legacy_passthrough=passthrough)
+        return state
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise FencedCommitError(
+            getattr(exc, "code", "record-invalid"),
+            "legacy state cannot be decoded",
+        ) from exc
+
+
+_METADATA_FIELDS = frozenset(
+    {
+        "schema_version",
+        "project_root",
+        "pid",
+        "pid_source",
+        "hostname",
+        "session_id",
+        "agent",
+        "created_at_session",
+        "cli_version",
+    }
+)
+
+
+def _command_with_missing_metadata(
+    command: object,
+    document: dict,
+    metadata: dict,
+) -> object:
+    if not metadata:
+        return command
+    if set(metadata) - _METADATA_FIELDS:
+        raise FencedCommitError("request-invalid", "metadata field is not closed")
+    if not hasattr(command, "compatibility"):
+        return command
+    compatibility = command.compatibility
+    if not isinstance(compatibility, CompatibilityPayload):
+        raise FencedCommitError("request-invalid", "command compatibility is invalid")
+    upserts = compatibility.upserts.thaw()
+    for key, value in metadata.items():
+        if key not in document:
+            upserts[key] = copy.deepcopy(value)
+    return replace(
+        command,
+        compatibility=CompatibilityPayload(upserts, compatibility.removals),
+    )
+
+
+@dataclass(frozen=True)
+class LegacyRepositorySnapshot:
+    """Canonical read result for one legacy compatibility document."""
+
+    state: MissionState
+    state_bytes: bytes
+
+
+class LegacyV4InitializerRepository:
+    """Expose the existing atomic v4 bootstrap as a repository operation.
+
+    A1 does not switch new sessions to v5.  The injected writer is therefore
+    the compatibility persistence implementation, while the application use
+    case and CLI remain independent of its filesystem details.
+    """
+
+    def __init__(
+        self,
+        *,
+        initialize_state: Callable[..., None],
+        write_state: Callable[[object, object], None],
+    ) -> None:
+        self._initialize_state = initialize_state
+        self._write_state = write_state
+
+    def initialize(self, arguments: object) -> None:
+        self._initialize_state(arguments, write_state=self._write_state)
+
+
+class LegacyV4Repository:
+    """Atomically decide, project, and persist typed legacy commands.
+
+    The injected persistence functions preserve the existing CLI's StateLock,
+    atomic writer, backup, and fenced-lease behavior without making the
+    application layer depend on the CLI module.
+    """
+
+    def __init__(
+        self,
+        *,
+        lock: Callable[[], ContextManager[object]],
+        read_state: Callable[[], dict],
+        write_state: Callable[..., None],
+        backup_state: Callable[[], None],
+        add_to_aggregate: Callable[[], None] | None = None,
+        remove_from_aggregate: Callable[[], None] | None = None,
+        aggregate_recover: Callable[[], None] | None = None,
+        aggregate_prepare: Callable[[str], object] | None = None,
+        aggregate_finalize: Callable[[object], None] | None = None,
+        clock: Callable[[], datetime] | None = None,
+        lease_ttl_seconds: int = 15 * 60,
+        effect_transaction: Callable[
+            [tuple[EvidenceEffect, ...]], ContextManager[object]
+        ]
+        | None = None,
+        effect_publisher: Callable[
+            [object, tuple[EvidenceEffect, ...], object], ContextManager[object]
+        ]
+        | None = None,
+        effect_context: object = None,
+        format_guard: Callable[[], object] | None = None,
+    ) -> None:
+        self._lock = lock
+        self._read_state = read_state
+        self._write_state = write_state
+        self._backup_state = backup_state
+        self._add_to_aggregate = add_to_aggregate
+        self._remove_from_aggregate = remove_from_aggregate
+        self._aggregate_recover = aggregate_recover
+        self._aggregate_prepare = aggregate_prepare
+        self._aggregate_finalize = aggregate_finalize
+        aggregate_callbacks = (
+            aggregate_recover,
+            aggregate_prepare,
+            aggregate_finalize,
+        )
+        if any(item is not None for item in aggregate_callbacks) and not all(
+            callable(item) for item in aggregate_callbacks
+        ):
+            raise ValueError("aggregate coordinator callbacks must be supplied together")
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._lease_ttl_seconds = lease_ttl_seconds
+        self._effect_publisher = effect_publisher
+        self._effect_context = effect_context
+        if effect_transaction is not None and effect_publisher is not None:
+            raise ValueError("effect transaction configuration is ambiguous")
+        if effect_publisher is not None:
+            self._effect_transaction = self._effect_transaction_from_publisher
+        else:
+            self._effect_transaction = effect_transaction
+        self._format_guard = format_guard
+        self._callback_depth = 0
+        self._transaction_depth = 0
+        self._loaded_document: dict | None = None
+
+    @contextlib.contextmanager
+    def transaction(self):
+        # Nested callers share one exact loaded document until the outermost
+        # transaction exits; only the outer boundary clears that snapshot.
+        self._transaction_depth += 1
+        if self._transaction_depth == 1:
+            self._loaded_document = None
+        try:
+            with self._guarded_context(self._lock):
+                yield
+        finally:
+            self._transaction_depth -= 1
+            if self._transaction_depth == 0:
+                self._loaded_document = None
+
+
+    # 外部から注入される callable の信頼境界（#632 / Sol 4 巡目）。
+    #
+    # ``decision`` / ``pre-decision`` の 2 分類は persistence への再入を許さない。
+    # ``primitive`` は「呼ばれた時点で決定が確定しており、再入させても検証を
+    # 迂回できない」ものだけを置く。分類の網羅は inventory テストが固定する。
+    GUARDED_INJECTED_CALLABLES = (
+        "_format_guard",
+        "_clock",
+        "_read_state",
+        "_backup_state",
+        "_write_state",
+        "_add_to_aggregate",
+        "_remove_from_aggregate",
+        "_aggregate_recover",
+        "_aggregate_prepare",
+        "_aggregate_finalize",
+        "_lock",
+        "_effect_publisher",
+        "_effect_transaction",
+    )
+
+    @contextlib.contextmanager
+    def _callback_guard(self):
+        """Reject persistence entry points while a caller callback is running.
+
+        直接の ``save()`` だけを塞ぐと、typed request や effect callback、注入 hook
+        という別の実行入口から同じ不変条件を迂回できる（#632 の Sol 指摘）。
+        callback 実行中は ``execute`` / ``save`` / ``execute_effects`` を拒否する。
+        """
+        self._callback_depth += 1
+        try:
+            yield
+        finally:
+            self._callback_depth -= 1
+
+    def _guarded_call(self, callback, *args, **kwargs):
+        """Run one injected callable inside the re-entrancy boundary."""
+        with self._callback_guard():
+            return callback(*args, **kwargs)
+
+    def _effect_transaction_from_publisher(
+        self, effects: tuple[EvidenceEffect, ...], prepared: object = None
+    ) -> ContextManager[object]:
+        """Bind the publisher's opaque context without hiding its guard contract."""
+        if self._effect_publisher is None:
+            raise ValueError("evidence-effect-transaction-missing")
+        return self._guarded_call(
+            self._effect_publisher, self._effect_context, effects, prepared
+        )
+
+    def _reject_reentrant_entry(self, operation: str) -> None:
+        if self._callback_depth:
+            raise FencedCommitError(
+                "request-invalid",
+                "%s is not allowed while a decision is being executed" % operation,
+            )
+
+    @contextlib.contextmanager
+    def _guarded_context(self, factory, *args):
+        """Hold the guard across a caller-supplied context manager's own hooks.
+
+        factory / ``__enter__`` / ``__exit__`` は外部 callback なので囲む。本文
+        （内部の ``save`` 等）はガードの外で実行しなければならないため、enter と
+        exit だけを個別に囲む。特殊メソッドは ``with`` 文と同じく **型から
+        ``__enter__`` 実行前に取得**し、instance 差し替えで意味論が変わらないように
+        する（#632 / Sol 4 巡目 Medium）。
+        """
+        with self._callback_guard():
+            manager = factory(*args)
+            manager_type = type(manager)
+            enter = manager_type.__enter__
+            exit_ = manager_type.__exit__
+            entered = enter(manager)
+        try:
+            yield entered
+        except BaseException as error:
+            with self._callback_guard():
+                # truth-value 評価（`__bool__`）も外部 callback なのでガード内で
+                # 済ませる。外に出すと `__bool__` から persistence へ再入できる
+                # （#632 / Sol 5 巡目の High）。
+                suppressed = bool(exit_(manager, type(error), error, error.__traceback__))
+            if not suppressed:
+                raise
+        else:
+            with self._callback_guard():
+                exit_(manager, None, None, None)
+
+    def load(self) -> dict:
+        if self._format_guard is not None:
+            self._guarded_call(self._format_guard)
+        document = self._guarded_call(self._read_state)
+        if not isinstance(document, dict):
+            return document
+        encode_legacy_document(document)
+        decode_projection(document)
+        decode_repair_projection(document)
+        decode_ledger(document)
+        self._loaded_document = copy.deepcopy(document)
+        return copy.deepcopy(document)
+
+    def read(self, session_id: str) -> LegacyRepositorySnapshot:
+        """Read one legacy session through the common typed repository port."""
+        if not isinstance(session_id, str) or not session_id:
+            raise FencedCommitError("request-invalid", "session id is invalid")
+        with self.transaction():
+            document = self.load()
+            if not isinstance(document, dict):
+                raise FencedCommitError("record-invalid", "legacy state is not an object")
+            try:
+                source = json.dumps(
+                    document,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+                state = decode_mission_state(source)
+            except (TypeError, ValueError, UnicodeError) as exc:
+                raise FencedCommitError(
+                    getattr(exc, "code", "record-invalid"),
+                    "legacy state cannot be decoded",
+                ) from exc
+            if state.identity.session_id not in {None, session_id}:
+                raise FencedCommitError("lineage-mismatch", "legacy session differs")
+            return LegacyRepositorySnapshot(state=state, state_bytes=source)
+
+    def execute(
+        self,
+        command,
+        *,
+        backup=True,
+        administrative=False,
+        aggregate_action=None,
+    ):
+        """Decide, project, and persist one legacy command atomically."""
+        self._reject_reentrant_entry("execute")
+        if isinstance(command, ExecutionRequest):
+            return self._execute_request(command)
+        try:
+            kernel_command_type(command)
+        except TypeError as exc:
+            raise FencedCommitError("request-invalid", "typed command is required") from exc
+        if self._transaction_depth <= 0 or self._loaded_document is None:
+            raise FencedCommitError(
+                "request-invalid", "legacy command execute requires one active loaded transaction"
+            )
+        state = _legacy_command_state(self._loaded_document, command)
+        decision = decide(state, command)
+        if not isinstance(decision, Decision):
+            raise FencedCommitError("decision-invalid", "decision result type is invalid")
+        if not decision.accepted:
+            if decision.transition is not None or decision.rejection is None:
+                raise FencedCommitError("decision-invalid", "rejected decision is not closed")
+            frozen = freeze_json_value(self._loaded_document)
+            assert isinstance(frozen, FrozenJsonObject)
+            return LegacyCommandExecutionResult(decision, frozen)
+        if decision.transition is None or decision.rejection is not None:
+            raise FencedCommitError("decision-invalid", "accepted decision is not closed")
+        proposed = json.loads(project_legacy_document(decision.transition.new_state))
+        frozen = freeze_json_value(proposed)
+        assert isinstance(frozen, FrozenJsonObject)
+        result = LegacyCommandExecutionResult(decision, frozen)
+        try:
+            self.save(
+                proposed,
+                backup=backup,
+                administrative=administrative,
+                aggregate_action=aggregate_action,
+            )
+        except AggregateIndexError as exc:
+            raise AggregateIndexError(str(exc), execution=result) from exc
+        return result
+
+    def _execute_request(
+        self,
+        request: ExecutionRequest,
+    ) -> RepositoryExecutionResult:
+        """Evaluate the common typed request while retaining the v4 layout."""
+        validate_execution_request(request)
+        if request.typed_command is None:
+            raise FencedCommitError("request-invalid", "typed command is required")
+        with self.transaction():
+            current = self.load()
+            if not isinstance(current, dict):
+                raise FencedCommitError("record-invalid", "legacy state is not an object")
+            source = json.dumps(
+                current,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            try:
+                state = decode_mission_state(source)
+            except (TypeError, ValueError, UnicodeError) as exc:
+                raise FencedCommitError(
+                    getattr(exc, "code", "record-invalid"),
+                    "legacy state cannot be decoded",
+                ) from exc
+            if state.identity.session_id not in {None, request.session_id}:
+                raise FencedCommitError("lineage-mismatch", "legacy session differs")
+            pending = admit_lease(
+                request,
+                state.lease,
+                self._guarded_call(self._clock),
+                self._lease_ttl_seconds,
+            )
+            admitted_state = replace(
+                state,
+                lease=pending.target,
+                snapshot_provenance=None,
+            )
+            decision = decide(admitted_state, request.typed_command)
+            if not isinstance(decision, Decision):
+                raise FencedCommitError("decision-invalid", "decision result type is invalid")
+            if not decision.accepted:
+                if decision.transition is not None or decision.rejection is None:
+                    raise FencedCommitError("decision-invalid", "rejected decision is not closed")
+                return RepositoryExecutionResult(False, None, decision.rejection.code)
+            if decision.transition is None or decision.rejection is not None:
+                raise FencedCommitError("decision-invalid", "accepted decision is not closed")
+            event_types = tuple(event.type for event in decision.events)
+            if event_types != request.audit.event_types:
+                raise FencedCommitError(
+                    "audit-binding-mismatch", "audit event categories differ"
+                )
+            transition = decision.transition
+            if request.blobs.blobs:
+                transition = bind_transition_effects(
+                    transition,
+                    tuple(blob.binding for blob in request.blobs.blobs),
+                )
+            target = transition.new_state
+            if target.lease != pending.target:
+                raise FencedCommitError(
+                    "pending-lease-mismatch", "transition does not contain the pending lease"
+                )
+            proposed = json.loads(project_legacy_document(target))
+            bindings = transition.effects
+            if type(bindings) is not tuple:
+                raise FencedCommitError(
+                    "effect-binding-invalid", "transition effects are not immutable"
+                )
+            expected = tuple(blob.binding for blob in request.blobs.blobs)
+            if bindings != expected:
+                raise FencedCommitError(
+                    "blob-binding-mismatch", "transition effects differ from captured blobs"
+                )
+            if bindings:
+                if self._effect_transaction is None:
+                    raise FencedCommitError(
+                        "effect-binding-invalid",
+                        "effectful typed request has no publication transaction",
+                    )
+                effects = tuple(
+                    EvidenceEffect(
+                        kind=blob.binding.kind,
+                        target=blob.binding.relative_path,
+                        content=blob.content,
+                        digest=blob.binding.digest,
+                        size=blob.binding.size,
+                    )
+                    for blob in request.blobs.blobs
+                )
+                closed = self.validate_effects(effects)
+                with self._guarded_context(self._effect_transaction, closed):
+                    self.save(proposed)
+            else:
+                self.save(proposed)
+            # The compatibility writer has no immutable commit/head record from
+            # which a v5 CommitResult could be derived.  Successful v4 writes
+            # therefore report acceptance with commit=None by design.
+            return RepositoryExecutionResult(True, None, None)
+
+    def save(
+        self,
+        state: dict,
+        *,
+        backup: bool = True,
+        administrative: bool = False,
+        aggregate_action: str | None = None,
+    ) -> None:
+        self._reject_reentrant_entry("save")
+        if aggregate_action not in {None, "add", "remove"}:
+            raise ValueError("unknown aggregate action")
+        if self._format_guard is not None:
+            self._guarded_call(self._format_guard)
+        prepared_intent = None
+        if self._aggregate_recover is not None:
+            self._guarded_call(self._aggregate_recover)
+        if aggregate_action is not None and self._aggregate_prepare is not None:
+            prepared_intent = self._guarded_call(
+                self._aggregate_prepare, aggregate_action
+            )
+        try:
+            if backup:
+                self._guarded_call(self._backup_state)
+            # Preserve the legacy writer call shape.  Several callers replace the
+            # writer with a one-argument fault injector; the administrative flag
+            # was only ever supplied for the routed-goal path.
+            if administrative:
+                self._guarded_call(self._write_state, state, administrative=True)
+            else:
+                self._guarded_call(self._write_state, state)
+        except BaseException:
+            if prepared_intent is not None and self._aggregate_recover is not None:
+                with contextlib.suppress(Exception):
+                    self._guarded_call(self._aggregate_recover)
+            raise
+        if aggregate_action is None:
+            return
+        if prepared_intent is not None:
+            try:
+                self._guarded_call(self._aggregate_finalize, prepared_intent)
+            except Exception as exc:
+                raise AggregateIndexError(str(exc)) from exc
+            return
+        # attribute を guard の第 1 引数へ直接渡す（dict 収集の alias を作ると
+        # 静的な境界検査が per-variable の追跡を要求されるため。Sol 7 巡目）。
+        try:
+            if aggregate_action == "add":
+                self._guarded_call(self._add_to_aggregate)
+            else:
+                self._guarded_call(self._remove_from_aggregate)
+        except Exception as exc:
+            raise AggregateIndexError(str(exc)) from exc
+
+    @staticmethod
+    def validate_effects(effects: Iterable[EvidenceEffect]) -> tuple[EvidenceEffect, ...]:
+        """Close every inert effect before the first public byte is emitted."""
+        if not isinstance(effects, tuple):
+            raise ValueError("effect-binding-invalid")
+        validated = tuple(validate_evidence_effect(effect) for effect in effects)
+        targets = [effect.target for effect in validated]
+        if len(targets) != len(set(targets)):
+            raise ValueError("effect-target-duplicated")
+        return validated
+
+    def execute_effects(
+        self,
+        decide: Callable[[dict], EvidenceDecision],
+        *,
+        effect_transaction: Callable[[tuple[EvidenceEffect, ...]], ContextManager[object]],
+        bind_published: Callable[[EvidenceDecision, object], None] | None = None,
+        backup: bool = True,
+    ) -> EvidenceDecision:
+        """Run one lease-first v4 evidence transaction with all-or-none effects.
+
+        ``load`` is intentionally called before the effect transaction starts;
+        callers bind the current fenced-lease check to that load.  The effect
+        context therefore sees no request after a rejected lease or decision,
+        and rolls published files back if binding or state save fails.
+        """
+        self._reject_reentrant_entry("execute_effects")
+        with self.transaction():
+            current = self.load()
+            with self._callback_guard():
+                decision = decide(copy.deepcopy(current))
+            if not isinstance(decision, EvidenceDecision) or not isinstance(decision.state, dict):
+                raise ValueError("effect-decision-invalid")
+            effects = self.validate_effects(decision.effects)
+            with self._guarded_context(effect_transaction, effects) as published:
+                if bind_published is not None:
+                    with self._callback_guard():
+                        bind_published(decision, published)
+                self.save(decision.state, backup=backup)
+            return decision
+
+    def execute_transition_effects(
+        self,
+        prepare: Callable[
+            [dict], PreparedArtifactOperation | PreparedTransitionOperation
+        ],
+        *,
+        effect_transaction: Callable[
+            [tuple[EvidenceEffect, ...]], ContextManager[object]
+        ]
+        | None = None,
+        verify_published: Callable[[tuple[EvidenceEffect, ...], object], None]
+        | None = None,
+        backup: bool = True,
+    ) -> tuple[
+        PreparedArtifactOperation | PreparedTransitionOperation,
+        LegacyCommandExecutionResult,
+    ]:
+        """Compatibility wrapper over the shared typed evidence core."""
+
+        def publish(_prepared, effects):
+            # 明示引数のみをここで包む。省略時の fallback（self._effect_transaction）
+            # は shared core の guarded 分岐に任せ、注入 callable の alias を作らない
+            # （#626 の境界検査は alias 経由の参照も検出する）。
+            assert effect_transaction is not None
+            return effect_transaction(effects)
+
+        def verify(_prepared, effects, published):
+            if verify_published is not None:
+                return verify_published(effects, published)
+            if published != effects:
+                raise ValueError("published-artifact-effect-binding-invalid")
+
+        return self.execute_evidence_transition_effects(
+            prepare,
+            operation_type=(PreparedArtifactOperation, PreparedTransitionOperation),
+            operation_error="transition-operation-invalid",
+            effect_transaction=publish if effect_transaction is not None else None,
+            verify_published=verify,
+            backup=backup,
+        )
+
+    def execute_evidence_transition_effects(
+        self,
+        prepare: Callable[[dict], object],
+        *,
+        operation_type: type = PreparedEvidenceOperation,
+        operation_error: str = "evidence-operation-invalid",
+        effect_transaction: Callable[[object, tuple[EvidenceEffect, ...]], ContextManager[object]]
+        | None = None,
+        verify_published: Callable[[object, tuple[EvidenceEffect, ...], object], None]
+        | None = None,
+        backup: bool = True,
+    ) -> tuple[object, LegacyCommandExecutionResult]:
+        """Prepare, decide, publish, verify, and project one typed evidence command."""
+        self._reject_reentrant_entry("execute_evidence_transition_effects")
+        with self.transaction():
+            current = self.load()
+            with self._callback_guard():
+                prepared = prepare(copy.deepcopy(current))
+            if not isinstance(prepared, operation_type):
+                raise ValueError(operation_error)
+            state = _legacy_command_state(current, prepared.command)
+            decision = decide(state, prepared.command)
+            if not isinstance(decision, Decision):
+                raise FencedCommitError(
+                    "decision-invalid", "decision result type is invalid"
+                )
+            if not decision.accepted:
+                if decision.transition is not None or decision.rejection is None:
+                    raise FencedCommitError(
+                        "decision-invalid", "rejected decision is not closed"
+                    )
+                frozen_current = freeze_json_value(current)
+                assert isinstance(frozen_current, FrozenJsonObject)
+                return prepared, LegacyCommandExecutionResult(
+                    decision, frozen_current
+                )
+            if decision.transition is None or decision.rejection is not None:
+                raise FencedCommitError(
+                    "decision-invalid", "accepted decision is not closed"
+                )
+            effects = self.validate_effects(prepared.effects)
+            transition = bind_transition_effects(decision.transition, effects)
+            bound_decision = replace(decision, transition=transition)
+            proposed = json.loads(project_legacy_document(transition.new_state))
+            frozen = freeze_json_value(proposed)
+            assert isinstance(frozen, FrozenJsonObject)
+            execution = LegacyCommandExecutionResult(bound_decision, frozen)
+            if effects:
+                if effect_transaction is None:
+                    if self._effect_transaction is None:
+                        raise ValueError("evidence-effect-transaction-missing")
+                    publication = self._guarded_context(
+                        self._effect_transaction, effects, prepared
+                    )
+                else:
+                    publication = self._guarded_context(
+                        effect_transaction, prepared, effects
+                    )
+                with publication as published:
+                    if verify_published is not None:
+                        with self._callback_guard():
+                            verify_published(prepared, effects, published)
+                    elif published != effects:
+                        raise ValueError("published-evidence-effect-binding-invalid")
+                    self.save(proposed, backup=backup)
+            else:
+                self.save(proposed, backup=backup)
+            return prepared, execution
+
+
+class V5CompatibilityRepository:
+    """Run extracted compatibility reducers on one format-pinned v5 UoW.
+
+    The reducer still receives the v4-shaped projection expected by the A1-A5
+    application seams, but publication is a single v5 generation.  No legacy
+    session file or backup is written.
+    """
+
+    def __init__(
+        self,
+        *,
+        repository: LocalFencedRepository,
+        session_id: str,
+        lease_owner_session_id: str,
+        presented_lease_id: str | None,
+        metadata: dict | None = None,
+        add_to_aggregate: Callable[[], None] | None = None,
+        remove_from_aggregate: Callable[[], None] | None = None,
+        aggregate_recover: Callable[[], None] | None = None,
+        aggregate_prepare: Callable[[str], object] | None = None,
+        aggregate_finalize: Callable[[object], None] | None = None,
+        effect_transaction: Callable[
+            [tuple[EvidenceEffect, ...], object], ContextManager[object]
+        ]
+        | None = None,
+        effect_publisher: Callable[
+            [object, tuple[EvidenceEffect, ...], object], ContextManager[object]
+        ]
+        | None = None,
+        effect_context: object = None,
+        lease_committed: Callable[[PendingLease, dict], None] | None = None,
+        format_guard: Callable[[], object] | None = None,
+        operation_id: str | None = None,
+        operation_command: object | None = None,
+        operation_command_type: str | None = None,
+    ) -> None:
+        self._repository = repository
+        self._session_id = session_id
+        self._lease_owner_session_id = lease_owner_session_id
+        self._presented_lease_id = presented_lease_id
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("metadata is not an object")
+        metadata_value = metadata or {}
+        if set(metadata_value) - _METADATA_FIELDS:
+            raise ValueError("metadata field is not closed")
+        try:
+            frozen_metadata = freeze_json_value(metadata_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("metadata is not strict JSON") from exc
+        if not isinstance(frozen_metadata, FrozenJsonObject):
+            raise ValueError("metadata is not an object")
+        self._metadata = frozen_metadata.thaw()
+        self._add_to_aggregate = add_to_aggregate
+        self._remove_from_aggregate = remove_from_aggregate
+        self._aggregate_recover = aggregate_recover
+        self._aggregate_prepare = aggregate_prepare
+        self._aggregate_finalize = aggregate_finalize
+        self._effect_publisher = effect_publisher
+        self._effect_context = effect_context
+        if effect_transaction is not None and effect_publisher is not None:
+            raise ValueError("effect transaction configuration is ambiguous")
+        if effect_publisher is not None:
+            self._effect_transaction = self._effect_transaction_from_publisher
+        else:
+            self._effect_transaction = effect_transaction
+        aggregate_callbacks = (
+            aggregate_recover,
+            aggregate_prepare,
+            aggregate_finalize,
+        )
+        if any(item is not None for item in aggregate_callbacks) and not all(
+            callable(item) for item in aggregate_callbacks
+        ):
+            raise ValueError("aggregate coordinator callbacks must be supplied together")
+        self._lease_committed = lease_committed
+        self._format_guard = format_guard
+        if (operation_id is None) != (operation_command is None):
+            raise ValueError("operation id and command must be supplied together")
+        if operation_id is not None and not operation_command_type:
+            raise ValueError("operation command type is required")
+        self._operation_id = operation_id
+        self._operation_command = operation_command
+        self._operation_command_type = operation_command_type
+        # #747 3a: the kernel command a typed evidence run prepared, so the
+        # admission can say which command is asking.  An ordinary CLI run
+        # supplies no caller operation identity, and its command then travels
+        # as a compatibility wrapper -- the audit is the one field that can
+        # carry the answer, and the intent digest does not fold it.
+        self._prepared_command_type: str | None = None
+        self._admitted: AdmittedSnapshot | None = None
+        self._observed_base: dict | None = None
+        self._replayed: OperationReplay | None = None
+        # #747 item 6: the request the replay was admitted under, kept for the
+        # historical read that follows inside the same transaction.
+        self._replay_request: ExecutionRequest | None = None
+        # #747 P2: the operation identity is fixed once per transaction, so a
+        # lookup before prepare and the admission after it name the same
+        # operation.  Minted here at most once per transaction.
+        self._transaction_operation_id: str | None = None
+        self._transaction_active = False
+        self._callback_depth = 0
+        self._loaded_document: dict | None = None
+
+    @contextlib.contextmanager
+    def transaction(self):
+        if self._transaction_active:
+            raise FencedCommitError("request-invalid", "nested v5 transaction")
+        self._transaction_active = True
+        # #747 P2: a configured id wins; otherwise one id for the whole
+        # transaction.  ``_observed_base`` is per transaction as well: a base
+        # read in an earlier transaction must not decide this one's replay.
+        self._observed_base = None
+        self._transaction_operation_id = (
+            self._operation_id or "compat:" + secrets.token_hex(16)
+        )
+        try:
+            yield
+        finally:
+            self._admitted = None
+            self._replayed = None
+            self._replay_request = None
+            self._loaded_document = None
+            self._observed_base = None
+            self._transaction_operation_id = None
+            self._transaction_active = False
+
+
+    # 外部から注入される callable の信頼境界（#632 / Sol 4 巡目）。分類の網羅は
+    # inventory テストが固定する。
+    GUARDED_INJECTED_CALLABLES = (
+        "_format_guard",
+        "_add_to_aggregate",
+        "_remove_from_aggregate",
+        "_aggregate_recover",
+        "_aggregate_prepare",
+        "_aggregate_finalize",
+        "_effect_publisher",
+        "_effect_transaction",
+        "_lease_committed",
+    )
+
+    @contextlib.contextmanager
+    def _callback_guard(self):
+        """Reject persistence entry points while a caller callback is running."""
+        self._callback_depth += 1
+        try:
+            yield
+        finally:
+            self._callback_depth -= 1
+
+    def _guarded_call(self, callback, *args, **kwargs):
+        """Run one injected callable inside the re-entrancy boundary."""
+        with self._callback_guard():
+            return callback(*args, **kwargs)
+
+    def _effect_transaction_from_publisher(
+        self, effects: tuple[EvidenceEffect, ...], prepared: object = None
+    ) -> ContextManager[object]:
+        """Bind the publisher's opaque context without hiding its guard contract."""
+        if self._effect_publisher is None:
+            raise ValueError("evidence-effect-transaction-missing")
+        return self._guarded_call(
+            self._effect_publisher, self._effect_context, effects, prepared
+        )
+
+    def _reject_reentrant_entry(self, operation: str) -> None:
+        if self._callback_depth:
+            raise FencedCommitError(
+                "request-invalid",
+                "%s is not allowed while a decision is being executed" % operation,
+            )
+
+    @contextlib.contextmanager
+    def _guarded_context(self, factory, *args):
+        """Run one injected publication context outside the commit boundary."""
+        with self._callback_guard():
+            manager = factory(*args)
+            manager_type = type(manager)
+            enter = manager_type.__enter__
+            exit_ = manager_type.__exit__
+            entered = enter(manager)
+        try:
+            yield entered
+        except BaseException as error:
+            with self._callback_guard():
+                suppressed = bool(
+                    exit_(manager, type(error), error, error.__traceback__)
+                )
+            if not suppressed:
+                raise
+        else:
+            with self._callback_guard():
+                exit_(manager, None, None, None)
+
+    def _request(self, *, blobs: VerifiedBlobSet | None = None) -> ExecutionRequest:
+        """Build the admission request, carrying the blobs the caller decided.
+
+        The blob set used to be fixed here, so no caller could supply one and
+        the evidence path had nothing to admit its output with.  It stays
+        optional because every other path genuinely has nothing to give.
+        """
+        operation_id = (
+            self._operation_id
+            or self._transaction_operation_id
+            or "compat:" + secrets.token_hex(16)
+        )
+        command = self._operation_command
+        if command is None:
+            command = decode_json_object(
+                json.dumps(
+                    {
+                        "schema": "mission-command-intent/1",
+                        "type": "compatibility-mutation",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        # The prepared command comes first: it is read from the command this
+        # run actually built, while the caller-supplied category is a label
+        # that a caller may leave at the compatibility default.
+        command_type = (
+            self._prepared_command_type
+            or self._operation_command_type
+            or "compatibility-mutation"
+        )
+        if blobs is None:
+            blobs = VerifiedBlobSet(())
+        return ExecutionRequest(
+            session_id=self._session_id,
+            lease_owner_session_id=self._lease_owner_session_id,
+            command=command,
+            blobs=blobs,
+            operation_id=operation_id,
+            intent_digest=compute_intent_digest(
+                session_id=self._session_id,
+                lease_owner_session_id=self._lease_owner_session_id,
+                operation_id=operation_id,
+                command=command,
+                blobs=blobs,
+            ),
+            presented_lease_id=self._presented_lease_id,
+            audit=AuditMetadata(command_type, ()),
+        )
+
+    @property
+    def operation_replayed(self) -> bool:
+        return self._replayed is not None
+
+    def _replayed_state_document(self) -> FrozenJsonObject:
+        """The committed state of the replayed operation, as a frozen document."""
+        replayed = self._replayed
+        request = self._replay_request
+        if replayed is None or request is None:
+            raise FencedCommitError("request-invalid", "no replay is admitted in this transaction")
+        # #747 P2: the commit is compared against the digest the operation
+        # record itself holds, in that record's generation, not against the
+        # requesting run's digest.
+        historical = self._repository.read_operation_state(
+            replayed.result,
+            session_id=request.session_id,
+            operation_id=request.operation_id,
+            intent_digest=replayed.intent_digest,
+            record_version=replayed.record_version,
+            materialization=replayed.materialization,
+        )
+        return decode_json_object(project_legacy_document(historical))
+
+    def read_snapshot(self) -> dict:
+        """Return the current document without admitting the transaction.
+
+        Prepare runs a caller-supplied callback that needs the current state.
+        Admitting first would run that callback after this session had taken
+        the lease, so a foreign lease could not be refused before caller code
+        ran.  Reading has no side effect, so it is not a one-shot and does not
+        consume the admission it precedes.
+        """
+        if not self._transaction_active:
+            raise FencedCommitError(
+                "request-invalid",
+                "v5 snapshot read requires an active transaction",
+            )
+        snapshot = self._repository.read(self._session_id)
+        # Keep what identifies the base this read saw.  Prepare runs against
+        # it, so the admission has to be able to check it is still the same
+        # one; discarding it here is what left the contract unenforced.
+        self._observed_base = {
+            "base_head_digest": snapshot.head_digest,
+            "base_generation": snapshot.head.generation,
+        }
+        return json.loads(project_legacy_document(snapshot.state))
+
+    def observed_base(self) -> dict:
+        """Return the base identifiers the last snapshot read observed."""
+        if self._observed_base is None:
+            raise FencedCommitError(
+                "request-invalid", "no snapshot has been read in this transaction"
+            )
+        return dict(self._observed_base)
+
+    def load(self, *, blobs: VerifiedBlobSet | None = None) -> dict:
+        if not self._transaction_active:
+            raise FencedCommitError(
+                "request-invalid",
+                "v5 load requires an active transaction",
+            )
+        if self._admitted is not None:
+            raise FencedCommitError("request-invalid", "v5 transaction already loaded")
+        if self._format_guard is not None:
+            self._guarded_call(self._format_guard)
+        request = self._request(blobs=blobs)
+        admitted = self._repository.begin(request)
+        if isinstance(admitted, OperationReplay):
+            self._assert_replay_materializes(request, admitted)
+            snapshot = self._repository.read(self._session_id)
+            self._replayed = admitted
+            self._replay_request = request
+            document = json.loads(project_legacy_document(snapshot.state))
+            self._loaded_document = copy.deepcopy(document)
+            return copy.deepcopy(document)
+        if admitted.base is None:
+            raise FencedCommitError("initial-state-required", "v5 head is missing")
+        self._admitted = admitted
+        admitted_state = replace(
+            admitted.base.state,
+            lease=admitted.pending_lease.target,
+            snapshot_provenance=None,
+        )
+        document = json.loads(project_legacy_document(admitted_state))
+        self._loaded_document = copy.deepcopy(document)
+        return copy.deepcopy(document)
+
+    def _assert_replay_materializes(
+        self, request: ExecutionRequest, replay: OperationReplay
+    ) -> None:
+        """D4 at admission (#747 P2): an immediate retry must produce the same bytes.
+
+        "Immediate" is decided by the base this transaction read: when it is
+        exactly the head the recorded operation produced, nothing intervened
+        and the generated bytes must agree; a difference is non-determinism
+        of prepare, not a moved base.  When the head has moved on, the record
+        stands as the answer (item 6) and nothing is compared.  A version-1
+        record carries nothing to compare, and a transaction that never read
+        a snapshot has no base to decide with.
+        """
+        observed = self._observed_base
+        materialization = replay.materialization
+        if (
+            observed is None
+            or replay.record_version < 2
+            or materialization is None
+        ):
+            return
+        if (
+            observed.get("base_head_digest") != replay.result.head_digest
+            or observed.get("base_generation") != replay.result.generation
+        ):
+            return
+        root = getattr(getattr(self._repository, "root", None), "name", None)
+        try:
+            prepared = {
+                "blobs_digest": generated_blobs_digest(
+                    binding_records(request.blobs),
+                    **({} if root is None else {"repository_root_name": root}),
+                )
+            }
+            assert_replay_materializes(recorded=materialization, prepared=prepared)
+        except EvidencePublicationError as exc:
+            raise FencedCommitError("replay-materialization-mismatch", exc.detail) from exc
+
+    def read(self, session_id: str):
+        return self._repository.read(session_id)
+
+    def execute(
+        self,
+        command,
+        *,
+        backup=True,
+        administrative=False,
+        aggregate_action=None,
+    ):
+        del backup
+        self._reject_reentrant_entry("execute")
+        if isinstance(command, ExecutionRequest):
+            return self._repository.execute(command)
+        try:
+            kernel_command_type(command)
+        except TypeError as exc:
+            raise FencedCommitError("request-invalid", "typed command is required") from exc
+        if not self._transaction_active or self._loaded_document is None:
+            raise FencedCommitError(
+                "request-invalid", "v5 command execute requires one active loaded transaction"
+            )
+        command = _command_with_missing_metadata(
+            command, self._loaded_document, self._metadata
+        )
+        state = _legacy_command_state(self._loaded_document, command)
+        decision = decide(state, command)
+        if not isinstance(decision, Decision):
+            raise FencedCommitError("decision-invalid", "decision result type is invalid")
+        if not decision.accepted:
+            if decision.transition is not None or decision.rejection is None:
+                raise FencedCommitError("decision-invalid", "rejected decision is not closed")
+            frozen = freeze_json_value(self._loaded_document)
+            assert isinstance(frozen, FrozenJsonObject)
+            return LegacyCommandExecutionResult(decision, frozen)
+        if decision.transition is None or decision.rejection is not None:
+            raise FencedCommitError("decision-invalid", "accepted decision is not closed")
+        proposed = json.loads(project_legacy_document(decision.transition.new_state))
+        frozen = freeze_json_value(proposed)
+        assert isinstance(frozen, FrozenJsonObject)
+        result = LegacyCommandExecutionResult(decision, frozen)
+        try:
+            self.save(
+                proposed,
+                administrative=administrative,
+                aggregate_action=aggregate_action,
+            )
+        except AggregateIndexError as exc:
+            raise AggregateIndexError(str(exc), execution=result) from exc
+        return result
+
+    def save(
+        self,
+        state: dict,
+        *,
+        backup: bool = True,
+        administrative: bool = False,
+        aggregate_action: str | None = None,
+    ) -> None:
+        del backup, administrative
+        self._reject_reentrant_entry("save")
+        if aggregate_action not in {None, "add", "remove"}:
+            raise ValueError("unknown aggregate action")
+        if self._format_guard is not None:
+            self._guarded_call(self._format_guard)
+        proposed = copy.deepcopy(state)
+        for key, value in self._metadata.items():
+            proposed.setdefault(key, copy.deepcopy(value))
+        if self._replayed is not None:
+            return
+        admitted = self._admitted
+        if admitted is None:
+            raise FencedCommitError("request-invalid", "v5 transaction was not loaded")
+        state_bytes = json.dumps(
+            proposed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        prepared_intent = None
+        if self._aggregate_recover is not None:
+            self._guarded_call(self._aggregate_recover)
+        if aggregate_action is not None and self._aggregate_prepare is not None:
+            prepared_intent = self._guarded_call(
+                self._aggregate_prepare, aggregate_action
+            )
+        try:
+            # The stage compares its effects against the blobs the admission
+            # carries, so an empty tuple is only right while the admission is
+            # empty too.  Taking them from the admission keeps the two sides
+            # from being decided in different places.
+            prepared = self._repository._stage_persistence(
+                admitted,
+                state_bytes=state_bytes,
+                effects=tuple(blob.binding for blob in admitted.request.blobs.blobs),
+            )
+            self._repository.commit(prepared, prepared.precondition)
+            self._admitted = None
+            if self._lease_committed is not None:
+                self._guarded_call(
+                    self._lease_committed, admitted.pending_lease, proposed
+                )
+        except BaseException:
+            if prepared_intent is not None and self._aggregate_recover is not None:
+                with contextlib.suppress(Exception):
+                    self._guarded_call(self._aggregate_recover)
+            raise
+        if aggregate_action is not None:
+            if prepared_intent is not None:
+                try:
+                    self._guarded_call(self._aggregate_finalize, prepared_intent)
+                except Exception as exc:
+                    raise AggregateIndexError(str(exc)) from exc
+                return
+            try:
+                if aggregate_action == "add":
+                    self._guarded_call(self._add_to_aggregate)
+                else:
+                    self._guarded_call(self._remove_from_aggregate)
+            except Exception as exc:
+                raise AggregateIndexError(str(exc)) from exc
+
+    def execute_transition_effects(
+        self,
+        prepare: Callable[
+            [dict], PreparedArtifactOperation | PreparedTransitionOperation
+        ],
+        *,
+        effect_transaction: object | None = None,
+        verify_published: object | None = None,
+        backup: bool = True,
+    ) -> tuple[
+        PreparedArtifactOperation | PreparedTransitionOperation,
+        LegacyCommandExecutionResult,
+    ]:
+        """Reuse the typed transition executor for effect-free v5 commands."""
+        return self.execute_evidence_transition_effects(
+            prepare,
+            operation_type=(PreparedArtifactOperation, PreparedTransitionOperation),
+            operation_error="transition-operation-invalid",
+            entry_label="execute_transition_effects",
+            result_error_detail="typed transition result is invalid",
+            effect_transaction=effect_transaction,
+            verify_published=verify_published,
+            backup=backup,
+        )
+
+    def execute_retry_safe_evidence_plan(self, plan):
+        """Run one plan, retrying while the base keeps moving under it.
+
+        The plan carries data only.  That is what makes the retry safe: an
+        arbitrary callback could observe the world again on the second
+        attempt, and this layer has no way to stop it.
+
+        The existing callback API stays as it is.  Every other evidence route
+        still uses it, and turning them all into plans at once is a larger
+        change than this one.
+        """
+        from mission_application.retry_plan import ContextManifestRetryPlan
+        from mission_persistence.retry_loop import run_with_base_retry
+
+        if callable(plan) or not isinstance(plan, ContextManifestRetryPlan):
+            raise EvidencePublicationError(
+                "retry-plan-invalid",
+                "this entry point takes a supported retry plan, not a callback",
+            )
+
+        # The operation identity is decided once, by the plan.  Leaving it to
+        # `_request` would mint a fresh id per attempt and turn one operation
+        # into three.  It is restored afterwards: the id belongs to the plan,
+        # and leaving it on the repository made the next operation inherit it.
+        previous_operation_id = self._operation_id
+
+        def _attempt(_number):
+            from mission_application.evidence import prepare_context_manifest
+
+            return self.execute_evidence_transition_effects(
+                lambda state: prepare_context_manifest(
+                    state,
+                    now=plan.now,
+                    iteration=(
+                        plan.iteration
+                        if plan.iteration is not None
+                        else state.get("iteration", 1)
+                    ),
+                    publication_path=plan.publication_path,
+                )
+            )
+
+        # Identity resolves in order of specificity: an id the plan carries,
+        # then one the caller configured on this repository (the callback
+        # route honoured it through `_request`, and a crash-replay relies on
+        # it staying stable), and only then the one the plan minted for
+        # itself.  Overwriting a configured id with the minted one turned every
+        # such replay into a new operation.
+        self._operation_id = (
+            plan.operation_id or previous_operation_id or plan.resolved_operation_id()
+        )
+        try:
+            return run_with_base_retry(plan, _attempt)
+        except EvidencePublicationError as exc:
+            # The CLI reports `EvidenceFailure` through a controlled exit;
+            # anything else surfaces as a crash.  Exhaustion is a refusal.
+            raise EvidenceFailure(exc.code, exc.detail) from exc
+        finally:
+            self._operation_id = previous_operation_id
+
+    def execute_evidence_transition_effects(
+        self,
+        prepare: Callable[[dict], object],
+        *,
+        operation_type: type = PreparedEvidenceOperation,
+        operation_error: str = "evidence-operation-invalid",
+        entry_label: str = "execute_evidence_transition_effects",
+        result_error_detail: str = "typed evidence result is invalid",
+        effect_transaction: object | None = None,
+        verify_published: object | None = None,
+        backup: bool = True,
+    ) -> tuple[object, LegacyCommandExecutionResult]:
+        """Prepare, publish, and commit one typed evidence command on v5."""
+        # entry_label and result_error_detail keep each delegating caller's
+        # diagnostics identical to the pre-delegation implementation.
+        self._reject_reentrant_entry(entry_label)
+        if effect_transaction is not None:
+            raise ValueError(
+                f"effect_transaction={effect_transaction!r} is not supported by the v5 executor"
+            )
+        if verify_published is not None:
+            raise ValueError(
+                f"verify_published={verify_published!r} is not supported by the v5 executor"
+            )
+        if backup is not True:
+            raise ValueError(f"backup={backup!r} is not supported by the v5 executor")
+        with self.transaction():
+            # A' order: read without admitting, prepare, then admit.  The
+            # admission used to happen inside ``load`` before prepare had run,
+            # so the request carried no blobs and the published files stayed
+            # outside the unit of work.  Reading first also keeps the caller's
+            # prepare callback behind the lease check rather than after it.
+            snapshot = self.read_snapshot()
+            with self._callback_guard():
+                prepared = prepare(copy.deepcopy(snapshot))
+            if not isinstance(prepared, operation_type):
+                raise ValueError(operation_error)
+            effects = self.validate_effects(prepared.effects)
+            # The admission carries what prepare produced.  This is the whole
+            # point of the reordering: with an empty blob set the published
+            # files stayed outside the generation the commit records.
+            # The root name is read defensively: not every repository this
+            # seam runs against exposes one, and a missing name means the
+            # default, not a failure.
+            root = getattr(
+                getattr(getattr(self, "_repository", None), "root", None), "name", None
+            )
+            blobs = blob_set_from_effects(
+                effects, prepared.command, repository_root_name=root
+            )
+            observed = self.observed_base()
+            # Say which command is asking before the admission reads the
+            # blobs: the repository authorises the in-root destination from
+            # this, and it has no other way to know.
+            try:
+                self._prepared_command_type = kernel_command_type(prepared.command)
+            except TypeError:
+                self._prepared_command_type = None
+            try:
+                current = self.load(blobs=blobs)
+            finally:
+                self._prepared_command_type = None
+            admitted = self._admitted
+            if admitted is not None:
+                # The audit travelled with the request, so it could have been
+                # any string had the request come from somewhere else.  Here
+                # both are in hand, so they are compared.
+                #
+                # A repository that does not model the audit is not made to:
+                # the comparison is a second opinion on this run's own request,
+                # not a requirement on what an admission has to carry.
+                declared = getattr(
+                    getattr(getattr(admitted, "request", None), "audit", None),
+                    "command_type",
+                    None,
+                )
+                actual = None
+                try:
+                    actual = kernel_command_type(prepared.command)
+                except TypeError:
+                    actual = None
+                if declared is not None and actual is not None and declared != actual:
+                    raise FencedCommitError(
+                        "audit-binding-mismatch",
+                        "the admitted audit names a different command",
+                    )
+            if admitted is not None and not base_agrees(
+                observed=observed,
+                admitted={
+                    "base_head_digest": admitted.precondition.base_head_digest,
+                    "base_generation": admitted.precondition.base_generation,
+                },
+            ):
+                # What prepare produced was built against a base that has since
+                # moved.  Publishing it would record content for a state nobody
+                # observed together.
+                raise EvidenceOrderError(
+                    BASE_MOVED_DETAIL + "; nothing was published"
+                )
+            if self.operation_replayed:
+                frozen = freeze_json_value(current)
+                assert isinstance(frozen, FrozenJsonObject)
+                # #747 item 6: read the state the replayed operation committed
+                # while the transaction still holds the replay identity; the
+                # transaction's exit clears it, so a later read is impossible.
+                # Done for every replay: the lineage check it performs is a
+                # fail-closed property, not an artifact-only convenience.
+                return prepared, LegacyCommandExecutionResult(
+                    None, frozen, replayed=True,
+                    replayed_state=self._replayed_state_document(),
+                )
+            # A replay commits nothing, so the effect claim is only worth
+            # checking on the path that is about to publish a generation.
+            state = _legacy_command_state(current, prepared.command)
+            decision = decide(state, prepared.command)
+            if not isinstance(decision, Decision):
+                raise FencedCommitError(
+                    "decision-invalid", "decision result type is invalid"
+                )
+            if not decision.accepted:
+                if decision.transition is not None or decision.rejection is None:
+                    raise FencedCommitError(
+                        "decision-invalid", "rejected decision is not closed"
+                    )
+                frozen_current = freeze_json_value(current)
+                assert isinstance(frozen_current, FrozenJsonObject)
+                return prepared, LegacyCommandExecutionResult(
+                    decision, frozen_current
+                )
+            if decision.transition is None or decision.rejection is not None:
+                raise FencedCommitError(
+                    "decision-invalid", "accepted decision is not closed"
+                )
+            if decision.transition is not None:
+                # The transition must hold the very bindings the blob set
+                # carries: ``stage`` compares the two for equality, so a
+                # separate object would be refused however equal it looked.
+                bind_transition_effects(
+                    decision.transition,
+                    tuple(blob.binding for blob in blobs.blobs) or effects,
+                )
+            if blobs.blobs:
+                # The unit of work owns the publish for anything it holds a
+                # blob for: the projection is applied at commit, so running
+                # the legacy publisher here would write the same file first
+                # and leave it outside the durable prepare on a crash.
+                #
+                # The branch turns on what the unit of work actually holds,
+                # not on which command this is.  Deciding by command type
+                # would leave nobody writing when an effect was not turned
+                # into a blob.
+                execution = self.execute(prepared.command)
+            elif effects:
+                if effect_transaction is None:
+                    if self._effect_transaction is None:
+                        raise ValueError("evidence-effect-transaction-missing")
+                    publication = self._guarded_context(
+                        self._effect_transaction, effects, prepared
+                    )
+                else:
+                    publication = self._guarded_context(
+                        effect_transaction, effects, prepared
+                    )
+                with publication as published:
+                    # The comparison itself can re-enter through a foreign
+                    # __ne__, so it runs under the same guard as the callback.
+                    with self._callback_guard():
+                        if verify_published is not None:
+                            verify_published(prepared, effects, published)
+                            binding_valid = True
+                        else:
+                            # bool() is evaluated here as well: a foreign
+                            # __eq__ or __bool__ must not re-enter persistence.
+                            binding_valid = bool(published == effects)
+                    if not binding_valid:
+                        raise ValueError("published-evidence-effect-binding-invalid")
+                    execution = self.execute(prepared.command)
+            else:
+                execution = self.execute(prepared.command)
+            if not isinstance(execution, LegacyCommandExecutionResult):
+                raise FencedCommitError("decision-invalid", result_error_detail)
+            return prepared, execution
+
+    validate_effects = staticmethod(LegacyV4Repository.validate_effects)

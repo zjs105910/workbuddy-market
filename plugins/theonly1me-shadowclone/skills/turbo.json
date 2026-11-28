@@ -1,0 +1,48 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "envMode": "loose",
+  "agentGuidance": false,
+  "globalDependencies": ["tsconfig.base.json", "bunfig.toml", "biome.json"],
+  "globalPassThroughEnv": [
+    "CODEX_HOME",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "LANG",
+    "PI_CODING_AGENT_DIR",
+    "SHADOWCLONE_INTERNAL_RUN",
+    "SHADOWCLONE_PI_SOCKET",
+    "SSH_AUTH_SOCK",
+    "TMPDIR"
+  ],
+  "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "typecheck": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/skills/**",
+        "$TURBO_ROOT$/preferences/**",
+        "$TURBO_ROOT$/plugins/**",
+        "$TURBO_ROOT$/.claude-plugin/**",
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/.github/release-please-config.json"
+      ]
+    },
+    "build": {
+      "dependsOn": ["transit"],
+      "outputs": ["dist/**"]
+    },
+    "stage": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": ["out/**"]
+    }
+  }
+}

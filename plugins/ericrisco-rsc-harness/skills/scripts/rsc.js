@@ -1,0 +1,1562 @@
+#!/usr/bin/env node
+import { loadManifest, skillsForProfile } from './lib/manifest.js';
+import { detectTarget, installedTargets, resolveTargets, TARGETS } from '../targets/index.js';
+import { detectRepo } from './detect-repo.js';
+import { rank } from './consult.js';
+import { expandRecommends, toOutcomes, hasOutcome } from './lib/recommend.js';
+import { applyInstall, listInstalled, listInstalledAgents, listInstalledCommands, uninstall, syncInstalled, purgeReport, collisions, ownSkillPaths, resetAgents } from './install-apply.js';
+import { isAbsolute, relative, sep } from 'node:path';
+import {
+  stackAgentNames, targetHasAgents, isValidAgentModel, agentModelSetting, targetInheritsByDefault,
+  effectiveAgentModel, writeAgentsDetailed, readDeveloperTier, AGENT_MODEL_INHERIT, AGENT_TARGET_IDS,
+} from '../targets/agents.js';
+import { doctor } from './doctor.js';
+import { ask, say, select, pickFrom, banner, confirm, isInteractive } from './lib/ui.js';
+import { refreshRegistry, registryStatus } from './lib/registry.js';
+import { audit, writeAuditReport, recordAuditBaseline } from './audit.js';
+import { DOMAINS } from './lib/domains.js';
+import { listBackups, restoreBackup, whereKept } from './lib/backups.js';
+import { runUpgrade } from './lib/upgrade.js';
+import { diagnose, repair } from './lib/repair.js';
+import { DEFAULT_SKILL_FLOOR, withDefaultSkillFloor } from './lib/default-skill-floor.js';
+import { RETIRED_SKILLS, replaceRetired } from './lib/retired-skills.js';
+import { readManifest, writeManifest } from './lib/manifest-file.js';
+import { versionReport } from './lib/versions.js';
+import { templateAssets, targetName } from './lib/tools-skeleton.js';
+import {
+  normalizeOnboarding, missingOnboardingFields, scanProject,
+  buildOnboardingPlan, decodeGoal, encodeGoal, identifyPlan, recommendDeferredComponents,
+} from './lib/onboarding.js';
+import { applyAcceptedOnboarding, verifyOnboarding, ensureHarnessSkeleton, harnessReadiness } from './lib/onboarding-apply.js';
+import { CONSTITUTION_PATH, constitutionIsDraft, ensureConstitutionDraft } from './lib/constitution-draft.js';
+
+const rawArgv = process.argv.slice(2);
+
+// `rsc --version` — answered before anything else runs, offline, and in a shape a bug report can
+// paste. Two numbers because there are two things: the CLI you just ran, and the harness this
+// project was built with. When they differ the project is running old hooks, and a fix that was
+// published may simply not be here yet.
+if (['--version', '-v', 'version'].includes(rawArgv[0])) {
+  const v = versionReport(process.cwd());
+  const lines = [`rsc ${v.cli}`];
+  if (v.installed) lines.push(`installed in this project: ${v.installed}${v.behind ? ' (behind)' : ''}`);
+  else lines.push('installed in this project: none');
+  if (v.behind) lines.push('This project runs older hooks than this CLI. To catch up, run here:', '  npx @ericrisco/rsc@latest');
+  process.stdout.write(`${lines.join('\n')}\n`);
+  process.exit(0);
+}
+const GENERAL_HELP = [
+  'Use: npx @ericrisco/rsc onboard | reassess | add <id...> | install --profile <p> | consult "<text>" | list | capabilities [--full|gap-log] | audit | registry refresh | doctor | sync | agent-model <target> <model|inherit|status> | agents [status|reset <name|--all>] | memory <on|off|status|save|resume|learn|metrics> | review consolidate [reports…] | sello <on|off|status|…> | worktrees [reap [path] [--confirm]] | backups | restore <id|latest> | upgrade | repair | uninstall <id...> | purge | help',
+  'Any command takes --target <claude|codex|cursor|copilot|gemini|…> (comma-separate for several)',
+  '   → without it, rsc uses the assistant already installed here; if two are, it asks instead of guessing.',
+].join('\n');
+const UNINSTALL_HELP = [
+  'Use: npx @ericrisco/rsc uninstall <id...> [--dry-run] [--target <assistant>]',
+  '  Removes the named skills or agents from this project.',
+  '  To remove everything rsc installed here, run: npx @ericrisco/rsc purge  (keeps 02-DOCS/ unless --with-docs)',
+].join('\n');
+const PURGE_HELP = [
+  'Use: npx @ericrisco/rsc purge [--dry-run] [--with-docs]',
+  '  Removes everything rsc installed in this project and reports what was removed, cleaned and kept.',
+  '  --dry-run shows the report without touching anything. 02-DOCS/ is kept unless --with-docs.',
+].join('\n');
+
+// Asking for help must never RUN the command. `uninstall --help` used to be read as an empty id list
+// and report "Removed: (nothing)"; `purge --help` would have purged. Answered before anything else.
+{
+  const helpAsked = rawArgv.some((a) => a === '--help' || a === '-h');
+  if (rawArgv[0] === 'help' || helpAsked) {
+    const about = rawArgv[0] === 'help' ? rawArgv[1] : rawArgv.find((a) => !a.startsWith('-'));
+    const text = about === 'uninstall' ? UNINSTALL_HELP : about === 'purge' ? PURGE_HELP : GENERAL_HELP;
+    process.stdout.write(`${text}\n`);
+    process.exit(0);
+  }
+}
+// `--accompaniment` stays listed although the dial is retired: old scripts and agents still pass it,
+// and its value must keep being skipped rather than read as a command or a skill id.
+const GLOBAL_VALUE_FLAGS = new Set([
+  '--target', '--technical-level', '--accompaniment', '--project-kind', '--goal', '--goal-base64', '--software-scope', '--workflow', '--accept-plan',
+]);
+const COMMANDS = new Set(['onboard', 'reassess', 'add', 'install', 'consult', 'catalog', 'audit', 'list', 'doctor', 'memory', 'knowledge-sync', 'git-permissions', 'agent-model', 'agents', 'main', 'isolation', 'sync', 'backups', 'restore', 'upgrade', 'registry', 'worktrees', 'capabilities', 'review', 'sello', 'repair', 'uninstall', 'purge']);
+function positionalTokens(input) {
+  const out = [];
+  for (let i = 0; i < input.length; i++) {
+    if (GLOBAL_VALUE_FLAGS.has(input[i]) || input[i] === '--profile' || input[i] === '--without') { i++; continue; }
+    if (input[i].startsWith('--')) continue;
+    out.push(input[i]);
+  }
+  return out;
+}
+const candidate = positionalTokens(rawArgv)[0];
+const cmd = candidate || undefined;
+const argv = cmd && COMMANDS.has(cmd)
+  ? [cmd, ...rawArgv.filter((_, index) => index !== rawArgv.indexOf(cmd))]
+  : rawArgv;
+
+const targetLabel = (id) => TARGETS.find((t) => t.id === id)?.label || id;
+
+function requestedIds(start = 1) {
+  const valueFlags = new Set(['--target', '--profile', '--without']);
+  const ids = [];
+  for (let i = start; i < argv.length; i++) {
+    if (valueFlags.has(argv[i])) { i++; continue; }
+    if (argv[i].startsWith('--')) continue;
+    ids.push(argv[i]);
+  }
+  return ids;
+}
+
+function onboardingInput(targets) {
+  const value = (name) => {
+    const v = flag(name);
+    return typeof v === 'string' && !v.startsWith('--') ? v : undefined;
+  };
+  return {
+    schemaVersion: 1,
+    technicalLevel: value('technical-level'),
+    projectKind: value('project-kind'),
+    goal: value('goal') || (value('goal-base64') ? decodeGoal(value('goal-base64')) : undefined),
+    softwareScope: value('software-scope'),
+    workflow: value('workflow'),
+    targets,
+  };
+}
+
+function onboardingRequired(raw, action = 'onboard') {
+  const payload = {
+    code: 'RSC_ONBOARDING_REQUIRED',
+    schemaVersion: 1,
+    missing: missingOnboardingFields(raw),
+    recovery: `Run npx @ericrisco/rsc@latest ${action} --technical-level <non-technical|mixed|technical> --project-kind <software|operations|research|content|mixed> --goal "<what you want>" --target <assistant> (software or mixed also: --software-scope <small|growing|complex> --workflow <main|branches>)`,
+    // Each value is the person's own answer, asked as a question. Never infer one from the code or
+    // from a nearby answer: a field test mapped «mixto» to technical and «growing» to small.
+    ask: {
+      'technical-level': 'Technical terms, or plain words with analogies? (non-technical | mixed | technical)',
+      'project-kind': 'What is this project? (software | operations | research | content | mixed)',
+      goal: 'What do you want this project to achieve?',
+      'software-scope': 'How much software work is expected? (small | growing | complex)',
+      workflow: 'Code changes: straight on main, or on branches closed with a pull request? (main | branches — recommended: branches only for complex, long-lived code)',
+      target: 'Which assistants? (claude, codex, gemini, cursor, opencode, …)',
+    },
+  };
+  console.error(`RSC_ONBOARDING_REQUIRED ${JSON.stringify(payload)}`);
+  process.exitCode = 2;
+}
+
+function hasDeclaredHarness(manifest = readManifest()) {
+  if (!manifest || manifest.version !== 1 || !Array.isArray(manifest.targets) || !manifest.targets.length
+    || !manifest.targets.every((target) => TARGETS.some((known) => known.id === target))
+    || !Array.isArray(manifest.skills) || !manifest.skills.length) return false;
+  const receipt = manifest.onboarding;
+  if (receipt) {
+    try {
+      const verified = receipt.schemaVersion === 1
+        && identifyPlan(receipt.plan) === receipt.acceptedPlanId
+        && verifyOnboarding(process.cwd(), receipt.plan, receipt.acceptedPlanId).length === 0;
+      if (verified) return true;
+      if (receipt.maintenanceDrift && installedTargets(process.cwd()).some((target) => manifest.targets.includes(target))) return true;
+    } catch { return false; }
+  }
+  // Backward compatibility is evidence-based: an actually installed pre-onboarding
+  // harness keeps its maintenance commands. A hand-written or merely committed
+  // declaration with no local state cannot bypass first contact.
+  return installedTargets(process.cwd()).some((target) => manifest.targets.includes(target));
+}
+
+function markMaintenanceDrift(action) {
+  const manifest = readManifest();
+  if (!manifest?.onboarding) return;
+  writeManifest(process.cwd(), {
+    ...manifest,
+    onboarding: {
+      ...manifest.onboarding,
+      maintenanceDrift: { action, recordedAt: new Date().toISOString(), requiresReassessment: true },
+    },
+  });
+}
+
+function renderPlan(plan, planId) {
+  say('RSC_ONBOARDING_PLAN');
+  say(`Plan id: ${planId}`);
+  say(`Project: ${plan.record.projectKind}${plan.record.softwareScope ? ` (${plan.record.softwareScope})` : ''}`);
+  say(`Technical level: ${plan.record.technicalLevel}`);
+  say(`Workflow: ${plan.record.workflow === 'branches' ? 'branches + pull request (the default branch is closed for the agent; it asks before each code change where it goes)' : 'straight on the default branch (no branch questions)'}`);
+  if (plan.record.softwareScope) say('AGENT: ask the person «¿Los cambios de código van directos a main, o con ramas y pull request?» (main | branches; branches is for long-lived, complex code). If their answer differs from the line above, generate the plan again with --workflow <answer>.');
+  say('AGENT: before accepting, read these values back to the person and check each one is what they answered.');
+  say(`Targets: ${plan.policy.targets.join(', ')}`);
+  say('Selected:');
+  for (const decision of plan.decisions.filter((d) => d.state === 'selected')) say(`  + ${decision.kind}/${decision.id} — ${decision.reason}`);
+  say('Deferred:');
+  for (const decision of plan.decisions.filter((d) => d.state === 'deferred')) say(`  - ${decision.kind}/${decision.id} — ${decision.reason} Reevaluate: ${decision.reevaluateWhen.join('; ')}`);
+  say('Excluded:');
+  for (const decision of plan.decisions.filter((d) => d.state === 'excluded')) say(`  × ${decision.kind}/${decision.id} — ${decision.reason}`);
+  say('Managed paths:');
+  for (const path of plan.governedPaths) say(`  ${path}`);
+  // The scaffolding is written once and then belongs to the person, so it is not a managed (digested)
+  // path — but it IS written by this plan, and a plan that does not show it is not the whole plan.
+  if ((plan.floorPaths || []).includes('01-TOOLS/_TEMPLATE/')) {
+    say('Scaffolded once (yours to edit; never overwritten; purge removes only untouched files):');
+    for (const path of ['01-TOOLS/.gitignore', ...templateAssets().map((a) => `01-TOOLS/_TEMPLATE/${targetName(a)}`)].sort()) say(`  ${path}`);
+  }
+  if (plan.replacesUserSkills?.length) {
+    say('Your own skills this plan replaces:');
+    for (const path of plan.replacesUserSkills) say(`  ! ${path} — already here and not put by rsc; the catalog skill of the same name takes its place, and yours is kept in .rsc/backups/`);
+    say('  To keep yours, rename its folder (for example review → review-own) and generate the plan again.');
+    say('  AGENT: name each of these to the user before accepting, and ask whether to replace or rename.');
+  }
+  if (plan.evidence.parentHarness) say(`Parent harness detected at ${plan.evidence.parentHarness}; it is not inherited by this plan.`);
+  // Pinned to the version that computed this plan. The id is a hash of the plan, and the plan
+  // depends on the catalog of the running version: `@latest` would accept it with whatever version
+  // npm resolves next, which answers RSC_PLAN_CHANGED the day a release lands in between.
+  const pieces = [
+    `npx @ericrisco/rsc@${versionReport(process.cwd()).cli} onboard`,
+    `--technical-level ${plan.record.technicalLevel}`,
+    `--project-kind ${plan.record.projectKind}`,
+    `--goal-base64 ${encodeGoal(plan.record.goal)}`,
+    ...(plan.record.softwareScope ? [`--software-scope ${plan.record.softwareScope}`] : []),
+    ...(plan.record.workflow ? [`--workflow ${plan.record.workflow}`] : []),
+    `--target ${plan.record.targets.join(',')}`,
+    `--accept-plan ${planId}`,
+  ];
+  say(`Accept exactly this plan: ${pieces.join(' ')}`);
+}
+
+async function runOnboarding(targets) {
+  const raw = onboardingInput(targets);
+  if (isInteractive() && missingOnboardingFields(raw).length) {
+    await banner(loadManifest().counts.skills);
+    say('Before rsc writes anything, it will learn how to help and show the exact harness plan.');
+    // One question about the person, not two: the register. `--technical-level mixed` is still
+    // accepted from the command line and reads like non-technical — with analogies.
+    raw.technicalLevel ||= await select('How should I talk to you?', [
+      { key: 'technical', label: 'Technical — assume I am comfortable with code and tooling' },
+      { key: 'non-technical', label: 'With analogies and plain words — explain terms, no jargon' },
+    ]);
+    raw.projectKind ||= await select('What are you building or running?', [
+      { key: 'software', label: 'Software or a website' },
+      { key: 'operations', label: 'Operations, a company or a process' },
+      { key: 'research', label: 'Research or a knowledge base' },
+      { key: 'content', label: 'Content or publishing' },
+      { key: 'mixed', label: 'A combination of these' },
+    ]);
+    raw.goal ||= await ask('What do you want this project to achieve? > ');
+    if ((raw.projectKind === 'software' || raw.projectKind === 'mixed') && !raw.softwareScope) {
+      raw.softwareScope = await select('How much software work is expected now?', [
+        { key: 'small', label: 'Small — one focused tool or a few simple changes' },
+        { key: 'growing', label: 'Growing — several related features or integrations' },
+        { key: 'complex', label: 'Complex — multiple systems, teams or critical behavior' },
+      ]);
+    }
+    if ((raw.projectKind === 'software' || raw.projectKind === 'mixed') && !raw.workflow) {
+      const branchesFirst = raw.softwareScope === 'complex';
+      const options = [
+        { key: 'main', label: 'Straight on main — research, content, scripts, simple projects' },
+        { key: 'branches', label: 'Branches + pull request — long-lived, complex code' },
+      ];
+      raw.workflow = await select('How should code changes land?', branchesFirst ? options.reverse() : options);
+    }
+    if (!raw.targets?.length) raw.targets = await selectAgents();
+    if (!raw.technicalLevel || !raw.projectKind || !raw.goal || !raw.targets?.length) {
+      say('Cancelled — nothing was touched.');
+      return;
+    }
+  }
+  if (missingOnboardingFields(raw).length) return onboardingRequired(raw);
+  let record;
+  try { record = normalizeOnboarding(raw); } catch (error) {
+    console.error(`RSC_ONBOARDING_INVALID: ${error.message}`);
+    process.exitCode = 2;
+    return;
+  }
+  const plan = buildOnboardingPlan(record, scanProject(process.cwd()));
+  // #275 — a folder where a catalog skill goes that rsc did not put is the user's own work. It goes
+  // INTO the plan, so the id they accept names it: an id made before that folder existed no longer
+  // applies, and accepting is never consent to something the plan did not show.
+  const replacesUserSkills = ownSkillPaths({ cwd: process.cwd(), targets: plan.policy.targets, skillIds: plan.policy.skills });
+  if (replacesUserSkills.length) plan.replacesUserSkills = replacesUserSkills;
+  const planId = identifyPlan(plan);
+  const accepted = flag('accept-plan');
+  if (!accepted) {
+    renderPlan(plan, planId);
+    if (!isInteractive()) return;
+    if (!(await confirm('Accept this exact harness plan?'))) return void say('Cancelled — nothing was touched.');
+  }
+  if (accepted && accepted !== planId) {
+    console.error(`RSC_PLAN_CHANGED: accepted ${accepted}, current plan is ${planId}. Regenerate the plan and ask the user to accept the new id.`);
+    process.exitCode = 3;
+    return;
+  }
+  try {
+    await applyAcceptedOnboarding({ cwd: process.cwd(), plan, planId });
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 4;
+    return;
+  }
+  // A partir de aquí la transacción YA confirmó, así que nada de lo que siga puede reportarse como
+  // fallo de aplicación: decirlo mentiría en la otra dirección, sobre una instalación que sí está
+  // aplicada. Montar el esqueleto va fuera de la transacción por eso mismo — dentro dejaría residuo
+  // si el apply revirtiera, porque el suelo no está en `governedPaths` y por tanto no se snapshotea.
+  try {
+    ensureHarnessSkeleton(process.cwd());
+  } catch (error) {
+    say(`RSC_SKELETON_FAILED ${error.message}`);
+  }
+  // La constitución, como BORRADOR, cuando el plan eligió SDD y no hay ninguna. Sin esto una
+  // instalación no interactiva de software complejo acababa INCOMPLETE: sólo una fase agéntica la
+  // escribía. Mismo sitio y mismo motivo que el esqueleto: fuera de la transacción, sin residuo.
+  try {
+    ensureConstitutionDraft(process.cwd(), plan);
+  } catch (error) {
+    say(`RSC_SKELETON_FAILED ${error.message}`);
+  }
+  // The audit cadence starts at install. Without a baseline the very first session after onboarding
+  // announced "a skill audit is due" about a set chosen minutes earlier. Never overwrites a real run.
+  try { recordAuditBaseline(process.cwd()); } catch { /* a missing baseline only means an early nudge */ }
+  for (const path of plan.replacesUserSkills || []) {
+    const kept = whereKept({ cwd: process.cwd(), relPath: path });
+    if (kept) say(`Your previous ${path} is kept in ${kept}`);
+  }
+  emitHarnessReadiness(plan, planId);
+}
+
+// La única línea que afirmaba que el arnés estaba listo lo hacía sin mirar si existía: «completado»
+// estaba definido contra lo que el plan prometió, no contra un suelo, así que un plan que prometía
+// poco se cumplía entero. Spec: 02-DOCS/wiki/sdd/specs/install-completion-floor.md
+function emitHarnessReadiness(plan, planId) {
+  const readiness = harnessReadiness(process.cwd(), plan);
+  if (readiness.ready) {
+    say(`RSC_ONBOARDING_READY ${planId}`);
+    // Listo no es «nada pendiente»: el borrador se nombra para que la cadena SDD lo complete primero.
+    if ((plan.floorPaths || []).includes(CONSTITUTION_PATH) && constitutionIsDraft(process.cwd())) {
+      say(`  Pending: ${CONSTITUTION_PATH} is a draft — complete it with the \`constitution\` phase before the first SDD feature.`);
+    }
+    return;
+  }
+  say(`RSC_ONBOARDING_INCOMPLETE ${planId}`);
+  for (const missing of safeLines(readiness.missing)) say(`  ${missing}`);
+  say(`  Next: ${readiness.action}`);
+}
+
+// Lo que se imprime aquí son órdenes que un agente va a leer y ejecutar, y parte del contenido sale
+// de `floorPaths`, que vive en `.rsc.json`: un fichero comiteado que un repo clonado puede traer
+// preparado. Se imprimía verbatim, con saltos de línea intactos, así que una entrada podía continuar
+// la numeración del instalador con un paso inventado e indistinguible del real.
+const ONE_LINE_LIMIT = 120;
+const FLOOR_LINES_LIMIT = 12;
+function safeLines(values) {
+  return (Array.isArray(values) ? values : []).slice(0, FLOOR_LINES_LIMIT).map((value) => String(value)
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, ONE_LINE_LIMIT));
+}
+
+function runReassessment() {
+  const manifest = readManifest();
+  const plan = manifest?.onboarding?.plan;
+  if (!plan) {
+    console.error('RSC_ONBOARDING_REQUIRED: no accepted onboarding receipt. Run npx @ericrisco/rsc@latest onboard');
+    process.exitCode = 2;
+    return;
+  }
+  const recommendations = recommendDeferredComponents(plan, scanProject(process.cwd()));
+  if (!recommendations.length) return void say('RSC_REASSESSMENT_NO_CHANGE');
+  say('RSC_REASSESSMENT_RECOMMENDED');
+  for (const item of recommendations) say(`  ${item.kind}/${item.id}: ${item.explanation}`);
+  const record = recommendations[0].suggestedRecord || plan.record;
+  say('Review a new plan; nothing has been installed:');
+  say([
+    'npx @ericrisco/rsc@latest onboard',
+    `--technical-level ${record.technicalLevel}`,
+    `--project-kind ${record.projectKind}`,
+    `--goal-base64 ${encodeGoal(record.goal)}`,
+    ...(record.softwareScope ? [`--software-scope ${record.softwareScope}`] : []),
+    ...(record.workflow ? [`--workflow ${record.workflow}`] : []),
+    `--target ${record.targets.join(',')}`,
+  ].join(' '));
+  say('Show the new plan and ask the user to accept its id before applying it.');
+}
+
+function editDistance(a, b) {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const above = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = above;
+    }
+  }
+  return prev[b.length];
+}
+
+function classifyRequested(ids) {
+  const skills = new Set(loadManifest().skills.map((skill) => skill.id));
+  const agents = new Set(stackAgentNames());
+  const out = { skills: [], agents: [], unknown: [] };
+  for (const id of ids) {
+    if (skills.has(id)) out.skills.push(id);
+    else if (agents.has(id)) out.agents.push(id);
+    else out.unknown.push(id);
+  }
+  return out;
+}
+
+function reportUnknown(ids) {
+  if (!ids.length) return false;
+  const candidates = [...loadManifest().skills.map((skill) => skill.id), ...stackAgentNames()];
+  for (const id of ids) {
+    const close = [...candidates].sort((a, b) => editDistance(id, a) - editDistance(id, b) || a.localeCompare(b)).slice(0, 3);
+    console.error(`rsc: unknown skill or agent '${id}'. Closest: ${close.join(', ')}`);
+  }
+  process.exitCode = 1;
+  return true;
+}
+
+// Commands that act ON one assistant. Only these stop when two are installed and no
+// flag says which: `purge` sweeps every target by design, and the catalog/consult
+// side barely touches one, so blocking them would be a regression, not a safeguard.
+const NEEDS_TARGET = new Set([
+  'onboard', 'add', 'install', 'list', 'doctor', 'sync', 'uninstall', 'capabilities', 'catalog', 'registry', 'agents',
+]);
+
+function flag(name) {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 ? (argv[i + 1] || true) : undefined;
+}
+
+// Remove everything rsc installed in this project (skills, hooks, .rsc/), across
+// every assistant. Keeps 02-DOCS/ unless --with-docs. `purge` / `uninstall --all`.
+async function runPurge(dryRun, withDocs) {
+  const cwd = process.cwd();
+  const report = await purgeReport({ cwd, withDocs, dryRun });
+  // Relative to the project: the report is read by a person, and every path is inside it.
+  const shown = (p) => {
+    const rel = relative(cwd, p);
+    return !rel || rel.startsWith('..') || isAbsolute(rel) ? p : rel.split(sep).join('/');
+  };
+  say(`${dryRun ? 'Would remove' : 'Removed'} ${report.removed.length} path(s):`);
+  for (const r of report.removed.map(shown).sort()) say(`  - ${r}`);
+  if (report.cleaned.length) {
+    say(`\n${dryRun ? 'Would clean' : 'Cleaned'} ${report.cleaned.length} file(s) — rsc's entries ${dryRun ? 'would be' : 'were'} taken out; ${dryRun ? 'each is deleted if nothing of yours remains' : 'the rest of the file is yours and stays'}:`);
+    for (const c of report.cleaned.map(shown).sort()) say(`  - ${c}`);
+  }
+  if (report.kept.length) {
+    say(`\nKept ${report.kept.length}:`);
+    for (const k of report.kept) say(`  - ${k.path} — ${k.reason}`);
+  }
+  // On a clone most of what purge deletes is committed. Deleting it here is local; committing the
+  // deletions uninstalls rsc for the whole team (team simulation D15). Said before anyone commits.
+  if (report.tracked?.length) {
+    const quote = (p) => (/^[\w./@+-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`);
+    say(`\nWARNING: ${report.tracked.length} of these file(s) are committed in git and ${dryRun ? 'would show' : 'now show'} as deleted or changed:`);
+    for (const f of report.tracked.slice(0, 12)) say(`  - ${f}`);
+    if (report.tracked.length > 12) say(`  … and ${report.tracked.length - 12} more`);
+    say('Committing these changes uninstalls rsc for the whole team, on their next pull. To remove rsc only on this machine, do not commit them.');
+    if (!dryRun) say(`To undo locally: git restore -- ${report.tracked.map(quote).join(' ')}`);
+    else say('To undo after a real purge: git restore -- <those files> (purge prints the exact command).');
+  }
+}
+
+async function recommendIds(query, { labeledOnly = false } = {}) {
+  const m = loadManifest();
+  const repo = detectRepo();
+  const ranked = query ? (await rank(m, query)).map((r) => r.id) : [];
+  let base = [...new Set(query ? [...ranked, ...repo] : repo)].filter((id) => id !== 'suggest');
+  if (labeledOnly) base = base.filter(hasOutcome);
+  base = base.slice(0, 4);
+  let out = expandRecommends(m, base).filter((id) => id !== 'suggest');
+  if (labeledOnly) out = out.filter(hasOutcome);
+  return out.slice(0, 6);
+}
+
+// Pick skills by browsing the domains, accumulating across rounds.
+// Returns the chosen skill ids, or null if the user backed out to the main menu.
+async function manualSelect() {
+  const chosen = new Set();
+  for (;;) {
+    const opts = DOMAINS.map((d, i) => ({ key: String(i), label: `${d.title} (${d.ids.length})` }));
+    opts.push({ key: 'done', label: chosen.size ? `✅ Finish & install (${chosen.size} chosen)` : 'Finish (install nothing)' });
+    opts.push({ key: 'back', label: '← Back to the main menu' });
+    const k = await select('\nWhich area do you want to install skills from?', opts);
+    if (k === 'back' || k === null) return null;          // esc or Back → main menu
+    if (k === 'done') break;
+    const d = DOMAINS[parseInt(k, 10)];
+    const picked = await pickFrom(`${d.title}:`, d.ids);  // null = esc → leave this area unchanged
+    if (picked) picked.forEach((id) => chosen.add(id));
+    say(`   → ${chosen.size} skills chosen so far.`);
+  }
+  return [...chosen];
+}
+
+// Ask which assistants to install into. The detected one is pre-labelled but
+// nothing is auto-applied — the user always confirms the set (one or many).
+async function selectAgents() {
+  const detected = detectTarget();
+  const items = TARGETS.map((t) => ({
+    id: t.id,
+    label: `${t.label}  (${t.hint})${t.id === detected ? '   ⟵ detected here' : ''}`,
+  }));
+  const chosen = await pickFrom('Which assistants do you want to install for? (space to toggle, a = all)', items);
+  if (chosen === null) return null;          // esc → back to the main menu
+  return chosen.length ? chosen : [detected];
+}
+
+// After installing, remind the user how to actually start — per IDE — and that
+// rsc keeps recommending skills as they work. The harness/SDD *init* runs INSIDE
+// the assistant (with the user present), never blindly from this CLI.
+function printNextSteps(targets, ids) {
+  const hasHarness = ids.includes('harness');
+  const hasSdd = ids.includes('sdd') || ids.includes('sdd-init');
+  const label = (id) => TARGETS.find((t) => t.id === id)?.label || id;
+  const openLine = `Open this project in: ${targets.map((t) => `**${label(t)}**`).join(' · ')}`;
+
+  say('\n────────────────────────────────────────────────────────');
+  say('👉 When you start working (these steps happen in your assistant, not here):');
+  let n = 1;
+  say(`   ${n++}. ${openLine}`);
+  if (hasHarness) {
+    say(`   ${n++}. Set up the second brain — tell it:`);
+    say('        "set up the harness for this project"');
+    say('      → creates 01-TOOLS/ (connections) + 02-DOCS/ (wiki) + CLAUDE.md/AGENTS.md.');
+  }
+  if (hasSdd) {
+    say(`   ${n++}. For a new feature, tell it:`);
+    say('        "sdd-init"   then   "I want <your idea>"');
+    say('      → walks you specify → plan → tasks → implement → verify → ship.');
+  }
+  say(`   ${n++}. From there, work in your own words. orient + suggest stay always-on; unslop is ready on request:`);
+  say('      orient talks in short stand-alone sentences (technical or with analogies) and draws a diagram if you do not follow;');
+  say('      suggest proposes missing skills; unslop rewrites text you send to other people.');
+  say('\n   Add something by hand anytime:    npx @ericrisco/rsc add <skill>');
+  say('   Browse the catalog / get picks:   npx @ericrisco/rsc consult "whatever you need"');
+  say('────────────────────────────────────────────────────────');
+  if (targets.includes('codex')) say('   Codex: review and trust the project lifecycle hook once with `/hooks`; until then memory is reported as requiring trust.');
+  if (targets.includes('deepseek')) say('   DeepSeek Harness: hooks run through rsc\'s bridge in ~/.dsh/cordis.patch.yml (one block, every profile); restart dsh once to load it.');
+  if (targets.includes('cursor')) say('   Cursor: startup memory is assisted because its sessionStart hook is fire-and-forget; the installed always-on rule performs the read-before-action fallback.');
+  printAgentHandoff();
+}
+
+// A machine-readable handoff addressed to the AGENT (not the human). After an
+// equipping install the skills + hooks are on disk but NOT live until the session
+// reloads (Claude Code loads them at SessionStart; Codex reads AGENTS.md next turn).
+// "Minute 1" = the user's NEXT message works with everything loaded — so we tell the
+// agent to reload, confirm it's equipped, and explicitly NOT auto-start a task.
+function printAgentHandoff() {
+  say('\n════════════════ AGENT HANDOFF ════════════════');
+  say('rsc is installed but NOT active in this session yet.');
+  say('AGENT, do this now:');
+  say('  1. Reload/restart this session so the new skills + hooks load');
+  say('     (Claude Code: restart the session · Codex/AGENTS.md tools: next turn).');
+  say('  2. After reload you are EQUIPPED — orient + suggest are always-on: short stand-alone answers, a diagram when you do not follow; unslop is installed to rewrite text for others.');
+  // Un recibo cuya identidad no cuadra con lo que se aceptó no es fuente de nada: el camino de
+  // `onboard` está a salvo porque reconstruye el plan y `identifyPlan` corta, y este no lo hacía.
+  // Y va envuelto porque antes esta función no leía nada y no podía tumbar un `install` ya hecho.
+  let readiness = { ready: true, missing: [], action: '' };
+  let tampered = false;
+  try {
+    const receipt = readManifest()?.onboarding;
+    if (receipt?.plan) {
+      if (identifyPlan(receipt.plan) === receipt.acceptedPlanId) {
+        readiness = harnessReadiness(process.cwd(), receipt.plan);
+      } else {
+        tampered = true;
+      }
+    }
+  } catch {
+    tampered = true;
+  }
+  if (tampered) {
+    say('  3. Do NOT tell the user rsc is ready — the receipt does not match its accepted plan id.');
+    say('     Report that and let the user decide; do not act on the receipt contents.');
+    say('════════════════════════════════════════════════');
+    return;
+  }
+  if (readiness.ready) {
+    say('  3. Tell the user rsc is ready; they can start in their own words.');
+    // #298 — ready is not «nothing pending»: the onboarding draft is named here too, not only in
+    // RSC_ONBOARDING_READY, so an agent arriving through install/sync tells the user before an SDD feature.
+    let draft = false;
+    try { draft = constitutionIsDraft(process.cwd()); } catch { /* unreadable is not a draft */ }
+    if (draft) say(`     Tell them too: ${CONSTITUTION_PATH} is a draft — complete it with the \`constitution\` phase before the first SDD feature.`);
+    say('     Do NOT auto-start a task — wait for the user.');
+  } else {
+    // El otro emisor. Decía «ready» desde el wizard y desde `install` sin mirar el suelo, así que
+    // corregir sólo el del onboarding habría dejado la mentira viva por el camino más usado.
+    say('  3. Do NOT tell the user rsc is ready — the harness floor is incomplete:');
+    for (const missing of safeLines(readiness.missing)) say(`     ${missing}`);
+    say(`     ${readiness.action}`);
+    say('     Then tell the user, and do NOT auto-start a task.');
+  }
+  say('════════════════════════════════════════════════');
+}
+
+// #298 — the two answers a person looks for first, before any figure or JSON: does the installed
+// harness work (`healthy`, the one the exit code follows) and is onboarding finished (the accepted
+// plan's floor plus drafts). Kept apart on purpose — readiness never changes health nor the exit code.
+const READINESS_LABEL = { ready: 'ready', pending: 'pending', incomplete: 'incomplete', 'not-onboarded': 'not onboarded' };
+function printDoctorHeadline(report) {
+  const o = report.onboarding || {};
+  say(`Harness health: ${report.healthy ? 'healthy' : 'unhealthy'}`);
+  say(`Onboarding readiness: ${READINESS_LABEL[o.status] || 'unknown'}`);
+  if (o.missing?.length) say(`Missing: ${safeLines(o.missing).join(', ')}`);
+  if (o.pending?.length) say(`Pending: ${safeLines(o.pending).map((p) => (p === CONSTITUTION_PATH ? `${p} (draft)` : p)).join(', ')}`);
+  if (o.action) say(`Next: ${o.action}`);
+}
+
+// What the harness costs in context before the user types anything. Printed ahead of the raw
+// health JSON because it is the part a human acts on: the figures say whether the harness is
+// paying its way, and the findings say what to do about it.
+const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
+
+function printContextBudget(b) {
+  if (!b) return;
+  say('\n════════════════ CONTEXT BUDGET ════════════════');
+  if (b.notApplicable.length) {
+    say(`  ${b.note}`);
+  } else {
+    say(`  Per session start : ${kb(b.sessionStartBytes)}   (always-on body, per wired scope; one-time and conditional banners not counted)`);
+    say(`  Per user turn     : ${kb(b.perTurnBytes)}`);
+  }
+  say(`  Skill descriptions: ${kb(b.descriptionsBytes)}   (${b.installedSkills} installed, always in context)`);
+  if (b.topContributors.bodies.length) {
+    const top = b.topContributors.bodies.map((t) => `${t.id} ${kb(t.bytes)}`).join(' · ');
+    say(`  Heaviest bodies   : ${top}`);
+  }
+  for (const s of b.scopes.filter((x) => x.wired)) {
+    say(`  Scope ${s.label.padEnd(8)}: ${s.root}${s.version ? ` (${s.version})` : ''}${s.status === 'unknown' ? ' — UNREADABLE' : ''}`);
+    // Copies are printed only when there is something to see. A line saying "×1" on every healthy
+    // box is noise, and noise is what gets a report skimmed instead of read.
+    const repeated = Object.entries(s.hookCounts || {})
+      .flatMap(([event, byHook]) => Object.entries(byHook).filter(([, n]) => n > 1).map(([id, n]) => `${event}/${id} ×${n}`));
+    if (repeated.length) say(`  Hook copies     : ${repeated.join(' · ')}`);
+  }
+  for (const f of b.findings) {
+    say(`\n  [${f.severity.toUpperCase()}] ${f.summary}`);
+    say(`  → ${f.action}`);
+  }
+  say('════════════════════════════════════════════════\n');
+}
+
+async function syncDeclared(targets, dry = false) {
+  for (const t of targets) {
+    const result = await syncInstalled({ target: t, dryRun: dry });
+    const verb = dry ? 'Would sync' : 'Synced';
+    say(`${verb} ${t}: ${result.synced.length ? result.synced.join(', ') : '(nothing to sync)'}`);
+    for (const k of result.keptAgents || []) say(`  ${k.message}`);
+    if (dry && result.paths?.length) {
+      for (const p of result.paths) say(`  ${p}`);
+    }
+  }
+}
+
+async function wizard(flagTargets, declaredTargets = []) {
+  const m = loadManifest();
+  await banner(m.counts.skills);
+  say('  the skill catalog for your assistant (Claude Code · Codex · Cursor · Gemini · Antigravity)\n');
+  // The base set is READ from the manifest, never enumerated here: a hand-kept list in a menu
+  // label is parallel accounting (P3), and it silently starts lying the day a skill's profiles
+  // change. The exact ids are printed before the install confirmation either way.
+  const baseIds = skillsForProfile(m, 'minimal');
+  // Navigable loop: esc / "← Back" / "no" all return here instead of quitting.
+  for (;;) {
+    const declared = readManifest();
+    const choice = await select('What do you want to do?', [
+      // First, because it is what someone who already has a harness came here for nine times in ten.
+      ...(declared ? [{ key: 'update', label: `Update this project — keeps its ${declared.skills.length} skills, refreshes hooks and content` }] : []),
+      { key: 'base', label: `Base install — the essentials (${baseIds.length} skills)` },
+      { key: 'sdd', label: 'Base + Spec-Driven Development — the specify → plan → implement → ship flow' },
+      { key: 'manual', label: 'Pick skills by hand, by area' },
+    ]);
+    if (choice === null) { say('\nOK — nothing installed. Anytime: npx @ericrisco/rsc'); return; }
+    if (choice === 'update') return syncDeclared(declaredTargets);
+
+    let ids;
+    if (choice === 'base') ids = baseIds;
+    else if (choice === 'sdd') ids = skillsForProfile(m, 'core');
+    else if (choice === 'manual') {
+      const picked = await manualSelect();
+      if (picked === null) continue;          // backed out → re-show this menu
+      ids = picked;
+    } else continue;
+
+    // The floor is always installed: compass + detector + human-language pass.
+    ids = withDefaultSkillFloor(ids);
+    if (ids.length <= DEFAULT_SKILL_FLOOR.length && choice !== 'base') {
+      say('\nNothing chosen — back to the menu.');
+      continue;
+    }
+
+    const targets = flagTargets || await selectAgents();
+    if (targets === null) continue;           // esc in the assistant picker → back to menu
+    say(`\nI'll install ${ids.length} skills for: ${targets.join(', ')}`);
+    say('   ' + ids.join(', '));
+    say('   (real files live once in .rsc/skills/ — each assistant just links to them)');
+    if (!(await confirm('Install it?'))) {
+      say('Cancelled — back to the menu.');
+      continue;                                // "no" / esc → back to menu, not quit
+    }
+    for (const target of targets) {
+      await applyInstall({ skillIds: ids, target });
+      say(`   ✅ ${target}`);
+    }
+    say(`\n✅ Installed ${ids.length} skills for ${targets.length} assistant(s).`);
+    printNextSteps(targets, ids);
+    return;
+  }
+}
+
+// Installing replaces whatever sits where a skill goes. If that is something the user
+// wrote by hand, it is the one thing an install can destroy — so it is named first and
+// they decide. Silence here is what made someone lose three months of work with a backup
+// they never knew to restore.
+async function guardCollisions(targets, ids) {
+  const hit = [...new Set(targets.flatMap((t) => collisions({ target: t, skillIds: ids })))];
+  if (!hit.length) return true;
+  say(`\n⚠️  These are already here and rsc did not put them — they look like your own work:`);
+  for (const id of hit) say(`     ${id}`);
+  say('   Installing would replace them. A backup is kept, but you would have to know to restore it.');
+  if (!isInteractive()) {
+    console.error('rsc: refusing to overwrite hand-written skills. Rename them, or re-run with --force.');
+    process.exitCode = 1;
+    return false;
+  }
+  return confirm('Replace them anyway?');
+}
+
+// The governed list that `sync` reads lives INSIDE the onboarding receipt, not in `manifest.skills`.
+// Updating one without the other is what deleted users' skills: `add` installed a skill and recorded
+// it in `manifest.skills`, `sync` then read a governed list that predated the install, and pruned
+// everything absent from it — recursively. Reported by a user, reproduced 2026-09-17: nine declared
+// skills against eight governed, visible in the manifest before sync was even run.
+//
+// So the two travel together, always. Any command that changes what is installed carries both, and
+// `applyInstall` persists the receipt rather than conserving the stale one.
+function governedBy(receipt, skills) {
+  // The receipt is hash-checked against the plan the user accepted, so its policy is NOT a place to
+  // record what happened afterwards: rewriting `plan.policy.skills` made every install report "the
+  // receipt does not match its accepted plan id", which is the integrity check doing its job.
+  //
+  // An earlier fix for the reported data loss did exactly that, and it was wrong — the right place
+  // was never `add`, it was `sync`, which treated the accepted plan as the only declaration and
+  // pruned everything absent from it. The policy still travels for hooks and agents; what must not
+  // travel is a rewritten receipt.
+  if (!receipt) return { policy: undefined, onboarding: undefined };
+  return { policy: { ...receipt.plan.policy, skills }, onboarding: undefined };
+}
+
+async function main() {
+  // One resolution for every command, doctor included: `doctor` used to resolve on its
+  // own and could report a different assistant than the one just installed into.
+  // --target accepts one id or a comma list (e.g. --target claude,codex).
+  const f = flag('target');
+  const resolved = resolveTargets({ flagValue: typeof f === 'string' ? f : undefined });
+  let targets = resolved.ids;
+  if (resolved.ambiguous && NEEDS_TARGET.has(cmd)) {
+    // Two installations, no flag: the whole point of this release is that we do NOT pick.
+    if (isInteractive()) {
+      const picked = await pickFrom(
+        'Two assistants are installed here. Which one do you mean?',
+        resolved.ambiguous.map((id) => ({ id, label: `${targetLabel(id)}  (${listInstalled({ target: id }).length} skills)` })),
+      );
+      if (!picked || !picked.length) return void say('Cancelled — nothing was touched.');
+      targets = picked;
+    } else {
+      console.error(
+        `rsc: ${resolved.ambiguous.join(' and ')} are both installed here, so I will not guess.\n` +
+        `     Say which one:  npx @ericrisco/rsc ${cmd} --target ${resolved.ambiguous[0]}`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
+  if (!targets.length) targets = [detectTarget()];
+  const target = targets[0];
+  switch (cmd) {
+    case undefined:
+      if (!hasDeclaredHarness()) return runOnboarding(f ? targets : []);
+      // A project that already has a harness: the bare command means "bring it up to date". It is
+      // what every update notice, the README and our own replies to users tell people to run, with
+      // the promise "that reinstalls and refreshes". It used to open the install wizard instead, and
+      // with no terminal — which is how an agent runs it when it obeys the notice — it did nothing.
+      // Restoring what the project already declared is not a decision, so there is nothing to ask.
+      if (!isInteractive()) return syncDeclared(targets);
+      return wizard(f ? targets : null, targets);
+    case 'onboard':
+      return runOnboarding(f ? targets : []);
+    case 'reassess':
+      return runReassessment();
+    case 'add': {
+      if (!hasDeclaredHarness()) return onboardingRequired(onboardingInput(targets));
+      // A retired id is not unknown: it has a successor, and old notes, scripts and agents still
+      // name it. Say so in one line and add the successor instead.
+      const asked = requestedIds();
+      for (const id of asked.filter((id) => Object.hasOwn(RETIRED_SKILLS, id))) {
+        say(`${id} was retired and replaced by ${RETIRED_SKILLS[id]} — adding ${RETIRED_SKILLS[id]}.`);
+      }
+      const requested = replaceRetired(asked);
+      const selected = classifyRequested(requested);
+      if (reportUnknown(selected.unknown)) return;
+      const ids = withDefaultSkillFloor(selected.skills);
+      if (!argv.includes('--force') && !(await guardCollisions(targets, ids))) return;
+      const currentManifest = readManifest();
+      const receipt = currentManifest?.onboarding;
+      const maintainedIds = receipt ? replaceRetired([...(currentManifest.skills || []), ...(receipt.plan.policy.skills || []), ...ids]).sort() : ids;
+      const { policy, onboarding } = governedBy(receipt, maintainedIds);
+      for (const t of targets) await applyInstall({ skillIds: maintainedIds, agentIds: selected.agents, target: t, policy, onboarding });
+      markMaintenanceDrift(`add ${requested.join(',')}`);
+      say(`✅ Installed for ${targets.join(', ')}: ${requested.join(', ')}`);
+      return void say('   ↻ Reload/restart your assistant so the new skill activates.');
+    }
+    case 'install': {
+      // Before the harness check on purpose: an obsolete flag is an argument error, and telling
+      // someone to run onboarding first when what they actually typed no longer exists sends them
+      // down the wrong path. There is one harness now, so there is nothing to choose. A flag that
+      // silently stops meaning what it used to is worse than one that is gone — a script would keep
+      // passing `--profile minimal` and keep believing it installed eight skills. Refused, with what
+      // replaced it (P6).
+      if (flag('profile')) {
+        say('⚠️  `--profile` no longer exists: rsc installs one harness — the always-on layer, the FTD lane and the SDD chain.');
+        say('    Everything else still arrives on demand: `npx @ericrisco/rsc add <id>`.');
+        return;
+      }
+      if (!hasDeclaredHarness()) return onboardingRequired(onboardingInput(targets));
+      const without = argv.filter((a, i) => argv[i - 1] === '--without');
+      let ids = skillsForProfile(loadManifest(), 'core');
+      ids = withDefaultSkillFloor(ids).filter((id) => !without.includes(id));
+      if (!argv.includes('--force') && !(await guardCollisions(targets, ids))) return;
+      const receipt = readManifest()?.onboarding;
+      // Deliberately NOT persisting the receipt here, unlike `add` above. `install --profile` REPLACES
+      // the set rather than adding to it, so writing it back would overwrite what the accepted plan
+      // declared with whatever profile was just named — measured: `install --profile minimal` after an
+      // SDD onboarding erased the SDD chain from the governed list, and the floor check then reported
+      // nothing pending. Unioning instead would leave `install` pruning to the profile while the
+      // governed list asked for more, and `sync` putting them back: churn.
+      // Now that profiles are gone this set IS the harness, so persisting it no longer overwrites a
+      // narrower accepted plan with a wider guess: they are the same set. The desync `add` had is
+      // therefore closed here too.
+      const { policy, onboarding } = governedBy(receipt, ids);
+      for (const t of targets) await applyInstall({ skillIds: ids, target: t, policy, onboarding });
+      markMaintenanceDrift('install harness');
+      say(`✅ Harness installed for ${targets.join(', ')} (${ids.length} skills)`);
+      printAgentHandoff();
+      return;
+    }
+    case 'consult': {
+      const ids = await recommendIds(argv.slice(1).join(' '));
+      if (!ids.length) return void say('(no recommendations)');
+      for (const o of toOutcomes(ids)) say(`${o.id}\t${o.label}`);
+      return;
+    }
+    case 'catalog': {
+      // Full catalog dump for SEMANTIC in-agent discovery: every skill as
+      // `id  <installed|available>  short description`, unranked. `consult` ranks
+      // lexically and returns nothing for natural-language / Catalan intent; `catalog`
+      // hands the agent the whole candidate set so the MODEL picks the best-fit missing
+      // skill by meaning. `--available` drops what's already installed for this target.
+      const m = loadManifest();
+      const installed = new Set(listInstalled({ target }));
+      const onlyAvailable = argv.includes('--available');
+      const short = (d) => {
+        const s = String(d || '').split('. ')[0].replace(/\s+/g, ' ').trim();
+        return s.length > 160 ? `${s.slice(0, 159)}…` : s;
+      };
+      for (const sk of [...m.skills].sort((a, b) => a.id.localeCompare(b.id))) {
+        const state = installed.has(sk.id) ? 'installed' : 'available';
+        if (onlyAvailable && state === 'installed') continue;
+        say(`${sk.id}\t${state}\t${short(sk.description)}`);
+      }
+      return;
+    }
+    case 'audit': {
+      const report = audit();
+      const written = writeAuditReport(report);
+      say(report.summary.headline);
+      for (const o of report.overlaps) say(`  ~ overlap: ${o.a} ↔ ${o.b} (${o.sharedTags.join(', ')})`);
+      for (const h of report.heavyDomains) say(`  ! heavy: ${h.domain} — ${h.count} skills`);
+      for (const n of report.noFootprint) say(`  ? no footprint: ${n.id} (${n.reason})`);
+      if (written.length) say(`\nReport: ${written[0]}`);
+      else say('\n(no harness wiki here — printed above only; run `harness` to keep a written record)');
+      return;
+    }
+    case 'list': {
+      const skills = listInstalled({ target }).map((id) => `skill\t${id}`);
+      const agents = listInstalledAgents({ target }).map((agent) => `agent\t${agent.id}\t${agent.source}${agent.skills.length ? `:${agent.skills.join(',')}` : ''}`);
+      const commands = listInstalledCommands({ target }).map((command) => `command\t${command.id}\t${command.path}`);
+      return void say([...skills, ...agents, ...commands].join('\n') || '(nothing installed)');
+    }
+    case 'doctor': {
+      const report = doctor({ target });
+      // #277 — an automation on top of rsc reads the exit code, not the prose.
+      if (!report.healthy) process.exitCode = 1;
+      if (argv.includes('--json')) return void say(JSON.stringify(report, null, 2));
+      printDoctorHeadline(report);
+      printContextBudget(report.contextBudget);
+      return void say(JSON.stringify({ ...report, contextBudget: undefined }, null, 2));
+    }
+    case 'main':
+    case 'isolation': {
+      // team-safe-default: the two switches a person asks the agent for in plain words —
+      // «desbloquea main» / «bloquea main», «no uses worktrees» / «usa worktrees». Both are PROJECT
+      // decisions (recorded in .rsc.json optOuts by the sync below) because one person's answer is
+      // the team's: the default branch is open or closed for every agent working on the repo.
+      const isMain = cmd === 'main';
+      const sub = argv[1] || 'status';
+      const root = process.cwd();
+      const { existsSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const marker = join(root, '.rsc', isMain ? '.no-trunk-guard' : '.no-worktree-isolation');
+      const OFF = isMain ? 'unlock' : 'off';
+      const ON = isMain ? 'lock' : 'on';
+      if (sub === OFF || sub === ON) {
+        mkdirSync(join(root, '.rsc'), { recursive: true });
+        if (sub === OFF) writeFileSync(marker, '');
+        else rmSync(marker, { force: true });
+        // main: lock and unlock are the two answers to «main or branches?», so each clears the other.
+        // A lock is a decision, not a return to guessing: closed even where nothing looks complex.
+        if (isMain) {
+          const lock = join(root, '.rsc', '.no-trunk-open');
+          if (sub === ON) writeFileSync(lock, ''); else rmSync(lock, { force: true });
+        }
+        for (const t of targets) await syncInstalled({ target: t, cwd: root });
+        say(isMain
+          ? (sub === OFF
+            ? 'rsc main unlock: the agent may now work on the default branch in this project. Commit .rsc.json so the team gets the same decision.'
+            : 'rsc main lock: branches and pull requests for this project — the default branch is closed for the agent, and it asks before each code change where it goes. Commit .rsc.json so the team gets the same decision.')
+          : (sub === OFF
+            ? 'rsc isolation off: sessions may share this folder without a worktree. Commit .rsc.json so the team gets the same decision.'
+            : 'rsc isolation on: with another session active in this folder, new work goes to .worktrees/<branch>/. Commit .rsc.json so the team gets the same decision.'));
+        return;
+      }
+      if (sub === 'status') {
+        if (isMain) {
+          const { trunkPolicy } = await import('../targets/trunk-policy.mjs');
+          return void say(JSON.stringify(trunkPolicy(root), null, 2));
+        }
+        const { otherActiveSessions } = await import('../targets/session-memory-core.mjs');
+        return void say(JSON.stringify({ isolation: existsSync(marker) ? 'off' : 'on', activeSessions: otherActiveSessions({ cwd: root }) }, null, 2));
+      }
+      say(`Use: npx @ericrisco/rsc ${cmd} ${ON}|${OFF}|status`);
+      process.exitCode = 2;
+      return;
+    }
+    case 'knowledge-sync': {
+      // On by default; the switch is a PROJECT decision (`.no-knowledge-sync`, recorded in `.rsc.json`
+      // optOuts by the sync below), because one person off means the team stops seeing their work.
+      const sub = argv[1] || 'status';
+      const root = process.cwd();
+      const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const marker = join(root, '.rsc', '.no-knowledge-sync');
+      if (sub === 'on' || sub === 'off') {
+        mkdirSync(join(root, '.rsc'), { recursive: true });
+        if (sub === 'off') writeFileSync(marker, '');
+        else rmSync(marker, { force: true });
+        for (const t of targets) await syncInstalled({ target: t, cwd: root });
+        say(sub === 'off'
+          ? 'rsc knowledge-sync off: 01-TOOLS/ and 02-DOCS/ no longer sync on their own in this project. Commit .rsc.json so the team gets the same decision.'
+          : 'rsc knowledge-sync on: 01-TOOLS/ and 02-DOCS/ go up when a turn ends and come down before each message. Commit .rsc.json so the team gets the same decision.');
+        return;
+      }
+      if (sub === 'status') {
+        const { knowledgeStatus } = await import('../targets/knowledge-sync.mjs');
+        return void say(JSON.stringify(knowledgeStatus(root), null, 2));
+      }
+      say('Use: npx @ericrisco/rsc knowledge-sync on|off|status');
+      process.exitCode = 2;
+      return;
+    }
+    case 'git-permissions': {
+      // On for a project installed from scratch: the agent commits, pushes and opens the PR without a
+      // prompt each time (a force-push still asks; the guards still apply). A PROJECT decision, saved as
+      // `gitPermissions` in `.rsc.json` so a clone gets the same; an older project starts undecided.
+      const sub = argv[1] || 'status';
+      const root = process.cwd();
+      const { readManifest, writeManifest } = await import('./lib/manifest-file.js');
+      const { gitPermissionsState, explainGitPermissions, GIT_PERMISSION_TARGETS } = await import('../targets/git-permissions.js');
+      if (sub === 'on' || sub === 'off') {
+        const current = readManifest(root);
+        if (!current) { say('No .rsc.json here: install the harness first (`npx @ericrisco/rsc onboard`).'); process.exitCode = 2; return; }
+        writeManifest(root, { ...current, gitPermissions: sub === 'on' });
+        for (const t of targets) await syncInstalled({ target: t, cwd: root });
+        // What rsc controls, what stops when off, and what is the assistant's own job (#298).
+        return void say(explainGitPermissions({ targets, cwd: root, mode: sub }));
+      }
+      if (sub === 'status') {
+        const declared = readManifest(root)?.gitPermissions;
+        if (!flag('json')) return void say(explainGitPermissions({ targets, cwd: root, mode: 'status', declared }));
+        const covered = targets.filter((t) => GIT_PERMISSION_TARGETS.includes(t));
+        const states = Object.fromEntries(covered.map((t) => [t, gitPermissionsState(t, root)]));
+        return void say(JSON.stringify({
+          declared: declared === undefined ? 'undecided' : declared,
+          wired: Object.fromEntries(covered.map((t) => [t, states[t].wired])),
+          format: Object.fromEntries(covered.map((t) => [t, states[t].format])),
+          notCovered: targets.filter((t) => !GIT_PERMISSION_TARGETS.includes(t)),
+        }, null, 2));
+      }
+      say('Use: npx @ericrisco/rsc git-permissions on|off|status [--json]');
+      process.exitCode = 2;
+      return;
+    }
+    case 'memory': {
+      const sub = argv[1] || 'status';
+      const root = process.cwd();
+      if (sub === 'on' || sub === 'off') {
+        const { readManifest, writeManifest } = await import('./lib/manifest-file.js');
+        const current = readManifest(root) || { version: 1, targets: targets || [], skills: [], agents: [], ownSkills: [], optOuts: [] };
+        writeManifest(root, { ...current, memory: sub === 'off' ? false : { enabled: true } });
+        for (const t of targets) await syncInstalled({ target: t, cwd: root });
+        say(`rsc memory ${sub}: ${sub === 'on' ? 'enabled' : 'disabled'} for this project (${targets.join(', ') || 'declaration only'}).`);
+        return;
+      }
+      const M = await import('../targets/session-memory-core.mjs');
+      if (sub === 'status') {
+        const reports = targets.map((t) => doctor({ target: t, cwd: root }).memory);
+        return void say(JSON.stringify(reports.length === 1 ? reports[0] : reports, null, 2));
+      }
+      if (sub === 'resume') {
+        const result = M.resume({ cwd: root });
+        return void say(argv.includes('--json') ? JSON.stringify(result, null, 2) : (result.context || '(no local continuation for this branch/worktree)'));
+      }
+      if (sub === 'save') {
+        const result = M.capture({
+          cwd: root,
+          sessionId: typeof flag('session') === 'string' ? flag('session') : `manual-${Date.now()}`,
+          target: target || 'manual',
+          event: 'save',
+          force: true,
+        });
+        return void say(JSON.stringify(result, null, 2));
+      }
+      if (sub === 'learn') {
+        const value = (name) => { const v = flag(name); return typeof v === 'string' && !v.startsWith('--') ? v : undefined; };
+        const result = M.learn({
+          cwd: root,
+          text: value('text'),
+          evidence: value('evidence'),
+          scope: value('scope') || 'project',
+          confidence: value('confidence'),
+          approved: argv.includes('--approve'),
+        });
+        if (!result.saved) process.exitCode = 1;
+        return void say(JSON.stringify(result, null, 2));
+      }
+      if (sub === 'metrics') return void say(JSON.stringify(M.metricsSummary({ cwd: root }), null, 2));
+      say('Use: npx @ericrisco/rsc memory on|off|status|save [--session id]|resume [--json]|learn --text "…" --evidence "…" --scope project|global --confidence 0..1 --approve|metrics');
+      process.exitCode = 1;
+      return;
+    }
+    case 'agent-model': {
+      // #298 — which model the generated agents carry: the session's (`inherit`, OpenCode's default)
+      // or one the project pins. A PROJECT decision, saved as `agentModels` in .rsc.json, so a clone
+      // renders the same agents; the files of that target are re-rendered at once.
+      const root = process.cwd();
+      const t = argv[1];
+      const value = argv[2] || 'status';
+      const describe = (id) => {
+        const setting = agentModelSetting(root, id);
+        const effective = effectiveAgentModel(id, root);
+        return {
+          target: id,
+          declared: setting || (targetInheritsByDefault(id) ? 'default (inherit)' : 'default (tier model)'),
+          effective: effective || 'inherit — the agent uses the session model',
+        };
+      };
+      if (!t || t === 'status') {
+        return void say(JSON.stringify(targets.filter(targetHasAgents).map(describe), null, 2));
+      }
+      if (!targetHasAgents(t)) {
+        console.error(`rsc: ${t} has no file-based agents. Targets with agents: ${AGENT_TARGET_IDS.join(', ')}`);
+        process.exitCode = 2;
+        return;
+      }
+      if (value === 'status') return void say(JSON.stringify(describe(t), null, 2));
+      if (!isValidAgentModel(value)) {
+        console.error(`rsc: '${value}' is not a model id (letters, digits and . _ : / @ + - only), nor 'inherit'.\nUse: npx @ericrisco/rsc agent-model <target> <model|inherit|status>`);
+        process.exitCode = 2;
+        return;
+      }
+      const current = readManifest(root);
+      if (!current) { say('No .rsc.json here: install the harness first (`npx @ericrisco/rsc onboard`).'); process.exitCode = 2; return; }
+      const next = { ...(current.agentModels || {}) };
+      // `inherit` on a target whose default is inherit stores nothing: the manifest stays as small as the decision.
+      if (value === AGENT_MODEL_INHERIT && targetInheritsByDefault(t)) delete next[t];
+      else next[t] = value;
+      writeManifest(root, { ...current, agentModels: Object.keys(next).length ? next : undefined });
+      const { targetPaths: pathsOf } = await import('../targets/index.js');
+      const { readState } = await import('./lib/state.js');
+      const installedAgents = readState(pathsOf(t, undefined, root).stateFile).agents || [];
+      const { written, kept } = writeAgentsDetailed(t, root, readDeveloperTier(root), installedAgents);
+      say(value === AGENT_MODEL_INHERIT
+        ? `rsc agent-model ${t} inherit: the agents carry no model and use the session's.`
+        : `rsc agent-model ${t} ${value}: the agents are pinned to ${value}.`);
+      say(`  Re-rendered ${written.length} agent file(s). Commit .rsc.json so the team gets the same decision.`);
+      for (const k of kept) say(`  ${k.message}`);
+      return;
+    }
+    case 'agents': {
+      const sub = argv[1] || 'status';
+      const root = process.cwd();
+      if (sub === 'reset') {
+        const all = argv.includes('--all');
+        const names = requestedIds(2);
+        if (!all && !names.length) {
+          console.error('Use: npx @ericrisco/rsc agents reset <name...|--all> [--target <assistant>]');
+          process.exitCode = 2;
+          return;
+        }
+        const { targetPaths: pathsOf } = await import('../targets/index.js');
+        const { readState } = await import('./lib/state.js');
+        const withAgents = targets.filter(targetHasAgents);
+        let done = 0;
+        for (const t of withAgents) {
+          const installed = readState(pathsOf(t, undefined, root).stateFile).agents || [];
+          const mine = all ? [] : names.filter((n) => installed.includes(n));
+          if (!all && !mine.length) continue;
+          const out = resetAgents({ target: t, cwd: root, names: mine, all });
+          done += out.reset.length;
+          if (out.reset.length) {
+            say(`Reset ${t}: ${out.reset.join(', ')} — rsc's version is back.`);
+            if (out.backup) say(`  Your previous files are kept in ${out.backup}/files/ (\`rsc restore\` lists the snapshot).`);
+          }
+        }
+        if (!all && !done) {
+          console.error(`rsc: ${names.join(', ')}: not an agent rsc installed here (${withAgents.join(', ') || 'no target with agents'}).`);
+          process.exitCode = 1;
+        }
+        return;
+      }
+      if (sub === 'status') {
+        const { targetPaths: pathsOf } = await import('../targets/index.js');
+        const { readState } = await import('./lib/state.js');
+        return void say(JSON.stringify(targets.filter(targetHasAgents).map((t) => {
+          const state = readState(pathsOf(t, undefined, root).stateFile);
+          return { target: t, agents: state.agents || [], editedByYou: (state.agentsKept || []).map((k) => k.name) };
+        }), null, 2));
+      }
+      say('Use: npx @ericrisco/rsc agents status | agents reset <name...|--all>');
+      process.exitCode = 2;
+      return;
+    }
+    case 'sync':
+      return syncDeclared(targets, argv.includes('--dry-run'));
+    case 'backups': {
+      const backups = listBackups();
+      if (!backups.length) return void say('(no backups)');
+      for (const b of backups) {
+        say(`${b.id}\t${b.operation}\t${b.target}\t${b.entries.length} files\t${b.createdAt}`);
+      }
+      return;
+    }
+    case 'restore': {
+      const dry = argv.includes('--dry-run');
+      const id = argv.slice(1).find((a) => !a.startsWith('--'));
+      const result = restoreBackup({ id, dryRun: dry });
+      say(`${dry ? 'Would restore' : 'Restored'} ${result.snapshot.id}`);
+      for (const p of result.changed) say(`  ${p}`);
+      return;
+    }
+    case 'upgrade': {
+      const dry = argv.includes('--dry-run');
+      const global = argv.includes('--global');
+      const result = runUpgrade({ targets, dryRun: dry, global });
+      if (result.ran) say('Upgraded global @ericrisco/rsc. Restart your shell if needed.');
+      else say(`${dry ? 'Would run' : 'Upgrade guide'}: ${result.plan.installCommand}`);
+      say(`After upgrade: ${result.plan.syncCommand}`);
+      return;
+    }
+    case 'registry': {
+      const sub = argv[1];
+      if (sub === 'refresh') {
+        const registry = refreshRegistry({ target });
+        say(`✅ Registry updated: .rsc/skill-registry.md (${registry.counts.skills} skills)`);
+        return;
+      }
+      if (sub === 'status') {
+        say(JSON.stringify(registryStatus(), null, 2));
+        return;
+      }
+      say('Use: npx @ericrisco/rsc registry refresh | registry status');
+      return;
+    }
+    case 'review': {
+      // `review consolidate` — the deterministic half of the refuter panel (P1): the three lenses
+      // often report one defect three ways, so grouping happens here, by location and evidence, and
+      // only the unique serious findings go on to `finding-verifier`, which is judgement.
+      const USE = 'Use: npx @ericrisco/rsc review consolidate [report.md|findings.json ...] [--json] [--window <lines>]\n  Without files it reads stdin. Each lens report carries its findings in ```json findings blocks.';
+      if (argv[1] !== 'consolidate') { say(USE); if (argv[1]) process.exitCode = 1; return; }
+      const { readFileSync } = await import('node:fs');
+      const R = await import('./lib/review-findings.js');
+      const w = flag('window');
+      const window = w === undefined ? R.DEFAULT_WINDOW : Number(w);
+      if (!Number.isInteger(window) || window < 0) { say(`rsc: --window takes a whole number of lines, got '${w}'.\n${USE}`); process.exitCode = 1; return; }
+      const rest = argv.slice(2);
+      const files = rest.filter((a, i) => !a.startsWith('--') && rest[i - 1] !== '--window');
+      const sources = [];
+      try {
+        if (files.length) for (const f of files) sources.push([readFileSync(f, 'utf8'), f]);
+        else if (!process.stdin.isTTY) sources.push([readFileSync(0, 'utf8'), 'stdin']);
+      } catch (e) { say(`rsc: cannot read ${e.path || 'stdin'} (${e.code || e.message}).`); process.exitCode = 1; return; }
+      if (!sources.length) { say(USE); process.exitCode = 1; return; }
+      const all = []; const errors = [];
+      for (const [raw, src] of sources) {
+        const parsed = R.parseFindings(raw, src);
+        all.push(...parsed.findings); errors.push(...parsed.errors);
+      }
+      const result = R.consolidate(all, { window });
+      if (argv.includes('--json')) say(JSON.stringify({ ...result, errors }, null, 2));
+      else say(R.renderConsolidation(result, errors));
+      // An unreadable block is a finding that may have been lost: say it with the exit code too.
+      if (errors.length) process.exitCode = 1;
+      return;
+    }
+    case 'worktrees': {
+      // The deterministic half of "the cleanup is the default". `ship` and the `worktrees` skill call
+      // this instead of judging by eye, which is what turns a rule that was only ever written down
+      // into one that actually runs.
+      const W = await import('../targets/worktree-reaper.mjs');
+      // From inside a worktree, home is the main checkout — you cannot remove the floor you stand on.
+      const root = W.resolveMainRoot(process.cwd());
+      const sub = argv[1];
+
+      if (!W.isCleanupEnabled(root)) {
+        say(`worktree cleanup is off for this project (.rsc/${W.OPT_OUT}). Delete that file to turn it back on.`);
+        return;
+      }
+
+      const candidates = W.classifyWorktrees(root).filter((c) => c.verdict !== 'skip');
+
+      if (sub === 'reap') {
+        const one = argv[2] && !argv[2].startsWith('--') ? argv[2] : undefined;
+        // Naming a path SELECTS it; it does not accept the risk of removing it. Conflating the two
+        // meant the strongest refusal in the module — "holds files that are in no commit" — was
+        // defeated by an argument the sweep itself told the agent to type.
+        const confirmed = argv.includes('--confirm');
+        const targets = one ? [one] : candidates.filter((c) => c.verdict === 'safe').map((c) => c.path);
+        // The bulk reap also deletes plain local branches that have landed (`branch -d`, never -D):
+        // the worktree is not the only thing a merge leaves behind (E2E defect 14).
+        const reapBranches = () => {
+          if (one) return 0;
+          const { deleted } = W.reapMergedBranches(root);
+          for (const b of deleted) say(`✅ deleted merged branch ${b}`);
+          return deleted.length;
+        };
+        if (!targets.length) { if (!reapBranches()) say('nothing to clean up.'); return; }
+        for (const t of targets) {
+          const out = W.reapWorktree(root, t, { confirmed });
+          if (out.removed) {
+            say(`✅ removed ${out.path}`);
+            if (out.branchKept) say(`   branch ${out.branch} kept — git will not delete it safely, and while it exists the commits are recoverable.`);
+          } else {
+            say(`⏸  kept ${t} — ${out.reason}`);
+            if (one && !confirmed) say('   If that is acceptable and you want it gone anyway: add --confirm');
+            process.exitCode = 1;
+          }
+        }
+        reapBranches();
+        return;
+      }
+
+      if (!candidates.length) { say('No worktrees to clean up.'); return; }
+      say(`${candidates.length} worktree(s) whose work has landed:`);
+      for (const c of candidates) say(W.describe(c));
+      say('');
+      say('Remove the safe ones:  npx @ericrisco/rsc worktrees reap');
+      say('Remove one by name:    npx @ericrisco/rsc worktrees reap <path> [--confirm]');
+      return;
+    }
+    case 'capabilities': {
+      // "What do I already have that solves this?" — the deterministic step the
+      // automation-gap rule requires BEFORE anyone proposes creating a skill or an
+      // agent. Without this command that rule would rest on the model's memory.
+      const { capabilities, appendGap, countGaps } = await import('./lib/capabilities.js');
+      const { resolveRoot } = await import('../targets/sello.mjs');
+      // A string flag must not swallow the next FLAG as its value (`flag()` returns
+      // the following token blindly), or `--procedure --verdict x` records "--verdict".
+      const str = (name) => {
+        const v = flag(name);
+        return typeof v === 'string' && !v.startsWith('--') ? v : undefined;
+      };
+      // Subcommand by presence, not by position: `capabilities --target claude gap-log`
+      // used to fall through and silently record nothing.
+      if (argv.includes('gap-log')) {
+        // The writer and doctor must agree on the root, or a run from a subdirectory
+        // writes a log nothing counts.
+        const root = resolveRoot(process.cwd());
+        try {
+          const p = appendGap({ procedure: str('procedure'), verdict: str('verdict'), cwd: root });
+          say(`📝 recorded (${countGaps(root)} total): ${p}`);
+        } catch (e) { say(e.message); process.exitCode = 1; }
+        return;
+      }
+      // `capabilities repetition` — read the ledger nobody was interrogating. It lives here and not in
+      // a new command because the enumeration and the writing already live here, and splitting them
+      // across two places is the parallel bookkeeping P3 forbids.
+      if (argv.includes('repetition')) {
+        const root = resolveRoot(process.cwd());
+        const { repetitionReport } = await import('./lib/repetition-report.js');
+        const rep = repetitionReport({ cwd: root });
+        if (argv.includes('--json')) return void say(JSON.stringify(rep, null, 2));
+        if (rep.blocked) { say(`⚠️  ${rep.reason}`); process.exitCode = 1; return; }
+        if (!rep.offer) { say(`# nada que ofrecer — ${rep.reason} (${rep.entries} entradas leídas)`); return; }
+        const o = rep.offer;
+        const where = o.repos.length ? ` · ${o.repos.map((r) => `${r.repo}×${r.n}`).join(', ')}` : '';
+        say(`🔁 «${o.procedure}» visto ${o.seen} veces (${o.dates.join(', ')})${where}`);
+        say(`   → ${o.kind}: ${o.why}`);
+        say(`   registra la decisión con: rsc capabilities gap-log --procedure "..." --verdict proposed-${o.kind === 'capability' ? 'capability' : 'accepted'}|proposed-declined`);
+        if (rep.uncertain.length) {
+          say(`   (${rep.uncertain.length} parecido(s) que NO se agruparon por debajo del umbral — deliberado)`);
+        }
+        return;
+      }
+      const full = argv.includes('--full');
+      const reports = targets.map((t) => capabilities({ target: t, full }));
+      if (argv.includes('--json')) {
+        return void say(JSON.stringify(reports.length === 1 ? reports[0] : reports, null, 2));
+      }
+      for (const caps of reports) {
+        if (reports.length > 1) say(`# target: ${caps.target}`);
+        for (const s of caps.installed) say(`skill\t${s.id}\tinstalled-${s.scope}\t${s.description}`);
+        for (const s of caps.available) say(`skill\t${s.id}\tavailable${s.description ? `\t${s.description}` : ''}`);
+        if (caps.agentsSupported) {
+          for (const a of caps.agents) say(`agent\t${a.id}\t${a.scope}\t${a.path}`);
+          if (!caps.agents.length) say('# no agent files found (this target supports them)');
+        } else {
+          say(`# ${caps.target} has no file-based agents — the agent option does not apply here`);
+        }
+        if (caps.commandsSupported) {
+          for (const command of caps.commands) say(`command\t${command.id}\tproject\t${command.path}`);
+          if (!caps.commands.length) say('# no managed command files found (this target supports them)');
+        } else {
+          say(`# ${caps.target} has no supported project command surface`);
+        }
+        say(`memory\t${caps.memory.mode}\t${caps.memory.status}\t${caps.memory.reason}`);
+      }
+      if (!full) say('# catalog shown as ids; add --full for descriptions, or use `catalog --available` to match by meaning');
+      return;
+    }
+    case 'sello': {
+      // Deterministic transitions of the sello (review receipt). The `review` skill
+      // orchestrates the lenses; every state change and every check runs HERE, token-free.
+      const S = await import('../targets/sello.mjs');
+      const root = S.resolveRoot(process.cwd());
+      const sub = argv[1];
+      const paths = S.selloPaths(root);
+      // flag() yields boolean true for a valueless flag; every string flag below
+      // goes through this so `--lenses` with no value is a usage error, not a crash.
+      const str = (name) => { const v = flag(name); return typeof v === 'string' ? v : undefined; };
+      switch (sub) {
+        case 'on':
+        case 'off': {
+          // --global writes the user-scope switch (every project inherits it);
+          // without it, the project switch, which always wins over the global one.
+          const isGlobal = argv.includes('--global');
+          const target = isGlobal ? S.globalConfigPath() : paths.config;
+          const cfg = (isGlobal ? S.readGlobalConfig() : S.readConfig(root)) || {};
+          delete cfg.scope; // derived, never persisted
+          // `off` never validates: it is the recovery advertised by every deny
+          // message, so a broken config must not be able to lock it away.
+          if (sub === 'on') {
+            try { S.validateRiskConfig(cfg); } catch (e) { say(e.message); process.exitCode = 1; return; }
+          }
+          const { writeFileSync, mkdirSync } = await import('node:fs');
+          const { dirname } = await import('node:path');
+          mkdirSync(dirname(target), { recursive: true });
+          writeFileSync(target, JSON.stringify({ ...cfg, enabled: sub === 'on' }, null, 2) + '\n');
+          const where = isGlobal ? 'for every project (global)' : 'for this project';
+          say(sub === 'on'
+            ? `✅ sello ON ${where}. Risk-0 changes (docs/copy) still pass silently; everything else needs a review before commit/push/PR.`
+            : `✅ sello OFF ${where}. Delivery behaves exactly as before.`);
+          if (isGlobal) {
+            const p = S.readConfig(root);
+            if (p && p.enabled !== undefined && p.enabled !== (sub === 'on')) {
+              say(`   ⚠️  this project overrides it (project = ${p.enabled ? 'on' : 'off'}); the project switch always wins. Change it with \`sello ${p.enabled ? 'off' : 'on'}\` here.`);
+            }
+          }
+          return;
+        }
+        case 'freeze': {
+          const cfg = S.readEffectiveConfig(root);
+          const candidate = S.computeCandidate(root, cfg);
+          if (!candidate) { say(S.MESSAGES.noTrunk()); process.exitCode = 1; return; }
+          const paths2 = Object.keys(candidate.files);
+          if (!paths2.length) { say('sello: nothing to freeze — the working tree matches the trunk base.'); return; }
+          const risk = S.classifyRisk(paths2, cfg);
+          if (risk.configError) say(`⚠️  ${risk.configError}\n   (using the default risk table until it is fixed)`);
+          const required = S.lensesRequired(risk.tier, cfg);
+          S.writeSello(root, { status: 'frozen', ...candidate, risk, required, lenses: [], createdAt: new Date().toISOString() });
+          say(`🧊 frozen: ${paths2.length} file(s), risk tier ${risk.tier} → ${required} lens(es) required.`);
+          for (const [p, c] of Object.entries(risk.classes)) if (c !== 'default' && c !== 'docs') say(`   ${p} → ${c}`);
+          if (risk.lowered?.length) say(`   (lowered by config: ${risk.lowered.join(', ')})`);
+          return;
+        }
+        case 'approve':
+        case 'block': {
+          const sello = S.readSello(root);
+          if (sello.missing || sello.corrupt || !sello.status) { say(S.MESSAGES.notFrozen()); process.exitCode = 1; return; }
+          const cfg = S.readEffectiveConfig(root);
+          const current = S.computeCandidate(root, cfg);
+          const changed = current && Object.keys({ ...sello.files, ...current.files })
+            .some((p) => sello.files[p] !== current.files[p]);
+          if (sub === 'approve' && (changed || sello.base !== current?.base)) {
+            say(S.MESSAGES.staleFreeze()); process.exitCode = 1; return;
+          }
+          const lenses = (str('lenses') || '').split(',').map((s) => s.trim()).filter(Boolean);
+          const required = sello.required ?? S.lensesRequired(sello.risk?.tier ?? 1, cfg);
+          // An incomplete panel must not seal silently (spec error path): the user
+          // may still accept the gap, but only on purpose.
+          if (sub === 'approve' && lenses.length < required && !argv.includes('--accept-partial-lenses')) {
+            say(S.MESSAGES.partialLenses(lenses.length, required)); process.exitCode = 1; return;
+          }
+          const note = str('note');
+          if (note) S.appendFindings(root, [`${new Date().toISOString().slice(0, 10)} ${note}`]);
+          const status = sub === 'approve' ? 'approved' : 'blocked';
+          const next = { ...sello, status, lenses, reason: str('reason') };
+          S.writeSello(root, next);
+          S.appendLog(root, {
+            at: new Date().toISOString(), status, base: sello.base, risk: sello.risk?.tier,
+            files: Object.keys(sello.files).length, lenses, digest: S.candidateDigest(sello),
+            partialLenses: lenses.length < required || undefined, reason: str('reason'),
+          });
+          say(sub === 'approve'
+            ? `✅ sealed with ${lenses.length}/${required} lens(es)${lenses.length ? `: ${lenses.join(', ')}` : ''}.`
+            : '⛔ blocked — fix and re-review.');
+          return;
+        }
+        case 'budget': {
+          const sello = S.readSello(root);
+          if (sello.missing || sello.corrupt) { say(S.MESSAGES.notFrozen()); process.exitCode = 1; return; }
+          const lines = Number(flag('lines'));
+          if (!Number.isFinite(lines) || lines <= 0) { say('Use: rsc sello budget --lines <N>'); process.exitCode = 1; return; }
+          S.writeSello(root, { ...sello, budget: { lines, declaredAt: new Date().toISOString() } });
+          say(`📏 fix budget declared: ${lines} line(s). budget-check will hold the fix to it.`);
+          return;
+        }
+        case 'budget-check': {
+          const sello = S.readSello(root);
+          if (sello.missing || sello.corrupt || !sello.budget) { say('sello: no declared budget. Recover: run `rsc sello budget --lines <N>` BEFORE fixing.'); process.exitCode = 1; return; }
+          const current = S.computeCandidate(root, S.readEffectiveConfig(root));
+          const spent = S.budgetSpent(sello, current || { numstat: {} });
+          if (spent <= sello.budget.lines) { say(`✅ within budget: ~${spent}/${sello.budget.lines} line(s).`); return; }
+          const justify = str('justify');
+          if (typeof justify === 'string' && justify.trim()) {
+            S.writeSello(root, { ...sello, budget: { ...sello.budget, exceeded: spent, justification: justify } });
+            S.appendFindings(root, [`budget exceeded (~${spent}/${sello.budget.lines}): ${justify}`]);
+            say(`⚠️ over budget (~${spent}/${sello.budget.lines}) — justification recorded.`);
+            return;
+          }
+          say(S.MESSAGES.overBudget(spent, sello.budget.lines));
+          process.exitCode = 1;
+          return;
+        }
+        case 'check': {
+          const verdict = S.checkSello(root);
+          if (verdict.warning) say(`⚠️  ${verdict.warning}`);
+          if (verdict.ok) { say(`✅ sello check: ${verdict.code}`); return; }
+          say(verdict.message);
+          process.exitCode = 1;
+          return;
+        }
+        case 'report': {
+          const { existsSync, readFileSync } = await import('node:fs');
+          say(existsSync(paths.findings) ? readFileSync(paths.findings, 'utf8') : '(no non-blocking findings recorded)');
+          return;
+        }
+        case 'status': {
+          const { existsSync } = await import('node:fs');
+          const { join } = await import('node:path');
+          const enabled = S.isEnabled(root);
+          const verdict = S.checkSello(root);
+          const sello = S.readSello(root);
+          const cfg = S.readEffectiveConfig(root);
+          let lowered = [];
+          let configError;
+          try { ({ lowered } = S.validateRiskConfig(cfg || {})); } catch (e) { configError = e.message; }
+          const globalCfg = S.readGlobalConfig();
+          const projectCfg = S.readConfig(root);
+          say(JSON.stringify({
+            enabled,
+            // Which scope decided, and what each one says — two scopes quietly
+            // disagreeing is a failure this harness has already lived through.
+            decidedBy: cfg?.scope,
+            scopes: {
+              global: globalCfg?.enabled === undefined ? 'unset' : globalCfg.enabled ? 'on' : 'off',
+              project: projectCfg?.enabled === undefined ? 'unset' : projectCfg.enabled ? 'on' : 'off',
+            },
+            check: verdict.code,
+            // An inert gate must never look armed: name every reason it is standing down.
+            inert: enabled && ['no-trunk', 'disabled'].includes(verdict.code) ? verdict.code : undefined,
+            shipGuardOptOut: existsSync(join(root, '.rsc', '.no-ship-guard')) || undefined,
+            warning: verdict.warning,
+            configError,
+            loweredClasses: lowered.length ? lowered : undefined,
+            status: sello.missing ? 'none' : sello.corrupt ? 'corrupt' : sello.status,
+            risk: sello.risk?.tier,
+            lenses: sello.lenses,
+            lensesRequired: sello.required,
+            budget: sello.budget,
+            nonBlockingFindings: S.countFindings(root),
+          }, null, 2));
+          return;
+        }
+        default:
+          say('Use: npx @ericrisco/rsc sello on|off [--global]|status|freeze|approve --lenses a,b [--accept-partial-lenses]|block --reason "…"|budget --lines N|budget-check [--justify "…"]|check|report');
+          return;
+      }
+    }
+    case 'uninstall': {
+      const dry = argv.includes('--dry-run');
+      // `uninstall --all` is an alias for a full purge.
+      if (argv.includes('--all')) return void (await runPurge(dry, argv.includes('--with-docs')));
+      const ids = requestedIds();
+      // No id is not "nothing to remove": it is a command that was not given what it needs.
+      if (!ids.length) {
+        console.error(`rsc: uninstall needs at least one skill or agent id.\n${UNINSTALL_HELP}`);
+        process.exitCode = 1;
+        return;
+      }
+      const selected = classifyRequested(ids);
+      // A retired skill an old install still holds is not unknown: the state file proves it is ours.
+      const held = new Set(listInstalled({ target }));
+      selected.skills.push(...selected.unknown.filter((id) => Object.hasOwn(RETIRED_SKILLS, id) && held.has(id)));
+      selected.unknown = selected.unknown.filter((id) => !selected.skills.includes(id));
+      if (reportUnknown(selected.unknown)) return;
+      const removed = await uninstall({ skillIds: selected.skills, agentIds: selected.agents, target, dryRun: dry });
+      return void say((dry ? 'Would remove:\n' : 'Removed:\n') + (removed.join('\n') || '(nothing)'));
+    }
+    case 'repair': {
+      // One command, no flags, for someone who does not know what is wrong. Restorations
+      // happen on their own; anything that changes a decision is asked, one by one.
+      const dry = argv.includes('--dry-run');
+      const yes = argv.includes('--yes');
+      const found = diagnose({ target, invoked: true });
+      if (!found.length) return void say('Nothing to repair — this harness is healthy.');
+      say(`\nFound ${found.length} thing(s):\n`);
+      for (const f of found) say(`  [${f.class === 'restore' ? 'fix' : 'ask'}] ${f.summary}\n      → ${f.action}`);
+      const accept = async (f) => {
+        if (yes) return true;
+        if (!isInteractive()) return false;
+        return confirm(`\nApply: ${f.summary}`);
+      };
+      const r = await repair({ target, dryRun: dry, invoked: true, accept });
+      say('');
+      if (dry) return void say(`Dry run — nothing written. Would apply ${r.applied.length}.`);
+      say(`Repaired ${r.applied.length} thing(s).${r.backup ? ' A copy of the previous state was kept.' : ''}`);
+      for (const p of r.pending) say(`  still pending (your call): ${p.summary}\n      → ${p.action}`);
+      return void say('   ↻ Reload/restart your assistant.');
+    }
+    case 'purge':
+      return void (await runPurge(argv.includes('--dry-run'), argv.includes('--with-docs')));
+    default:
+      say(`rsc: unknown command '${cmd}'.`);
+      say(GENERAL_HELP);
+      process.exitCode = 1;
+  }
+}
+
+main().catch((e) => {
+  console.error('rsc error:', e.message);
+  process.exit(1);
+});

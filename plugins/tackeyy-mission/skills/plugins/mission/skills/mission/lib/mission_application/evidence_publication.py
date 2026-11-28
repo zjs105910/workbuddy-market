@@ -1,0 +1,879 @@
+"""#711: evidence publish が UoW へ渡す publication path と blob 識別子.
+
+publication path と blob id は intent / generation / prepare / commit の各
+レコードへ永続化される。式が動くと既存レコードを読めなくなるため、導出は
+この 1 箇所に置き、呼び出し側で再導出しない。
+"""
+
+from __future__ import annotations
+import hashlib
+import json
+import re
+from pathlib import PurePosixPath
+from typing import Optional
+
+from mission_kernel.projection_path import (
+    ProjectionRejection,
+    resolve_internal_artifact_path,
+    resolve_internal_archive_path,
+    resolve_projection_path,
+)
+
+# Re-exported so the adapter reaches the generator through the application
+# layer, the way it reaches every other published-path decision.  The rule and
+# the generator stay together in the kernel module.  The ``as`` form marks the
+# re-export without ``__all__``, which would have to name every public name of
+# this module.
+from mission_kernel.projection_path import (  # noqa: E402
+    progress_mission_segment as progress_mission_segment,
+)
+
+REPOSITORY_ROOT_NAME = ".mission-state"
+BLOB_ID_PREFIX = "evidence:"
+
+
+class EvidencePublicationError(Exception):
+    """Reject one publication path that the unit of work cannot carry."""
+
+    def __init__(self, code: str, detail: str):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+def canonical_publication_path(
+    relative_path: str, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> str:
+    """Return the one canonical form both the claim and the binding carry.
+
+    The unit of work resolves projections against the project root and
+    refuses its own repository subtree, so the same restriction has to hold
+    before the path reaches a binding.
+    """
+    if not isinstance(relative_path, str) or not relative_path:
+        raise EvidencePublicationError(
+            "publication-path-invalid", "publication path must be a non-empty string"
+        )
+    resolved = resolve_projection_path(
+        PurePosixPath(relative_path), root_name=repository_root_name
+    )
+    if isinstance(resolved, ProjectionRejection):
+        # The decision is shared; the wording is not.  A caller of this
+        # command reads these messages, and they say more than the unit of
+        # work's single refusal does.
+        if resolved.reason == "absolute":
+            raise EvidencePublicationError(
+                "publication-path-invalid", "publication path must be relative"
+            )
+        if resolved.reason == "empty-or-relative-segment":
+            raise EvidencePublicationError(
+                "publication-path-invalid",
+                "publication path has an empty or relative segment",
+            )
+        parts = PurePosixPath(relative_path).parts
+        # Name the way out: a caller whose existing command stops working
+        # needs to know what to write instead, and the message is the only
+        # place that reaches a runbook this change never touched.
+        raise EvidencePublicationError(
+            "publication-path-invalid",
+            "publication path is inside the repository root (%s/); evidence is "
+            "published as a projection of the repository, so choose a path "
+            "outside it, for example %s"
+            % (repository_root_name, "/".join(parts[1:]) or "evidence/output.json"),
+        )
+    return "/".join(resolved)
+
+
+def canonical_generated_path(
+    relative_path: str, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> str:
+    """Return the canonical form of any path a generated file may take.
+
+    A generated file goes to one of two places, and the two rules are
+    disjoint: outside the repository as a projection, or inside it at the one
+    in-root destination #747 3a opens.  This says which paths are well formed,
+    not which command may use which -- the permission to write in-root is
+    bound to the command type where the claim and the command are both in
+    hand, and is not re-decided here.
+
+    Three callers need the same answer: the blob set built from the effects,
+    the identifier derived from the path, and the binding read back from a
+    persisted record.  A rule split between them is how the writer and the
+    reader drift apart.
+    """
+    if isinstance(relative_path, str) and relative_path:
+        internal = resolve_internal_archive_path(
+            PurePosixPath(relative_path), root_name=repository_root_name
+        )
+        if not isinstance(internal, ProjectionRejection):
+            return "/".join(internal)
+        artifact = resolve_internal_artifact_path(
+            PurePosixPath(relative_path), root_name=repository_root_name
+        )
+        if not isinstance(artifact, ProjectionRejection):
+            return "/".join(artifact)
+    # Not the in-root destination, so the projection rule answers -- including
+    # the refusals, whose wording names the way out for a caller that meant to
+    # publish outside and got the path wrong.
+    return canonical_publication_path(
+        relative_path, repository_root_name=repository_root_name
+    )
+
+
+def authorize_generated_destinations(
+    paths,
+    *,
+    command_type,
+    field=None,
+    repository_root_name: str = REPOSITORY_ROOT_NAME,
+) -> None:
+    """Refuse an in-root destination for a command that may not write one.
+
+    Well-formedness and permission are different questions and are asked in
+    different places: ``canonical_generated_path`` says the path is one a
+    generated file may take, and this says this command may take it.  Asking
+    only the first would let any command reach the in-root destination once
+    the shape exists.
+
+    A path that is neither shape raises from the canonicaliser rather than
+    passing as "not internal, so no permission needed".
+    """
+    permitted_rule = INTERNAL_DESTINATION_RULE_BY_COMMAND_FIELD.get((command_type, field))
+    for path in paths:
+        canonical = canonical_generated_path(
+            path, repository_root_name=repository_root_name
+        )
+        internal = resolve_internal_archive_path(
+            PurePosixPath(canonical), root_name=repository_root_name
+        )
+        artifact = resolve_internal_artifact_path(
+            PurePosixPath(canonical), root_name=repository_root_name
+        )
+        rule = None
+        if not isinstance(internal, ProjectionRejection):
+            rule = "progress"
+        elif not isinstance(artifact, ProjectionRejection):
+            rule = "artifact"
+        if rule is None or rule == permitted_rule:
+            continue
+        raise EvidencePublicationError(
+            "publication-destination-unauthorized",
+            "%s may not publish inside the repository root (%s); the path %s "
+            "is reserved for the commands that own it"
+            % (command_type, repository_root_name, canonical),
+        )
+
+
+def derive_blob_id(
+    canonical_path: str, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> str:
+    """Return the blob identifier bound to one canonical publication path.
+
+    Nothing but the path takes part: a timestamp or an iteration would make
+    the identifier differ between the prepare and the retry that follows it.
+    """
+    if (
+        canonical_generated_path(
+            canonical_path, repository_root_name=repository_root_name
+        )
+        != canonical_path
+    ):
+        raise EvidencePublicationError(
+            "publication-path-invalid", "blob id requires the canonical publication path"
+        )
+    digest = hashlib.sha256(canonical_path.encode("utf-8")).hexdigest()
+    return BLOB_ID_PREFIX + digest
+
+
+BLOB_ORIGINS = frozenset({"captured", "generated"})
+LEGACY_BLOB_ORIGIN = "captured"
+REQUIRED_CLAIM_FIELDS = ("kind", "target")
+SEMANTIC_CLAIM_FIELDS = ("kind", "target", "publication_path")
+
+
+def project_semantic_claim(
+    claim: dict,
+    *,
+    repository_root_name: str = REPOSITORY_ROOT_NAME,
+    expects_publication_path: Optional[bool] = None,
+) -> dict:
+    """Return the part of one effect claim that decides which operation this is.
+
+    ``digest`` and ``size`` describe what the operation produced, not what it
+    was asked to do, so a retry that materializes the same request must not
+    look like a different operation because the bytes moved.
+    """
+    if not isinstance(claim, dict):
+        raise EvidencePublicationError("effect-claim-invalid", "effect claim must be a mapping")
+    missing = [name for name in REQUIRED_CLAIM_FIELDS if name not in claim]
+    if missing:
+        raise EvidencePublicationError(
+            "effect-claim-invalid", "effect claim is missing " + ", ".join(missing)
+        )
+    projected = {name: claim[name] for name in REQUIRED_CLAIM_FIELDS}
+    # Artifact and progress claims name a target without naming where it is
+    # published; only the evidence claims carry a path.  Which of the two a
+    # claim is comes from its command, not from whether the field happens to
+    # be there: treating it as optional for everyone means it is required for
+    # no one.
+    present = "publication_path" in claim
+    if expects_publication_path is not None and present != expects_publication_path:
+        raise EvidencePublicationError(
+            "effect-claim-invalid",
+            "effect claim %s a publication path" % ("must name" if not present else "must not name"),
+        )
+    if present:
+        canonical = canonical_publication_path(
+            claim["publication_path"], repository_root_name=repository_root_name
+        )
+        if claim["target"] != PurePosixPath(canonical).name:
+            raise EvidencePublicationError(
+                "effect-claim-invalid", "effect target is not the publication basename"
+            )
+        projected["publication_path"] = canonical
+    return projected
+
+
+def blob_origin_of(record: dict) -> str:
+    """Return the origin one persisted blob record carries.
+
+    Records written before this field existed only ever held captured input,
+    so their absence is a known value rather than an unknown one.  An origin
+    that is present but unrecognised is refused instead: defaulting it would
+    silently reclassify a blob the writer meant to distinguish.
+    """
+    if not isinstance(record, dict):
+        raise EvidencePublicationError("blob-origin-invalid", "blob record must be a mapping")
+    if "origin" not in record:
+        return LEGACY_BLOB_ORIGIN
+    origin = record["origin"]
+    if origin not in BLOB_ORIGINS:
+        raise EvidencePublicationError("blob-origin-invalid", "blob origin is not recognised")
+    return origin
+
+
+KNOWN_RECORD_VERSIONS = (1, 2)
+MATERIALIZATION_RECORD_VERSION = 2
+
+
+def record_version(document: dict, record_name: str) -> int:
+    """Return which generation of one persisted record this document is.
+
+    The blob shape changes between generations, so every reader has to know
+    which one it holds before it looks for a field.  Deciding this from the
+    code path that produced the read would be wrong: a v4 repository keeps no
+    operation record at all, and the records that do exist were written by an
+    older v5.
+    """
+    if not isinstance(document, dict):
+        raise EvidencePublicationError("record-invalid", "record must be a mapping")
+    schema = document.get("schema")
+    if not isinstance(schema, str):
+        raise EvidencePublicationError("record-invalid", "record schema is not a string")
+    for version in KNOWN_RECORD_VERSIONS:
+        if schema == "%s/%d" % (record_name, version):
+            return version
+    raise EvidencePublicationError(
+        "record-invalid", "record schema is not a recognised generation of " + record_name
+    )
+
+
+def expects_materialization(version: int) -> bool:
+    """Say whether one record generation carries the materialization binding."""
+    return version >= MATERIALIZATION_RECORD_VERSION
+
+
+SEMANTIC_INTENT_SCHEMA = "mission-intent/2"
+BINDING_FIELDS = ("blob_id", "digest", "kind", "relative_path", "size")
+
+
+def _canonical(value: dict) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+
+
+def _canonical_binding(
+    record: dict, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> dict:
+    """Return one binding in the single form this module accepts.
+
+    Normalisation and the identifier check belong together: the identifier is
+    derived from the canonical path, so a caller that checks one without the
+    other can accept a record whose path and id disagree.  Keeping the rule
+    in two places is exactly how the writer and the reader drifted apart.
+    """
+    if not isinstance(record, dict):
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "blob binding is not an object"
+        )
+    missing = [name for name in BINDING_FIELDS if name not in record]
+    if missing:
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "binding is missing " + ", ".join(missing)
+        )
+    if not isinstance(record["relative_path"], str):
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "blob path is not a string"
+        )
+    canonical = canonical_generated_path(
+        record["relative_path"], repository_root_name=repository_root_name
+    )
+    if record["blob_id"] != derive_blob_id(
+        canonical, repository_root_name=repository_root_name
+    ):
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "blob id does not match its publication path"
+        )
+    if not isinstance(record["digest"], str) or not DIGEST_PATTERN.fullmatch(
+        record["digest"]
+    ):
+        raise EvidencePublicationError("blob-binding-invalid", "blob digest is invalid")
+    if not isinstance(record["kind"], str) or not record["kind"]:
+        raise EvidencePublicationError("blob-binding-invalid", "blob kind is invalid")
+    if type(record["size"]) is not int or record["size"] < 0:
+        raise EvidencePublicationError("blob-binding-invalid", "blob size is invalid")
+    projected = {name: record[name] for name in BINDING_FIELDS}
+    projected["relative_path"] = canonical
+    return projected
+
+
+def _captured_binding(record: dict) -> dict:
+    """Return one captured binding in the form the semantic digest folds.
+
+    A captured blob is caller-supplied input: its identifier is the caller's
+    Token128 and its path is wherever the caller read it from, neither of
+    which derives from the other (U1 already validated both).  Only the
+    generated bindings have a path-derived identifier, so only they go
+    through the canonical check.
+    """
+    if not isinstance(record, dict):
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "blob binding is not an object"
+        )
+    missing = [name for name in BINDING_FIELDS if name not in record]
+    if missing:
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "binding is missing " + ", ".join(missing)
+        )
+    for name in ("blob_id", "kind", "relative_path"):
+        if not isinstance(record[name], str) or not record[name]:
+            raise EvidencePublicationError(
+                "blob-binding-invalid", "blob " + name + " is invalid"
+            )
+    if not isinstance(record["digest"], str) or not DIGEST_PATTERN.fullmatch(
+        record["digest"]
+    ):
+        raise EvidencePublicationError("blob-binding-invalid", "blob digest is invalid")
+    if type(record["size"]) is not int or record["size"] < 0:
+        raise EvidencePublicationError("blob-binding-invalid", "blob size is invalid")
+    return {name: record[name] for name in BINDING_FIELDS}
+
+
+def _partition_bindings(
+    bindings, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> tuple[list, list]:
+    captured, generated = [], []
+    for record in bindings:
+        origin = blob_origin_of(record)
+        if origin == "generated":
+            generated.append(
+                _canonical_binding(record, repository_root_name=repository_root_name)
+            )
+        else:
+            captured.append(_captured_binding(record))
+    key = lambda item: item["blob_id"]
+    return sorted(captured, key=key), sorted(generated, key=key)
+
+
+# The moment the caller asked is not what makes an operation the operation
+# it is: a crash retry runs in a new process with a new clock, and the
+# committed record is what answers with the time (#747 P2, decision D3).
+#
+# Only a typed kernel command is known to carry the operation's own
+# timestamp under this name.  Any other document is opaque here, and a
+# field that merely shares the name may be what distinguishes two
+# requests; dropping it there would let one replay the other.
+SEMANTIC_TIME_FIELD = "at"
+TYPED_COMMAND_SCHEMA = "mission-kernel-command/1"
+PATH_BEARING_COMMAND_TYPES = frozenset(
+    {"generate-claims-ledger", "generate-context-manifest"}
+)
+
+# #747 3a: which commands may publish inside the repository.  Everything else
+# publishes as a projection of it.  The list is explicit rather than derived
+# from the path, because the path alone cannot say who asked: a binding built
+# by hand carries a well-formed path and no permission.
+INTERNAL_DESTINATION_RULE_BY_COMMAND_FIELD = {
+    ("update-progress", "effect"): "progress",
+    ("initialize-artifact", "effect"): "artifact",
+    ("render-artifact", "effect"): "artifact",
+    ("record-artifact-publication", "effect"): "artifact",
+    ("export-artifact", "artifact_effect"): "artifact",
+}
+INTERNAL_DESTINATION_COMMAND_TYPES = frozenset(
+    command for command, _field in INTERNAL_DESTINATION_RULE_BY_COMMAND_FIELD
+)
+
+
+def internal_destination_rules_by_command_type():
+    """Derive each command's in-repository rules from its effect fields."""
+    rules = {}
+    for (command_type, _field), rule in INTERNAL_DESTINATION_RULE_BY_COMMAND_FIELD.items():
+        rules.setdefault(command_type, set()).add(rule)
+    return {command_type: frozenset(value) for command_type, value in rules.items()}
+
+
+def publication_blob_shapes_by_command_type():
+    """Derive published-blob cardinality and in-root ownership from fields."""
+    rules = internal_destination_rules_by_command_type()
+    shapes = {}
+    for command_type, fields in EFFECT_FIELDS_BY_COMMAND_TYPE.items():
+        internal_fields = tuple(
+            field for field in fields
+            if (command_type, field) in INTERNAL_DESTINATION_RULE_BY_COMMAND_FIELD
+        )
+        permitted = rules.get(command_type, frozenset())
+        shapes[command_type] = {
+            "blob_count": len(fields),
+            "internal_min": 0 if permitted == frozenset({"progress"}) else len(internal_fields),
+            "internal_max": len(internal_fields),
+            "rules": permitted,
+        }
+    from mission_kernel.fresh_review import FRESH_REVIEW_FINDINGS_LIMIT
+    shapes["fresh-review-output-import"].update(blob_count=None, blob_max=FRESH_REVIEW_FINDINGS_LIMIT + 2)
+    return shapes
+
+# Which attribute of a command's effect claim holds the path it publishes to.
+# The two projection commands carry it separately from the effect target; the
+# progress claim has no such field and its target *is* the path.  Reading the
+# field name from here keeps the two spellings from becoming two rules.
+#
+# This is deliberately not ``PATH_BEARING_COMMAND_TYPES``: that one says the
+# *encoded* claim must carry a ``publication_path`` key, which the progress
+# claim does not and must not gain -- adding it would change the kernel
+# command schema, and with it every operation identity already recorded.
+PUBLICATION_PATH_FIELD_BY_COMMAND_TYPE = {
+    "fresh-review-prepare": "target",
+    "fresh-review-output-import": "target",
+    "generate-claims-ledger": "publication_path",
+    "generate-context-manifest": "publication_path",
+    "update-progress": "target",
+    "initialize-artifact": "target",
+    "render-artifact": "target",
+    "record-artifact-publication": "target",
+    "export-artifact": "target",
+}
+EFFECT_FIELDS_BY_COMMAND_TYPE = {
+    "fresh-review-prepare": ("effect",),
+    "fresh-review-output-import": ("effect", "coverage_effect", "findings_effect"),
+    "export-artifact": ("artifact_effect", "export_effect"),
+    "generate-claims-ledger": ("effect",),
+    "generate-context-manifest": ("effect",),
+    "initialize-artifact": ("effect",),
+    "record-artifact-publication": ("effect",),
+    "render-artifact": ("effect",),
+    "update-progress": ("effect",),
+}
+
+
+def _is_typed_kernel_command(command: dict) -> bool:
+    """Say whether this document is one the kernel's encoder could have produced."""
+    from mission_kernel.commands import kernel_command_type_names
+
+    return (
+        command.get("schema") == TYPED_COMMAND_SCHEMA
+        and command.get("type") in kernel_command_type_names()
+    )
+
+
+def project_semantic_command(
+    command, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+):
+    """Return the command with its effect claims reduced to their meaning.
+
+    The claim is located by command type, not by shape.  Recognising it as
+    "any object carrying these five keys" reaches look-alike objects a
+    command holds for its own reasons, which drops that payload from the
+    intent and lets two different commands share one digest.
+    """
+    if not isinstance(command, dict):
+        raise EvidencePublicationError(
+            "command-invalid", "encoded command must be an object"
+        )
+    if not _is_typed_kernel_command(command):
+        # Only a typed kernel command has a known shape.  Any other document
+        # is opaque: its ``type`` may name anything, and a field of its own
+        # that resembles an effect claim or a timestamp may be exactly what
+        # distinguishes two requests.  Projecting by name alone would drop it
+        # and let one replay the other.  The schema string alone does not
+        # settle this -- a caller may write it into a document by hand -- so
+        # the type has to be one the kernel could have encoded.
+        return command
+    effect_fields = EFFECT_FIELDS_BY_COMMAND_TYPE.get(command.get("type"))
+    value = command.get("value")
+    if not isinstance(value, dict):
+        if not effect_fields:
+            # A typed command with no object value has nothing to project.
+            return command
+        raise EvidencePublicationError(
+            "command-invalid", "encoded command value must be an object"
+        )
+    projected_value = {
+        name: item for name, item in value.items() if name != SEMANTIC_TIME_FIELD
+    }
+    if not effect_fields:
+        return dict(command, value=projected_value)
+    for field in effect_fields:
+        if field not in value:
+            raise EvidencePublicationError(
+                "command-invalid", "encoded command is missing " + field
+            )
+        if command.get('type') == 'fresh-review-output-import' and value[field] is None:
+            projected_value[field] = None
+            continue
+        if command.get('type') == 'fresh-review-output-import' and field == 'findings_effect':
+            projected_value[field] = [project_semantic_claim(item, repository_root_name=repository_root_name,
+                expects_publication_path=False) for item in value[field]]
+            continue
+        projected_value[field] = project_semantic_claim(
+            value[field],
+            repository_root_name=repository_root_name,
+            expects_publication_path=command.get("type") in PATH_BEARING_COMMAND_TYPES,
+        )
+    return dict(command, value=projected_value)
+
+
+def semantic_intent_digest(
+    inputs: dict, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> str:
+    """Return the digest of what the caller asked for, not of what came out.
+
+    Generated bindings are left out on purpose: their digests only exist once
+    the operation has run, so including them would make the same request look
+    like a different operation every time its output moved.  Captured input
+    stays in, because a different input is a different request.
+    """
+    captured, _generated = _partition_bindings(
+        inputs["bindings"], repository_root_name=repository_root_name
+    )
+    return "sha256:" + hashlib.sha256(
+        _canonical(
+            {
+                "blobs": captured,
+                "command": project_semantic_command(
+                    inputs["command"], repository_root_name=repository_root_name
+                ),
+                "lease_owner_session_id": inputs["lease_owner_session_id"],
+                "operation_id": inputs["operation_id"],
+                "schema": SEMANTIC_INTENT_SCHEMA,
+                "session_id": inputs["session_id"],
+            }
+        )
+    ).hexdigest()
+
+
+def binding_records(blobs) -> list:
+    """Return the persistence-neutral records of one verified blob set.
+
+    Every place that folds bindings into a digest -- the semantic intent, the
+    materialization, the replay comparison -- reads them through this one
+    projection, so a binding cannot enter one digest with an origin and
+    another without it.  An origin outside ``BLOB_ORIGINS`` is refused rather
+    than defaulted: a binding whose origin is unknown cannot be classified,
+    and classifying it wrongly changes which operation it belongs to.
+    """
+    views = getattr(blobs, "blobs", None)
+    if not isinstance(views, tuple):
+        raise EvidencePublicationError(
+            "blob-binding-invalid", "blob set does not expose an immutable blob tuple"
+        )
+    records = []
+    for blob in views:
+        binding = getattr(blob, "binding", None)
+        if binding is None:
+            raise EvidencePublicationError(
+                "blob-binding-invalid", "verified blob carries no binding"
+            )
+        origin = getattr(binding, "origin", None)
+        if origin not in BLOB_ORIGINS:
+            raise EvidencePublicationError(
+                "blob-origin-invalid", "blob origin is not recognised"
+            )
+        record = {name: getattr(binding, name, None) for name in BINDING_FIELDS}
+        record["origin"] = origin
+        records.append(record)
+    return records
+
+
+def generated_blobs_digest(
+    bindings, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> Optional[str]:
+    """Return the digest of what this run generated, or ``None`` for nothing.
+
+    ``None`` is a value: an operation that generated nothing is recorded as
+    such, and a replay that prepares something against it does not agree.
+    The bindings are canonicalised and ordered before hashing so the same
+    generated set has one digest however it was assembled.
+    """
+    _captured, generated = _partition_bindings(
+        bindings, repository_root_name=repository_root_name
+    )
+    if not generated:
+        return None
+    return "sha256:" + hashlib.sha256(_canonical({"blobs": generated})).hexdigest()
+
+
+def materialization_binding(
+    *,
+    bindings,
+    repository_root_name: str = REPOSITORY_ROOT_NAME,
+    base_head_digest: Optional[str],
+    state_digest: str,
+) -> dict:
+    """Return what this run actually produced, against the base it saw.
+
+    Kept apart from the semantic digest so a replay can check that the commit
+    it is about to return holds the same bytes this run just prepared.  The
+    generated bindings enter as one digest rather than a list: the operation
+    record has a byte limit, and a list of bindings has none.  The base
+    generation is not repeated here; the record's result carries the target
+    generation and a prepare is always base + 1.
+    """
+    # Nothing is checked here.  The reader below is the one place that
+    # decides what a materialization may hold; running it over what was just
+    # built is what keeps the writer from producing a record nothing can read.
+    return read_materialization(
+        {
+            "base_head_digest": base_head_digest,
+            "blobs_digest": generated_blobs_digest(
+                bindings, repository_root_name=repository_root_name
+            ),
+            "state_digest": state_digest,
+        },
+        repository_root_name=repository_root_name,
+    )
+
+
+def assert_replay_materializes(*, recorded, prepared: dict) -> None:
+    """Refuse a replay whose commit does not hold what this run prepared.
+
+    A replay means the same operation already committed.  It does not mean it
+    committed the same bytes: without this check a re-run that would have
+    written different content returns success while its content never lands.
+
+    Only the generated content takes part, as one digest on each side.  A
+    recorded ``None`` is "nothing was generated", so a run that prepared
+    something against it does not agree.  The base a run saw is not compared
+    here; the caller decides whether the two runs saw the same base.
+
+    "Generated" means what the request carries as a generated binding.  A
+    route whose effects are not bindings yet -- artifact and progress,
+    until #747 items 3a and 3b -- records ``None`` on both sides, so this
+    comparison says nothing about its produced content.  It does not
+    weaken those routes either: they had no such comparison before.
+    """
+    if not isinstance(recorded, dict) or "blobs_digest" not in recorded:
+        raise EvidencePublicationError(
+            "replay-materialization-mismatch",
+            "the recorded operation carries no materialization to compare",
+        )
+    if not isinstance(prepared, dict) or "blobs_digest" not in prepared:
+        raise EvidencePublicationError(
+            "replay-materialization-mismatch",
+            "the prepared run carries no materialization to compare",
+        )
+    if recorded["blobs_digest"] != prepared["blobs_digest"]:
+        raise EvidencePublicationError(
+            "replay-materialization-mismatch",
+            "the recorded commit does not hold the prepared content",
+        )
+
+
+MAX_BASE_RETRIES = 3
+BASE_IDENTIFIERS = ("base_head_digest", "base_generation")
+
+
+def base_agrees(*, observed: dict, admitted: dict) -> bool:
+    """Say whether the base this run prepared against is the admitted one.
+
+    Both identifiers have to match.  Either one alone can repeat across a
+    move -- a generation is only unique within a lineage, and a head digest
+    says nothing about how far the lineage has advanced -- so a single
+    agreement is not evidence that the base held still.
+    """
+    for side in (observed, admitted):
+        if not isinstance(side, dict):
+            raise EvidencePublicationError("base-invalid", "base must be a mapping")
+        missing = [name for name in BASE_IDENTIFIERS if name not in side]
+        if missing:
+            raise EvidencePublicationError(
+                "base-invalid", "base is missing " + ", ".join(missing)
+            )
+    return all(observed[name] == admitted[name] for name in BASE_IDENTIFIERS)
+
+
+def next_attempt(attempt: int) -> int:
+    """Return the next attempt number, or refuse to keep going.
+
+    Running out of attempts ends the operation without publishing.  Falling
+    through to a publish would place a file against a base nobody confirmed.
+    """
+    if type(attempt) is not int or not 1 <= attempt <= MAX_BASE_RETRIES:
+        raise EvidencePublicationError(
+            "base-retry-invalid", "attempt is outside the retry budget"
+        )
+    if attempt == MAX_BASE_RETRIES:
+        raise EvidencePublicationError(
+            "base-retry-exhausted", "the base moved on every attempt; nothing was published"
+        )
+    return attempt + 1
+
+
+OPERATION_RECORD_KEYS = {
+    1: frozenset(
+        {"commit_digest", "intent_digest", "operation_id", "result", "schema", "session_id"}
+    ),
+    2: frozenset(
+        {
+            "commit_digest",
+            "intent_digest",
+            "materialization",
+            "operation_id",
+            "result",
+            "schema",
+            "session_id",
+        }
+    ),
+}
+
+
+def operation_record_keys(version: int) -> frozenset:
+    """Return the exact key set one generation of the operation record holds.
+
+    The reader compares keys exactly, so a record gains a field only by
+    gaining a version.  Writing the new field into a v1 record would make
+    every existing reader refuse it.
+    """
+    if type(version) is not int or version not in OPERATION_RECORD_KEYS:
+        raise EvidencePublicationError(
+            "record-invalid", "operation record version is not recognised"
+        )
+    return OPERATION_RECORD_KEYS[version]
+
+
+MATERIALIZATION_FIELDS = ("base_head_digest", "blobs_digest", "state_digest")
+DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def read_materialization(
+    value, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> dict:
+    """Parse and check one materialization binding.
+
+    The key set is exact: a record carrying the older list-shaped form, or a
+    field this version does not know, is refused rather than read partially.
+    ``base_head_digest`` may be null only because genesis has no head;
+    ``blobs_digest`` may be null because an operation may generate nothing.
+    ``state_digest`` is never null: every commit has a state.
+    """
+    del repository_root_name  # kept for signature stability with the writer
+    if not isinstance(value, dict):
+        raise EvidencePublicationError(
+            "materialization-invalid", "materialization is not an object"
+        )
+    present = frozenset(value)
+    expected = frozenset(MATERIALIZATION_FIELDS)
+    if present != expected:
+        raise EvidencePublicationError(
+            "materialization-invalid",
+            "materialization fields differ: %r" % (sorted(present ^ expected),),
+        )
+    for field in ("base_head_digest", "blobs_digest"):
+        candidate = value[field]
+        if candidate is not None and (
+            not isinstance(candidate, str) or not DIGEST_PATTERN.fullmatch(candidate)
+        ):
+            raise EvidencePublicationError(
+                "materialization-invalid", "materialization " + field + " is invalid"
+            )
+    state_digest = value["state_digest"]
+    if not isinstance(state_digest, str) or not DIGEST_PATTERN.fullmatch(state_digest):
+        raise EvidencePublicationError(
+            "materialization-invalid", "materialization state_digest is invalid"
+        )
+    return {name: value[name] for name in MATERIALIZATION_FIELDS}
+
+
+def read_operation_record(
+    document: dict, *, repository_root_name: str = REPOSITORY_ROOT_NAME
+) -> dict:
+    """Parse one operation record of either generation.
+
+    The key set is checked exactly against the generation the record names,
+    so a v1 record that somehow carries a materialization is refused rather
+    than read as a v2: a record whose shape and version disagree was not
+    written by anything this code understands.
+    """
+    version = record_version(document, "mission-operation")
+    expected = operation_record_keys(version)
+    present = frozenset(document)
+    if present != expected:
+        raise EvidencePublicationError(
+            "record-invalid",
+            "operation record keys differ from version %d: %r" % (
+                version, sorted(present ^ expected)
+            ),
+        )
+    return {
+        "version": version,
+        "materialization": (
+            read_materialization(
+                document["materialization"], repository_root_name=repository_root_name
+            )
+            if version >= 2
+            else None
+        ),
+    }
+
+
+def replay_requires_materialization(version: int) -> bool:
+    """Say whether one replay has to prove it holds the prepared content.
+
+    Records written before the field existed cannot carry it.  Demanding it
+    of them would strand every mission that ran before this change, so the
+    obligation starts with the generation that has somewhere to put it.
+    """
+    if type(version) is not int or version not in KNOWN_RECORD_VERSIONS:
+        raise EvidencePublicationError(
+            "record-invalid", "operation record version is not recognised"
+        )
+    return expects_materialization(version)
+
+
+def relative_publication_path(project_root, path_text: str, *, repository_root_name: str = REPOSITORY_ROOT_NAME) -> str:
+    """Return the project-relative canonical form of one publication path.
+
+    The caller types ``--out`` as it pleases, so the value arriving here is
+    often absolute.  A projection target is relative to the project, so the
+    absolute form is converted rather than refused; refusing it would break
+    every caller that builds a path from a temporary directory.
+    """
+    from pathlib import Path
+
+    if not isinstance(path_text, str) or not path_text:
+        raise EvidencePublicationError(
+            "publication-path-invalid", "publication path must be a non-empty string"
+        )
+    candidate = Path(path_text)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.resolve().relative_to(Path(project_root).resolve())
+        except ValueError as exc:
+            raise EvidencePublicationError(
+                "publication-path-invalid",
+                "publication path is outside the project root",
+            ) from exc
+    return canonical_publication_path(
+        candidate.as_posix(), repository_root_name=repository_root_name
+    )

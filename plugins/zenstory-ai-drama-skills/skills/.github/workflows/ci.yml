@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Exercise the declared Python floor and the newest supported CI runtime.
+  # The tests use unittest directly, so CI does not install a second test runner.
+  test:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+      - name: unit tests
+        run: python -B -m unittest discover -s tests -v
+
+  dashboard-browser:
+    name: Dashboard browser regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DASHBOARD_BROWSER_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # Browser tooling stays CI-local rather than becoming a runtime dependency
+      # of the filesystem-first skill package.
+      - name: Install pinned Chromium test runtime
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - name: Run real-browser Dashboard regressions
+        run: python -B -m unittest tests.test_dashboard_browser -v
+
+  windows-install:
+    name: Windows CRLF installation and dashboard
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.x"
+      # The dashboard pins directories by verified path here rather than by
+      # descriptor, and that half of it exists for this runner. The POSIX jobs
+      # exercise the same backend by forcing the selection, but only this one
+      # proves it against real Windows file semantics -- reparse points,
+      # msvcrt locking, and a replace that a holder can refuse.
+      - name: Run Windows portability regressions
+        run: >-
+          python -B -m unittest
+          tests.test_installation_resolution
+          tests.test_episode_intake
+          tests.test_standalone_skill_tooling
+          tests.test_golden_project
+          tests.test_dashboard_server
+          tests.test_simple_lifecycle.SimpleLifecycleTests.test_publish_rejects_path_aliases_and_unsafe_episode_ids
+          tests.test_simple_lifecycle.SimpleLifecycleTests.test_package_and_verify_selected_approved_text
+          -v
+
+  # Tool versions are pinned on purpose. This repository has no dependency
+  # manifest, so an unpinned `pip install ruff` turns main red the next time
+  # ruff changes its default rule set — with nobody having touched the code.
+  # Bumping these is a deliberate pull request, not a surprise.
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --disable-pip-version-check ruff==0.15.11 mypy==2.3.0
+      - name: ruff
+        run: ruff check .
+      - name: mypy
+        run: >
+          mypy skills/short-drama/scripts/project_tool.py
+          skills/short-drama/scripts/dashboard_server.py
+          skills/short-drama/scripts/creator_markdown_check.py
+          skills/short-drama/scripts/creator_views.py
+          skills/short-drama-develop/scripts/episode_intake.py
+          tests/legacy/short-drama-assets/scripts/asset_check.py
+          tests/legacy/short-drama-image-prompts/scripts/image_prompt_check.py
+          skills/short-drama-produce/scripts/production_tool.py
+          skills/short-drama-produce/scripts/provider_adapters.py
+          skills/short-drama-edit/scripts/edit_tool.py
+          tests/legacy/short-drama-review/scripts/review_check.py
+          tests/legacy/short-drama-video-prompts/scripts/music_spec_check.py
+          evaluations/content_quality_gate.py
+          --ignore-missing-imports
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+      - name: dashboard script parses
+        run: node --check skills/short-drama/assets/dashboard/app.js

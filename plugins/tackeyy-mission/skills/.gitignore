@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.env*
+.mission-state/
+.pytest_cache/
+.venv-ci/
+.serena/
+.worktrees/
+output/
+
+# mission スキルの孤立タイムスタンプ
+.orphaned_at
+
+# ベンチ内部 state のローカル保全アーカイブ（機械生成物・git 管理外）
+.bench-archive/
+
+# 異系統レビューの作業ディレクトリ（レビュアーの出力にローカル絶対パスが入る）
+.review*/

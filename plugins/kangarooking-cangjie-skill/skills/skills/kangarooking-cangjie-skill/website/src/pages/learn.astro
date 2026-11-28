@@ -1,0 +1,64 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { INSTALL_GUIDE_URL } from "@/lib/install";
+import { withBase } from "@/lib/urls";
+
+const exampleInstallPrompt = "请根据 " + INSTALL_GUIDE_URL + "，从 https://github.com/kangarooking/buffett-letters-skill 安装 buffett-letters-skill。";
+---
+
+<BaseLayout title="使用教程 — 仓颉 Skill" description="从选择、安装到调用，快速学会在主流 AI 编程 Agent 中使用仓颉 Skill。">
+  <section class="page-hero"><div class="shell"><p class="eyebrow">Get started</p><h1>十分钟，让 Agent<br />用上专业方法</h1><p class="lede">Skill 不是一段需要复制粘贴的提示词，而是一套放在本地、可被 Agent 自动读取的工作方法。</p></div></section>
+
+  <div class="learn-layout shell">
+    <aside class="toc" aria-label="页面目录">
+      <strong>本页内容</strong>
+      <a href="#understand">1. 理解目录</a>
+      <a href="#choose">2. 选择 Skill</a>
+      <a href="#install">3. 交给 Agent 安装</a>
+      <a href="#use">4. 开始调用</a>
+      <a href="#verify">5. 验证是否生效</a>
+      <a href="#troubleshoot">常见问题</a>
+    </aside>
+
+    <article class="prose learn-prose">
+      <section id="understand"><p class="step-number">STEP 01</p><h2>先理解一个 Skill Pack</h2><p>一个 Skill Pack 是一个文件夹，里面可以包含多个面向具体场景的原子 Skill。每个原子 Skill 至少有一个 <code>SKILL.md</code>，用于告诉 Agent：什么时候使用、需要哪些输入、按什么步骤执行、最终交付什么。</p><div class="file-tree"><span>example-skill-pack/</span><span>├── README.md</span><span>├── research-analysis/</span><span>│&nbsp;&nbsp;&nbsp; └── SKILL.md</span><span>└── decision-checklist/</span><span>&nbsp;&nbsp;&nbsp;&nbsp;└── SKILL.md</span></div></section>
+
+      <section id="choose"><p class="step-number">STEP 02</p><h2>选择适合任务的 Pack</h2><p>进入 <a href={withBase("/skills")}>Skills 目录</a>，按领域或场景搜索。初次使用建议选一个和手头真实任务直接相关的 Pack，而不是一次安装全部内容。</p><div class="callout">例如：准备分析一家企业时选择投资类 Skill；要重写产品页面时选择文案类 Skill。</div></section>
+
+      <section id="install"><p class="step-number">STEP 03</p><h2>把安装提示词交给 Agent</h2><p>进入任意 Skill 详情页，点击「复制安装提示词」，然后直接发送给你正在使用的 Agent。无需自己判断 Codex、Claude Code、Cursor 或其他工具的目录。</p><div class="agent-install-demo"><span>安装提示词</span><p>{exampleInstallPrompt}</p></div><h3>Agent 会自动完成</h3><ul class="agent-checklist"><li>识别当前 Agent 和可用的 Skills 目录</li><li>读取来源仓库，检查 SKILL.md、风险与同名冲突</li><li>安装完整文件及其脚本、模板和资源</li><li>验证是否能被识别，并报告安装位置与结果</li></ul><div class="callout">只有遇到覆盖本地修改、执行未审查脚本、需要凭证或权限提升时，Agent 才应该暂停并询问你。</div></section>
+
+      <section id="use"><p class="step-number">STEP 04</p><h2>直接描述你的真实任务</h2><p>无需背诵特殊口令。说明目标、背景和希望得到的结果即可；如果希望明确指定，也可以直接说出 Skill 名称。</p><div class="prompt-example"><span>示例任务</span><p>请使用巴菲特股东信中的企业质量检查方法，分析这家公司过去五年的年报，并列出我还需要验证的关键假设。</p></div></section>
+
+      <section id="verify"><p class="step-number">STEP 05</p><h2>验证 Skill 是否生效</h2><p>让 Agent 说明它读取了哪个 Skill、当前采用了哪些步骤。一个正常生效的 Skill 应该让输出更有结构，而且包含该方法特有的检查项，而不是泛泛回答。</p><pre><code>开始前，请告诉我你将使用哪个 Skill，
+并用 3 点概括它要求你遵循的工作流程。</code></pre></section>
+
+      <section id="troubleshoot"><p class="step-number">TROUBLESHOOTING</p><h2>常见问题</h2><details><summary>Agent 没有识别到 Skill</summary><p>先检查目录层级：目标文件应为 <code>.../skill-name/SKILL.md</code>，而不是多套了一层压缩包目录。然后开启新会话再试。</p></details><details><summary>一次安装很多 Skill 会怎样？</summary><p>可以安装，但名称和触发描述过于相似时可能产生冲突。推荐围绕当前工作保留一组高频 Skill。</p></details><details><summary>Skill 会把资料上传到哪里？</summary><p>仓颉 Skill 本身只是本地文本和脚本。实际数据如何处理取决于你使用的 Agent、模型服务和 Skill 内部是否调用外部服务，安装前应检查仓库内容。</p></details></section>
+    </article>
+  </div>
+</BaseLayout>
+
+<style>
+  .learn-layout { display: grid; grid-template-columns: 190px minmax(0, 720px); justify-content: center; gap: 70px; padding-top: 70px; }
+  .toc { position: sticky; top: 100px; align-self: start; display: grid; gap: 10px; font-size: 13px; }
+  .toc strong { margin-bottom: 7px; color: var(--ink); }
+  .toc a { color: var(--muted); }
+  .toc a:hover { color: var(--accent); }
+  .learn-prose section { scroll-margin-top: 90px; padding-bottom: 28px; }
+  .learn-prose section + section { border-top: 1px solid var(--line); }
+  .step-number { margin-top: 54px; color: var(--accent) !important; font: 12px "SFMono-Regular", monospace; letter-spacing: .08em; }
+  code { padding: 2px 5px; border-radius: 4px; background: var(--soft); color: var(--ink); font: 13px "SFMono-Regular", monospace; }
+  pre code { padding: 0; background: transparent; color: inherit; }
+  .file-tree { display: grid; margin-top: 22px; padding: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); font: 13px/1.8 "SFMono-Regular", monospace; }
+  .agent-install-demo { margin: 24px 0; padding: 20px; border: 1px solid var(--ink); border-radius: 8px; background: var(--soft); box-shadow: 5px 5px 0 var(--ink); }
+  .agent-install-demo span { color: var(--accent); font-size: 11px; font-weight: 750; text-transform: uppercase; }
+  .agent-install-demo p { margin: 9px 0 0; color: var(--ink); font-size: 14px; word-break: break-word; }
+  .agent-checklist { display: grid; gap: 9px; padding: 0; list-style: none; }
+  .agent-checklist li::before { content: "✓"; margin-right: 10px; color: var(--success); font-weight: 750; }
+  .prompt-example { margin-top: 22px; padding: 20px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); }
+  .prompt-example span { color: var(--accent); font-size: 12px; font-weight: 700; }
+  .prompt-example p { margin-bottom: 0; color: #263653; }
+  details { padding: 18px 0; border-top: 1px solid var(--line); }
+  details:last-child { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 650; }
+  @media (max-width: 760px) { .learn-layout { grid-template-columns: 1fr; gap: 0; } .toc { display: none; } }
+</style>

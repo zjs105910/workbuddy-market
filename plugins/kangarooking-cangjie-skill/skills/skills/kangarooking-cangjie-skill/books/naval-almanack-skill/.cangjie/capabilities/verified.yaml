@@ -1,0 +1,987 @@
+schema_version: 1
+bundle_id: bundle.naval-almanack
+book:
+  title: 《纳瓦尔宝典：财富与幸福指南》
+  author: 纳瓦尔·拉维坎特（Eric Jorgenson 整理）
+  source_pack: books/naval-almanack-skill
+  baseline_tag: baseline-naval-19skill-20260825
+entry:
+  name: naval-almanack
+  description: '当用户询问《纳瓦尔宝典》(The Almanack of Naval Ravikant) 相关内容，或在以下领域寻求建议时调用:
+
+    财富构建(怎么赚钱/股权期权/杠杆/副业与职业定位/时薪与外包决策)、判断与决策(重大选择纠结/心智模型/打工vs创业)、
+
+    幸福与心智(欲望与焦虑/接受与内耗/冥想/刷手机上瘾/愤怒与期望/攀比妒忌)、人生哲学(生命意义/该不该信玄学/诚实沟通/选朋友圈子/怎么读书学习)。
+
+    不适用于: 具体投资标的与选股、临床心理治疗、急性危机(先求助专业人士)。
+
+    Triggers: 纳瓦尔/Naval/纳瓦尔宝典/致富/财富/幸福/判断力/冥想/读书/人生意义
+
+    '
+  core_principles:
+  - 财富=睡觉时仍在赚钱的资产；靠「责任→产权→杠杆」构建，无法靠出租时间致富。
+  - 用特殊知识（对你像玩、对别人像工作）产品化自己，成为不可替代。
+  - 判断力比努力重要；无法决定就答否；两条均等的路选短期更痛苦的那条。
+  - 财富、知识、声誉、关系都遵循复利；只玩长期正和游戏，与能共事一辈子的人同行。
+  - 幸福是可训练的技能：减少欲望、活在当下；任何处境只有三选项——改变/接受/离开。
+  - 阅读是终极元技能：读你所爱、原著优先，每天 1-2 小时即进入极少数人行列。
+  out_of_scope:
+  - 具体投资标的分析、选股与理财产品建议
+  - 临床抑郁、精神疾病急性发作等需要专业治疗的场景（先就医）
+  - 急性自杀风险（先紧急求助）
+  - 需要外交辞令的谈判策略与具体薪酬数字
+  stop_conditions:
+  - 意图在路由表与能力索引中均无法命中 → 明确告知超出本书范围，不硬套书中框架。
+  - 涉及医疗/法律/人身安全 → 停止套用方法论，建议专业求助。
+  - 纯事实查询（书名/作者/出版年/章节）→ 用核心原则与 overview 回答后即停，不展开人生建议。
+router_entry:
+  name: naval-almanack
+  description: '当用户询问《纳瓦尔宝典》这本书本身(书名/作者/章节/整书概览/术语)，或涉及本书未独立成 Skill 的主题时调用:
+
+    幸福训练/欲望管理、接受与内耗、冥想与心猴、地位游戏与攀比、选朋友与圈子、打工vs创业(委托代理)、
+
+    诚实沟通、身份与自我形象、期望与愤怒、生命意义、该不该信玄学(理性验证)、长期复利与声誉、判断力训练。
+
+    以下意图优先使用同包独立 Skill: wealth-structure(致富/股权期权)、productize-yourself(职业定位/副业方向)、
+
+    decision-heuristics(重大选择纠结)、hourly-rate-time(时薪/外包/时间分配)、reading-metaskill(怎么读书学习)、screen-detox(刷手机上瘾)。
+
+    Triggers: 纳瓦尔/Naval/纳瓦尔宝典/幸福/冥想/内耗/攀比/圈子/复利/人生意义
+
+    '
+promotion_budget: 8
+capabilities:
+- capability_id: cap.naval.wealth-structure
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: wealth-structure
+  title: 财富结构：责任+产权+杠杆+避免出局
+  importance: high
+  importance_rationale: 引用图入度1/出度3的财富主线枢纽；DIGEST 第一章核心；「怎么赚钱」是本书最高频外部意图。
+  one_liner: 先诊断收入结构：有无产权、用了几种杠杆、下行风险会不会让你出局。
+  intents:
+  - 怎么赚钱/如何致富
+  - 该不该要期权/股权
+  - 评估一个生意或副业的结构
+  keywords:
+  - 致富
+  - 赚钱
+  - 股权
+  - 期权
+  - 杠杆
+  - 被动收入
+  also_read:
+  - productize-yourself
+  - long-term-compounding
+  card: cards/wealth-structure.md
+  frontmatter:
+    description: '当用户问「怎么赚钱/如何致富/该不该要期权/如何判断一个生意的结构」时调用。
+
+      核心理念: 财富=睡觉时仍在赚钱的资产; 靠「责任(押上声誉)→产权(股权/知识产权)→杠杆(无需许可的代码媒体)→避免出局」构建, 无法靠出租时间致富。
+
+      不适用于: 具体投资标的分析、理财产品的选股建议。
+
+      Triggers: 致富/赚钱/股权/期权/杠杆/被动收入/ownership/leverage/equity'
+    tags:
+    - wealth
+    - leverage
+    - ownership
+    - equity
+    - risk
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第一节 创造财富 / 认识如何创造财富
+  promotion:
+    destination: promoted
+    gate: &id001
+      independent_intent: true
+      independent_contract: true
+      independent_run: true
+      independent_reuse: true
+      independent_eval: true
+    notes: 五条全过——谈 offer/期权是脱离书语境的独立意图；契约清晰（输入生意/offer，输出结构诊断）；可单独运行；跨书复用中（财富类书通用意图）；有独立评测价值。
+- capability_id: cap.naval.productize-yourself
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: productize-yourself
+  title: 特殊知识发现与产品化定位
+  importance: high
+  importance_rationale: 引用图起点节点（推荐学习顺序第 1 位）；「找方向/不可替代」是独立高频求助意图。
+  one_liner: 找到「对你像玩、对别人像工作」的特殊知识，再用代码/媒体杠杆规模化。
+  intents:
+  - 职业/副业/自由职业方向纠结
+  - 我该做什么才能赚钱且不被替代
+  - 寻找独特优势
+  keywords:
+  - 找方向
+  - 独特优势
+  - 副业
+  - 不可替代
+  - 特殊知识
+  also_read:
+  - wealth-structure
+  card: cards/productize-yourself.md
+  frontmatter:
+    description: '当用户在纠结职业/副业/自由职业方向、问「我该做什么才能赚钱/不被替代」、或想找到自己的独特优势时调用。
+
+      核心理念: 特殊知识(不可培训、对你像玩对别人像工作) × 产品化(杠杆规模化) = 无可替代的致富定位。
+
+      不适用于: 纯求职投递、写简历、已有明确方向的执行细节。
+
+      Triggers: 找方向/独特优势/副业/不可替代/productize/special knowledge/moat'
+    tags:
+    - wealth
+    - career
+    - positioning
+    - moat
+    - leverage
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第一节 创造财富 / 认识如何创造财富
+  promotion:
+    destination: promoted
+    gate: *id001
+    notes: 五条全过——职业定位是完全独立的求助意图，用户不会以「纳瓦尔」为入口提问；契约清晰；跨书复用高。
+- capability_id: cap.naval.decision-heuristics
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: decision-heuristics
+  title: 决策启发式：无法决定就答否
+  importance: high
+  importance_rationale: 引用图入度1（judgment 组合）；「重大选择纠结」是最典型的独立可执行任务意图。
+  one_liner: 无法决定就答否；三个重大决定值得花一两年；两条均等的路选短期更痛苦的。
+  intents:
+  - 换工作/买房/搬城/合伙/结婚等重大选择纠结
+  - 列了利弊表还是拿不定主意
+  keywords:
+  - 纠结
+  - 拿不定主意
+  - 要不要
+  - 该不该
+  - 利弊
+  also_read:
+  - judgment-training
+  card: cards/decision-heuristics.md
+  frontmatter:
+    description: '当用户在重大选择上纠结（换工作/买房/搬城/合伙/结婚）、列了利弊表还是拿不定主意时调用。
+
+      核心理念: 无法决定就答否; 三个重大决定(住哪/和谁/做什么)值得花一两年; 两个均等选择选短期更痛苦的路。
+
+      不适用于: 日常琐碎选择（晚饭吃什么）、信息查询。
+
+      Triggers: 纠结/拿不定主意/要不要/该不该/利弊/decision/hesitate/should I'
+    tags:
+    - decision
+    - heuristics
+    - career
+    - life-choice
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 如果你无法下决定就回答否
+  promotion:
+    destination: promoted
+    gate: *id001
+    notes: 五条全过——「帮我做决定」不需要书语境；输入选项输出启发式判定，契约最清晰；独立评测容易出题。
+- capability_id: cap.naval.hourly-rate-time
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: hourly-rate-time
+  title: 高时薪时间分配与外包判据
+  importance: medium
+  importance_rationale: 引用图入度0（工具型叶子）；但「这事值不值得我做/外包」是清晰独立的执行型意图。
+  one_liner: 给自己定离谱高的时薪，低于时薪的事外包或不做；不随收入升级生活方式。
+  intents:
+  - 琐事/外包值不值得
+  - 时间分配与安排
+  - 离财务自由还差什么
+  keywords:
+  - 时薪
+  - 时间管理
+  - 外包
+  - 琐事
+  - 财务自由
+  - 退休
+  also_read:
+  - wealth-structure
+  card: cards/hourly-rate-time.md
+  frontmatter:
+    description: '当用户纠结时间分配、问「这个琐事/外包值不值」「怎么安排时间」「离财务自由还差什么」时调用。
+
+      核心理念: 给时间定一个高得离谱的时薪, 低于时薪的事外包或不做; 退休=不为想象中的明天牺牲今天; 不随收入升级生活方式。
+
+      不适用于: 需要享受慢节奏的时刻（休息/家庭时间按定义不是浪费）。
+
+      Triggers: 时薪/时间管理/外包/琐事/排队/财务自由/退休/hourly rate/delegate'
+    tags:
+    - time
+    - delegation
+    - freedom
+    - productivity
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第一节 创造财富 / 优先级和重点
+  promotion:
+    destination: promoted
+    gate: *id001
+    notes: 独立意图/契约/可运行/评测四条过；跨书复用中。工具属性最强，适合独立触发。
+- capability_id: cap.naval.reading-metaskill
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: reading-metaskill
+  title: 阅读元技能：读什么与怎么读
+  importance: high
+  importance_rationale: 引用图被 judgment-training 依赖（判断力的输入管线）；「怎么读书/学习」是高频跨书通用意图。
+  one_liner: 读你所爱直到爱上阅读；原著与经典优先；没有读完义务；以教促学。
+  intents:
+  - 想养成阅读习惯
+  - 读什么书/怎么读
+  - 如何学习新领域/入门某学科
+  keywords:
+  - 阅读
+  - 读书
+  - 怎么学习
+  - 入门
+  - 原著
+  - 书单
+  also_read:
+  - judgment-training
+  card: cards/reading-metaskill.md
+  frontmatter:
+    description: '当用户想养成阅读习惯、问「读什么书/怎么读」「如何学习新领域/怎么入门某学科」时调用。
+
+      核心理念: 阅读是终极元技能; 读你所爱直到爱上阅读, 没有读完义务; 读原著与经典优先; 以教促学; 每天1-2小时即可进入极少数人行列。
+
+      不适用于: 具体某本书的书评、考试备考资料选择。
+
+      Triggers: 阅读/读书/怎么学习/入门/原著/书单/reading/how to learn'
+    tags:
+    - reading
+    - learning
+    - habit
+    - foundations
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 学会爱上阅读
+  promotion:
+    destination: promoted
+    gate: *id001
+    notes: 五条全过——跨书复用性全包最高（任何学习场景都可触发）；不依赖书语境。
+- capability_id: cap.naval.screen-detox
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: screen-detox
+  title: 屏幕戒断与多巴胺管理
+  importance: medium
+  importance_rationale: 引用图入度2（happiness 链）；「戒手机」是完全独立的行为改变意图，用户不会从书出发提问。
+  one_liner: 屏幕活动是用长期后果换短期快感的多巴胺零食；用习惯替换五步戒断。
+  intents:
+  - 刷手机/短视频/社交媒体上瘾
+  - 想戒断多巴胺零食
+  keywords:
+  - 刷手机
+  - 上瘾
+  - 短视频
+  - 社交媒体
+  - 多巴胺
+  - 戒断
+  also_read:
+  - happiness-skill
+  card: cards/screen-detox.md
+  frontmatter:
+    description: '当用户刷手机/短视频/社交媒体上瘾、感觉空虚、想戒断多巴胺零食时调用。
+
+      核心理念: 所有屏幕活动与更少幸福相关(作者断言无例外); 屏幕=用长期后果换短期快感的多巴胺零食; 用习惯替换五步戒断。
+
+      不适用于: 工作需要屏幕的职业场景(区分工作屏幕与消费屏幕)。
+
+      Triggers: 刷手机/上瘾/短视频/社交媒体/多巴胺/戒断/屏幕时间/screen time/dopamine/addiction'
+    tags:
+    - habits
+    - digital
+    - dopamine
+    - happiness
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第一节 学习幸福 / 幸福的习惯
+  promotion:
+    destination: promoted
+    gate: *id001
+    notes: 独立意图最强（帮我戒手机）；契约清晰（五步法）；可单独运行；独立评测容易。跨书复用中。
+- capability_id: cap.naval.judgment-training
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: judgment-training
+  title: 判断力训练：方向>努力、心智模型库
+  importance: high
+  importance_rationale: 引用图入度2（wealth-structure、rational-buddhism 均依赖它），是全书方法论底座。
+  one_liner: 判断力（知道行为的长期后果）比努力重要；从基础学科重建推理，收集心智模型。
+  intents:
+  - 需要方向性判断/这事靠谱吗
+  - 想提升决策能力/学心智模型
+  keywords:
+  - 判断力
+  - 方向
+  - 第一性原理
+  - 心智模型
+  - 思维模型
+  also_read:
+  - reading-metaskill
+  - decision-heuristics
+  card: cards/judgment-training.md
+  frontmatter:
+    description: '当用户需要做方向性判断、评估「该往哪走/这事靠谱吗」、或想提升决策能力时调用。
+
+      核心理念: 判断力(知道行为长期后果)比努力重要; 清晰思考=从基础学科重建推理; 收集心智模型(复利/委托代理/可证伪性/基础数学)。
+
+      不适用于: 需要立即执行的具体任务步骤。
+
+      Triggers: 判断力/方向/第一性原理/心智模型/思维模型/判断靠不靠谱/judgment/mental model/first principles'
+    tags:
+    - judgment
+    - thinking
+    - mental-models
+    - learning
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 判断力与如何清晰地思考
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 独立意图弱——「提升判断力」是学习型咨询而非任务，通常与决策/阅读一起出现；留路由域。
+- capability_id: cap.naval.long-term-compounding
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: long-term-compounding
+  title: 复利与长期游戏
+  importance: high
+  importance_rationale: 引用图入度1/出度2；DIGEST 财富章第二支柱；与多能力组合出现。
+  one_liner: 财富、知识、声誉、关系都遵循复利；只玩长期正和游戏。
+  intents:
+  - 要不要长期投入某段关系/某个项目
+  - 如何积累声誉与信任
+  keywords:
+  - 长期
+  - 复利
+  - 声誉
+  - 合作
+  - 信任
+  also_read:
+  - peer-selection
+  - wealth-structure
+  card: cards/long-term-compounding.md
+  frontmatter:
+    description: '当用户在选择合作者/生意模式/人生策略、问「要不要长期投入这段关系/这个项目」「如何积累声誉」时调用。
+
+      核心理念: 财富、知识、声誉、关系都遵循复利; 只玩长期正和游戏, 与能想象共事一辈子的人合作, 拒绝短期思维交易。
+
+      不适用于: 紧急止损、短期现金周转等必须立即决策的场景。
+
+      Triggers: 长期/复利/声誉/合作/信任/compounding/long-term/trust'
+    tags:
+    - long-term
+    - compounding
+    - relationship
+    - trust
+    - reputation
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第一节 创造财富 / 认识如何创造财富
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 意图与 wealth-structure/peer-selection 高度重叠，独立触发会造成近邻混淆；留路由域待使用证据。
+- capability_id: cap.naval.principal-agent
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: principal-agent
+  title: 委托-代理识别
+  importance: medium
+  importance_rationale: 引用图入度1；解释型框架，多与职业选择组合出现。
+  one_liner: 看收益与创造价值绑定多紧——绑得紧像委托人把事做好，松则像代理人为自己优化。
+  intents:
+  - 为什么大公司磨洋工/小公司拼命
+  - 打工还是创业/该不该自己干
+  keywords:
+  - 激励
+  - 代理
+  - 委托人
+  - 打工
+  - 创业
+  - 利益绑定
+  also_read:
+  - judgment-training
+  card: cards/principal-agent.md
+  frontmatter:
+    description: '当用户选择职业/组织/合作方式、困惑「为什么大公司磨洋工/小公司拼命」「该不该自己干」时调用。
+
+      核心理念: 委托人(主人)会把事做好, 代理人会为自己利益优化; 收益与创造价值绑得越紧, 越像委托人; 别让媒体洗脑你需要代理人。
+
+      不适用于: 具体薪酬谈判数字、组织架构设计细节。
+
+      Triggers: 激励/代理/主人/打工 vs 创业/利益绑定/principal/agent/incentive'
+    tags:
+    - economics
+    - incentive
+    - career
+    - organization
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 经济学 / 委托-代理问题
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 「打工vs创业」与 productize-yourself/wealth-structure 意图重叠；解释型多于任务型；留路由域。
+- capability_id: cap.naval.happiness-skill
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: happiness-skill
+  title: 幸福是可训练的技能
+  importance: high
+  importance_rationale: 引用图出度5的幸福链枢纽（连接 acceptance/冥想/戒断/游戏/自由/身份）；DIGEST 第二章核心。
+  one_liner: 幸福=缺憾感清空的默认状态；欲望是与自己的契约，同时只留一个重大欲望。
+  intents:
+  - 怎么才能更幸福
+  - 为什么得到了还不满足
+  - 怎么减少焦虑
+  keywords:
+  - 幸福
+  - 不快乐
+  - 欲望
+  - 焦虑
+  - 知足
+  - 活在当下
+  also_read:
+  - acceptance
+  - monkey-mind-meditation
+  card: cards/happiness-skill.md
+  frontmatter:
+    description: '当用户问「怎么才能更幸福/为什么得到了还不满足/怎么减少焦虑」时调用。
+
+      核心理念: 幸福是缺憾感清空的默认状态, 是可训练的技能; 欲望是与自己的契约(得到前不快乐), 同时只留一个重大欲望; 活在当下。
+
+      不适用于: 临床抑郁等需要专业治疗的场景(本书方法不能替代医疗)。
+
+      Triggers: 幸福/不快乐/欲望/焦虑/知足/活在当下/happiness/desire/anxiety'
+    tags:
+    - happiness
+    - desire
+    - mindfulness
+    - skill
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第一节 学习幸福
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 幸福域 8 个能力意图相互交叠（幸福/接受/冥想/自由/身份/意义），按方案 §4.6.5 原则先统一留在路由域，等 split-on-evidence。
+- capability_id: cap.naval.game-selection
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: game-selection
+  title: 游戏选择：地位游戏 vs 财富游戏 vs 单人游戏
+  importance: medium
+  importance_rationale: 引用图入度2；解释「攀比/妒忌/被攻击」的框架，常与幸福域组合。
+  one_liner: 识别自己在玩哪种游戏；躲开零和地位游戏，回到内在记分卡。
+  intents:
+  - 为什么有人攻击我/大家卷来卷去
+  - 怎么不在乎别人眼光
+  - 为什么妒忌
+  keywords:
+  - 地位
+  - 攀比
+  - 内卷
+  - 妒忌
+  - 零和
+  - 内在记分卡
+  also_read:
+  - happiness-skill
+  - long-term-compounding
+  card: cards/game-selection.md
+  frontmatter:
+    description: '当用户困惑「为什么有人攻击我/为什么大家卷来卷去/我怎么不在乎别人眼光/为什么妒忌」时调用。
+
+      核心理念: 人生同时存在零和地位游戏、正和财富游戏、单人游戏; 识别你玩的是哪种游戏, 避免地位游戏, 回到内在记分卡。
+
+      不适用于: 具体竞争策略制定（如何赢下某个比赛）。
+
+      Triggers: 地位/攀比/内卷/妒忌/别人怎么看我/零和/单人游戏/status game/envy'
+    tags:
+    - status
+    - zero-sum
+    - happiness
+    - psychology
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第一节 学习幸福 / 妒忌是幸福的敌人
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 解释型框架，意图入口分散且与幸福域重叠；留路由域。
+- capability_id: cap.naval.acceptance
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: acceptance
+  title: 情境三选项：改变/接受/离开
+  importance: medium
+  importance_rationale: 引用图入度2（happiness、identity 组合）；幸福域近邻能力（方案 §4.6.5 点名示例）。
+  one_liner: 任何处境只有三选项——改变它/接受它/离开它；三者都不做是痛苦之源。
+  intents:
+  - 困在无法改变的处境里反复内耗
+  - 该忍还是该走
+  keywords:
+  - 接受
+  - 忍
+  - 内耗
+  - 放不下
+  - 该走该留
+  also_read:
+  - life-meaning
+  - happiness-skill
+  card: cards/acceptance.md
+  frontmatter:
+    description: '当用户困在无法改变的处境（坏关系/讨厌的同事/不如意的事）里反复内耗、问「该忍还是该走」时调用。
+
+      核心理念: 面对任何情境只有三选项——改变它/接受它/离开它; 三者都不做是痛苦之源; 接受=快速适应, 用「积极方面是什么」重释训练。
+
+      不适用于: 可以改变的处境(应先改变), 以及涉及违法/人身安全的场景。
+
+      Triggers: 接受/忍/内耗/放不下/该走该留/acceptance/let go/change-accept-leave'
+    tags:
+    - acceptance
+    - happiness
+    - decision
+    - resilience
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第一节 学习幸福 / 在接受中寻找幸福
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 与 self-liberation/happiness 近邻混淆风险高，方案明确先留统一路由域。
+- capability_id: cap.naval.self-liberation
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: self-liberation
+  title: 期望边界、愤怒解体与就业自由
+  importance: medium
+  importance_rationale: 引用图入度2；幸福域近邻能力。
+  one_liner: 期望不是合同（约定才是）；愤怒是自我惩罚；低生活成本买来就业自由。
+  intents:
+  - 被别人的期望压垮
+  - 容易愤怒/怎么不生气
+  - 感觉被工作困住/怎么说不
+  keywords:
+  - 期望
+  - 愤怒
+  - 自由
+  - 取悦别人
+  - 说不
+  also_read:
+  - happiness-skill
+  - honesty-communication
+  card: cards/self-liberation.md
+  frontmatter:
+    description: '当用户被别人的期望压垮、容易愤怒、或感觉被工作/责任困住、问「怎么说不/怎么不生气/怎么更自由」时调用。
+
+      核心理念: 期望不是你的合同(约定才是); 愤怒是自我惩罚; 就业自由来自低生活成本; 自由=免于被迫反应的自由。
+
+      不适用于: 违约/欠债等真正的约定责任。
+
+      Triggers: 期望/愤怒/自由/取悦别人/说不/就业自由/freedom/anger/expectations'
+    tags:
+    - freedom
+    - boundaries
+    - emotion
+    - independence
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第二节 自救 / 选择解放自己
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 意图与 acceptance/happiness 交叠；留路由域。
+- capability_id: cap.naval.monkey-mind-meditation
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: monkey-mind-meditation
+  title: 心猴关停与冥想
+  importance: medium
+  importance_rationale: 引用图入度2；「学冥想」有独立性但通用冥想指导非本书独有增量，先观察。
+  one_liner: 内心独白是失控程序不是「我」；用调试模式逐条观察念头，意识到即失去控制。
+  intents:
+  - 脑子停不下来/焦虑反刍
+  - 想学冥想/提升专注力
+  keywords:
+  - 冥想
+  - 焦虑
+  - 胡思乱想
+  - 专注
+  - 心猴
+  also_read:
+  - happiness-skill
+  - rational-buddhism
+  card: cards/monkey-mind-meditation.md
+  frontmatter:
+    description: '当用户脑子停不下来、焦虑反刍、想学冥想/提升专注力时调用。
+
+      核心理念: 内心独白(心猴)是失控程序不是"我"; 用调试模式逐条观察念头, 意识到即失去控制; 冥想=收件箱归零/心灵间歇性禁食。
+
+      不适用于: 严重精神疾病急性发作(先就医); 需要立刻处理的实际问题(先做事)。
+
+      Triggers: 冥想/焦虑/脑子停不下来/胡思乱想/专注/心猴/monkey mind/meditation/anxiety'
+    tags:
+    - mind
+    - meditation
+    - anxiety
+    - focus
+    - self-awareness
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第二节 自救 / 冥想+精神力量
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 独立意图存在（教我冥想），但本书增量相对通用冥想内容有限，且属幸福近邻域；留路由域待证据。
+- capability_id: cap.naval.peer-selection
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: peer-selection
+  title: 五只黑猩猩：主动选择同伴
+  importance: medium
+  importance_rationale: 引用图入度2；「选圈子」意图与 long-term-compounding、decision-heuristics 重叠。
+  one_liner: 你的行为由最常接触的五个人预测；同伴是主动选择而非巧合。
+  intents:
+  - 交朋友/选伴侣/换圈子纠结
+  - 感觉被周围人拖累/该不该疏远某人
+  keywords:
+  - 朋友
+  - 圈子
+  - 伴侣
+  - 疏远
+  - 五只黑猩猩
+  also_read:
+  - long-term-compounding
+  - honesty-communication
+  card: cards/peer-selection.md
+  frontmatter:
+    description: '当用户纠结交朋友/选伴侣/换圈子、感觉被周围人拖累、问「该不该疏远某人」时调用。
+
+      核心理念: 五只黑猩猩理论(你的行为由最常接触的5人预测); 同伴是主动选择而非巧合; 只与价值观一致者深交, 远离愤世嫉俗者/愤怒者。
+
+      不适用于: 职场必须共事的同事关系(可先设边界)。
+
+      Triggers: 朋友/圈子/伴侣/该不该疏远/被拖累/五只黑猩猩/peer/friends/circle/values'
+    tags:
+    - relationship
+    - happiness
+    - values
+    - community
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第一节 学习幸福 / 习惯造就幸福
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 意图有一定独立性但与决策域重叠；留路由域。
+- capability_id: cap.naval.identity-work
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: identity-work
+  title: 身份清空与自我形象杠杆
+  importance: medium
+  importance_rationale: 引用图入度2；抽象度高，用户极少以「身份」为入口直接提问。
+  one_liner: 放下身份才能看清真相；更新自我形象才能替代自律。
+  intents:
+  - 发现自己在为立场辩护/看不清现实
+  - 反复立志却改变不了自己
+  keywords:
+  - 立场
+  - 身份
+  - 自我形象
+  - 自律失败
+  also_read:
+  - acceptance
+  - honesty-communication
+  card: cards/identity-work.md
+  frontmatter:
+    description: '当用户发现自己在为立场辩护、看不清现实、或反复立志却改变不了自己时调用。
+
+      核心理念: 身份是认知牢笼也是行为杠杆——放下身份才能看清真相(痛苦=真相时刻), 更新自我形象才能替代自律(对外承诺)。
+
+      不适用于: 需要专业心理咨询的深层创伤。
+
+      Triggers: 立场/身份/自我/看不清现实/改变不了自己/自律失败/identity/self-image'
+    tags:
+    - identity
+    - self-awareness
+    - change
+    - reality
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 如何清晰地思考 + 第二章·幸福 / 选择去塑造你自己
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 意图表述抽象、入口分散；留路由域。
+- capability_id: cap.naval.honesty-communication
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: honesty-communication
+  title: 彻底诚实与反馈技术
+  importance: medium
+  importance_rationale: 引用图出度3入度0；沟通建议类意图有通用竞品，本书增量中等。
+  one_liner: 所想与所说一致；具体表扬、一般批评；秘密越少快乐越多。
+  intents:
+  - 怎么真诚沟通/拒绝别人/给反馈
+  - 不想说场面话/发现自己在隐瞒
+  keywords:
+  - 诚实
+  - 沟通
+  - 拒绝
+  - 批评
+  - 表扬
+  - 场面话
+  also_read:
+  - identity-work
+  card: cards/honesty-communication.md
+  frontmatter:
+    description: '当用户问怎么真诚沟通/拒绝别人/给反馈/不想说场面话、或发现自己在隐瞒时调用。
+
+      核心理念: 撒谎会先骗到自己(费曼: 你最容易愚弄的人是你); 彻底诚实=所想与所说一致; 具体表扬、一般批评; 秘密越少快乐越多。
+
+      不适用于: 需要外交辞令的谈判策略(可以诚实但不必全说)。
+
+      Triggers: 诚实/沟通/拒绝/批评/表扬/秘密/场面话/honesty/communication/feedback'
+    tags:
+    - honesty
+    - communication
+    - values
+    - feedback
+  source_evidence:
+  - source_id: src-main-book
+    location: 第一章·财富 / 第二节 培养判断力 / 如何清晰地思考 + 第二章·幸福 / 活出你的价值
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 通用沟通类意图竞争大、书增量中等；留路由域。
+- capability_id: cap.naval.rational-buddhism
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: rational-buddhism
+  title: 理性佛学：验证一切
+  importance: medium
+  importance_rationale: 引用图出度2；哲学收尾章；提问频率低。
+  one_liner: 亲自测试一切、保留有用的；不可证伪的主张不进入基本真理。
+  intents:
+  - 某主张/玄学/灵修该不该信
+  - 想建立自己的验证标准
+  keywords:
+  - 该不该信
+  - 玄学
+  - 灵修
+  - 可证伪
+  - 验证
+  also_read:
+  - life-meaning
+  - monkey-mind-meditation
+  card: cards/rational-buddhism.md
+  frontmatter:
+    description: '当用户问某主张/玄学/灵修该不该信、想建立自己的验证标准、或寻找科学与精神的结合点时调用。
+
+      核心理念: 尝试一切, 亲自测试, 保持怀疑, 保留有用的, 舍弃没用的; 不可证伪的主张不进入基本真理; 冥想/接纳等内在技术可保留。
+
+      不适用于: 需要信仰安慰的临终/哀伤场景(尊重个体选择)。
+
+      Triggers: 该不该信/玄学/灵修/冥想/可证伪/验证/理性/rational buddhism/verify/belief'
+    tags:
+    - philosophy
+    - verification
+    - mindfulness
+    - epistemology
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第三节 哲学 / 理性佛教
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 低频哲学咨询；留路由域。
+- capability_id: cap.naval.life-meaning
+  revision: 1
+  status: active
+  aliases: []
+  supersedes: []
+  merged_into: null
+  split_into: []
+  slug: life-meaning
+  title: 生命意义三答案
+  importance: medium
+  importance_rationale: 引用图入度2；哲学收尾；触发场景与幸福域连续。
+  one_liner: 意义=个人创造+愿意为之受苦；拥抱死亡是意义的入口。
+  intents:
+  - 活着的意义是什么/虚无感
+  - 找不到方向/该为什么努力
+  keywords:
+  - 生命的意义
+  - 虚无
+  - 为什么活着
+  also_read:
+  - rational-buddhism
+  - acceptance
+  card: cards/life-meaning.md
+  frontmatter:
+    description: '当用户问「活着的意义是什么/找不到方向/虚无感/该为什么努力」时调用。
+
+      核心理念: 生命没有外在赋予的意义(宇宙尺度一切会消失); 意义=个人创造+愿意为之受苦; 拥抱死亡是意义的入口。
+
+      不适用于: 急性自杀风险(先紧急求助)。
+
+      Triggers: 生命的意义/虚无/找不到意义/为什么活着/meaning/purpose/nihilism'
+    tags:
+    - philosophy
+    - meaning
+    - mortality
+    - values
+  source_evidence:
+  - source_id: src-main-book
+    location: 第二章·幸福 / 第三节 哲学 / 生命的意义
+  promotion:
+    destination: router
+    gate:
+      independent_intent: false
+      independent_contract: true
+      independent_run: true
+      independent_reuse: false
+      independent_eval: true
+    notes: 低频、高风险边界（自杀风险须转介）；留路由域并保留判停规则。

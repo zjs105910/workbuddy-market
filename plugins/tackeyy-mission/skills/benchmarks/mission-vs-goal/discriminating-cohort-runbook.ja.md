@@ -1,0 +1,154 @@
+# Discriminating cohort N≥5 diff-review 計測 runbook
+
+目的: openworld-v1 で確認した品質天井 (marker 1.0 / 分散 0) を解消した
+`tasks.discriminating.json` cohort で、「品質>goal・速度≈goal」の採用判定を行う。
+判定契約は #236 の「較正 N=3 → 採用判定は対象 cohort N≥10 の paired benchmark」に従う。
+
+## 前提
+
+- #261 (mission-loop 遵守ガード) がマージ済みであること。無効 record は
+  `failure_kind=mission_loop_not_initialized` として comparable 集計から自動除外される
+- Pro プラン利用上限が回復していること (較正 run は名目 $22 消費。本 run は下記見積)
+- model 固定は PATH shim で `--model claude-sonnet-5` を注入し、artifact の
+  `modelUsage` で確認する (ANTHROPIC_MODEL 環境変数は効かない)
+- **permission-mode 汚染防止 (#268)**: CC セッションの Bash から起動する場合、shim で
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` を明示しないと `acceptEdits` が default に
+  強制降格される。run 後に各 record の stderr に `Permission mode forced` 警告が
+  ないことを必ず確認する
+
+- **CC 2.1.219 以降の hardening (#292)**: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0` の
+  opt-out は無効化された。runner は `--allowedTools` を両 arm へ明示する (#292 で実装済み)。
+  run 後に summary の `permission_degraded_records` が 0 であることを確認する
+- **無効な ANTHROPIC_API_KEY の伝播対策**: CC セッション env の `ANTHROPIC_API_KEY` は
+  claude.ai ログインより優先され、無効値だと子が 401 で全滅する。起動時に
+  `env -u ANTHROPIC_API_KEY` を付ける
+
+## Step 1: 較正 smoke (1 task, fail-first 検証)
+
+fail-first 設計が実際に iteration >= 2 を発生させるかを、本 run 前に 1 task で検証する。
+
+```bash
+cd benchmarks/mission-vs-goal
+PATH="<shim-dir>:$PATH" python3 run_claude_goal_vs_mission.py \
+  --starting-commit <latest-main> \
+  --tasks-file benchmarks/mission-vs-goal/tasks.discriminating.json \
+  --run-id <date>-discriminating-smoke \
+  --model-id claude-sonnet-5 \
+  --task-ids disc-config-sprawl \
+  --max-budget-usd-goal 3 --max-budget-usd-mission 10 \
+  --mission-budget-minutes 30 --timeout 2400
+```
+
+smoke gate (すべて満たしたら Step 2 へ):
+- mission record の `mission_iterations >= 2` (fail-first が機能)
+- mission state に `critic_has_new_scope` が記録されている (#258 配線の実運用初観測)
+- 両 arm とも `failure_kind != mission_loop_not_initialized`
+- marker score が 1.0 未満の record が存在する (天井飽和の解消)
+
+smoke で iter1 素通しした場合は fail-first タスクの難度を上げてから再 smoke する
+(本 run に進まない)。
+
+## Step 2: N≥5 本 run
+
+5 tasks x 2 arms x `--repeats 1` = 10 records (mission N=5)。分散を厚くする場合は
+`--repeats 2` で 20 records。
+
+```bash
+PATH="<shim-dir>:$PATH" python3 run_claude_goal_vs_mission.py \
+  --starting-commit <latest-main> \
+  --tasks-file benchmarks/mission-vs-goal/tasks.discriminating.json \
+  --run-id <date>-discriminating-v1 \
+  --model-id claude-sonnet-5 \
+  --limit-tasks 5 --repeats 1 --parallel 3 \
+  --max-budget-usd-goal 3 --max-budget-usd-mission 10 \
+  --mission-budget-minutes 30 --timeout 2400
+```
+
+課金実行はこの手順の外である。上限は smoke USD 13、本 run USD 65、合計 USD 78。
+本 run は必ず `--parallel 3` とする。API/spend 上限、clean gate 不達、または観測 burn
+から該当上限を超えると判断できた時点で停止する。
+
+### 実測に基づく予算上限の推奨値
+
+以下は支出目標ではなく上限値。cohort、model、mission profile を変更した場合は
+再較正する。
+
+| arm / cohort | 推奨上限 | 実測根拠 |
+|---|---:|---|
+| goal（portfolio 全 task） | USD 3.0 | `2026-08-07-portfolio-v6-repeats3` の `portfolio-std-contract` goal rep 1 が USD 2.6253。 |
+| mission Standard | USD 8.0 | `2026-08-07-portfolio-v6-repeats3` の `portfolio-std-contract` mission rep 1 が USD 5.9400 で完走。Standard の USD 6.0085 / 6.0259 capped record から USD 6 では不足。 |
+| mission full profile（Standard + Complex） | USD 10.0 | `2026-08-02-portfolio-v5-speed` の `portfolio-std-contract-mission` が iteration 2、USD 4.8770。v6 完走最大 USD 5.9400 と併せ、iteration 2 の余裕を確保。 |
+
+### benchmark audit KPI
+
+runner summary には `benchmark_kpi`（`mission-benchmark-kpi/1`）が出力される。
+これは synthetic な result record の annotation だけを集計し、raw planning
+state を読む・再計算するものではない。通常の arm summary の代替ではなく、併読する。
+
+- `score_buckets` は below-pass（`<4.0`）、pass-but-below-target
+  （`4.0.. <4.3`）、target-met（`>=4.3`）に分ける。
+- `audit_events` は `root_event_id`、正の `attempt`、`defect` または
+  `expected-gate` の `kind` を持つ。defect は root event で dedupe し retry は別に
+  可視化する。`expected-gate` は報告するが defect total から除外する。
+- `audit_context.coverage` は observed/eligible、`tier` は文脈情報である。
+  eligible が 0 の coverage rate は null とする。
+- duration の p50/p90/tail は `run_status=completed` record だけを使う。`blocked`
+  record は `blocked_censored_records`、他の非完了 record は
+  `noncompleted_excluded_records` として別々に数え、いずれも percentile を歪めない。
+
+`mission-planning-provider-kpi/1` の producer は Issue #399 の責務であり、現時点で
+runner は消費しない。`planning_provider_kpi.status=deferred` は意図した versioned
+seam である。#399 の consumer contract を実装・検証するまで、benchmark record へ
+payload を追加しない。
+
+`scripts/mission-audit.py --json` は mission state の較正済み evidence を別途出力する。
+`score_calibration` の population は pass session である。session threshold 未満は
+`below-pass-threshold`、threshold 以上かつ 4.3 未満は
+`pass-but-below-target` の finding を発火し、target-met は数えるが finding を発火しない。
+既存の `low_score_pass_*` JSON は互換 alias として残るが、finding を二重発火しない。
+`command_outcome_defects` は expected-gate を除外して non-gate defect を root event
+で dedupe し、retry は別に出力する。slow-run finding には
+`activity_coverage_ratio` と `review_tier` を併記する。
+
+benchmark の `measurement_observations` は
+`artifact_observation_coverage`、`activity_coverage`、
+`structured_score_provenance`、`reviewer_freshness`、`force_pass_rate`、
+`expected_gate_retry_count`、`group_closeout_completeness` を明示する。runner が
+mission arm の typed state evidence から最初の6項目を versioned observation として渡し、
+goal arm は明示的に `not-applicable` とする。`group_closeout_completeness` は producer
+未実装のため unavailable のままである。reducer は各 record に埋め込まれた
+numerator/denominator または counter だけを集計し（denominator 0 の rate は null）、
+raw mission state から再計算しない。
+
+## Step 3: 採用判定ゲート
+
+すべて summary / records から機械的に判定する:
+
+1. **測定妥当性**: summary の `diff_review_measurement_gate` で
+   `iter2_eligible_records >= 5`、`permission_degraded_records = 0`、
+   `mission_loop_not_initialized_records = 0`。context manifest の expected / generated /
+   fallback iteration count を必ず記録し、generated と fallback を同一視しない。
+   iteration 単位の cost は推定しない。eligible iter-2 record の cost total / mean を記録する
+2. **判別力**: 両 arm の `marker_score_variance` が 0 でない (天井飽和の解消)
+3. **iter>=2 の実運用観測**: `iter2_eligible_records >= 5` を満たし、各 eligible record の
+   state で boolean の `critic_has_new_scope` 記録を確認 (#240/#241 発火証跡)
+4. **品質判定**: `comparable_average_quality_score` と marker recall の arm 差で
+   「品質>goal」を判定。同点なら「mission の価値はテール保険+ガバナンス」の
+   現行結論を維持する
+5. **速度判定**: `comparable_average_elapsed_minutes` の arm 比で「速度≈goal」
+   (目安 1.5x 以内) を判定
+
+## 結果の記録
+
+- results JSONL + summary + artifacts を commit し、report.ja.md / report.md に
+  セクション追記 (openworld-v1 節の形式に従い「危険な解釈」ガードを必ず付ける)
+- 判定結果を Issue #275 に記録してクローズする。Issue #262 は以前の採用runbookの履歴参照である
+
+---
+
+## 修正履歴
+| 日時 | 内容 |
+|------|------|
+| 2026-07-22 | 初版作成 (#262) |
+| 2026-07-25 | CC 2.1.219 hardening 対応 (--allowedTools 明示・ANTHROPIC_API_KEY unset) を追記 (#292) |
+| 2026-08-07 | arm 別予算 flag と実測に基づく推奨上限を追記 (#358) |

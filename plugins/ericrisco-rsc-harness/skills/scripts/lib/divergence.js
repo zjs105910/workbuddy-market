@@ -1,0 +1,44 @@
+import { readManifest } from './manifest-file.js';
+import { readState } from './state.js';
+import { targetPaths } from '../../targets/index.js';
+import { existsSync } from 'node:fs';
+import { DEFAULT_SKILL_FLOOR } from './default-skill-floor.js';
+import { replaceRetired } from './retired-skills.js';
+
+// What the team declared versus what is on this machine.
+//
+// The everyday case is not cloning — it is a teammate changing the harness and everyone
+// else running `git pull`. The clone is day one; divergence is every other day. Nothing
+// used to notice, so two people drifted apart in silence.
+//
+// Three buckets, because the three need different answers, and collapsing them is how a
+// report starts nagging someone about their own work:
+//   missing    — declared catalog skill, not installed here. Aligning installs it.
+//   ownMissing — declared team skill, absent from the repo. Aligning says so and writes
+//                nothing: it comes from the repo, not from us.
+//   extra      — installed BY RSC, no longer declared.
+//   floorMissing — a skill the catalog makes mandatory that this declaration predates.
+//                Not drift between teammates: drift between the harness and the catalog,
+//                and the only bucket that survives everyone running the same `git pull`.
+// A hand-written skill that nobody declared is in none of them. Not declaring is a valid
+// way to keep things of your own, not an oversight to correct.
+export function divergence({ cwd = process.cwd(), target, home } = {}) {
+  const empty = { missing: [], extra: [], ownMissing: [], floorMissing: [] };
+  const manifest = readManifest(cwd);
+  if (!manifest) return empty;
+
+  const paths = targetPaths(target, home, cwd);
+  const installed = new Set(Object.keys(readState(paths.stateFile).skills || {}));
+  // A declaration written before eli5, show-me and bro were retired names them; it is read as
+  // their successors, so a teammate who has not synced yet is not told to install a ghost.
+  const declared = replaceRetired(manifest.skills || []);
+
+  return {
+    missing: declared.filter((id) => !installed.has(id)),
+    extra: [...installed].filter((id) => !declared.includes(id)),
+    ownMissing: (manifest.ownSkills || []).filter((name) => !existsSync(paths.skillDir(name))),
+    // Read off the declaration, not off the disk: a skill installed by hand into a harness
+    // that still does not declare it is one sync away from being pruned again.
+    floorMissing: DEFAULT_SKILL_FLOOR.filter((id) => !declared.includes(id)),
+  };
+}
